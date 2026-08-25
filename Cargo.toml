@@ -22,7 +22,7 @@ chrono = { version = "0.4", features = ["serde"] }
 fs2 = "0.4"
 hex = "0.4"
 libc = "0.2"
-nix = { version = "0.30", features = ["fs", "process", "signal", "user"] }
+nix = { version = "0.30", features = ["fs", "process", "signal", "term", "user"] }
 rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }

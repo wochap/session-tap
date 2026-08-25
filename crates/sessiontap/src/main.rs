@@ -219,6 +219,15 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         .spawn()
         .with_context(|| format!("launch {executable}"))?;
     let pid = child.id().context("child PID unavailable")?;
+    let terminal = std::fs::File::open("/dev/tty").ok();
+    if let Some(tty) = &terminal {
+        match nix::unistd::tcsetpgrp(tty, nix::unistd::Pid::from_raw(pid as i32)) {
+            Ok(()) | Err(nix::errno::Errno::EINVAL) => {}
+            Err(error) => {
+                eprintln!("sessiontap: provider may not control the terminal: {error}")
+            }
+        }
+    }
     if tracked {
         let _ = request(
             paths,
@@ -231,7 +240,11 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         )
         .await;
     }
-    let status = wait_with_signal_forwarding(&mut child, pid).await?;
+    let wait_result = wait_with_signal_forwarding(&mut child, pid).await;
+    if let Some(tty) = &terminal {
+        let _ = nix::unistd::tcsetpgrp(tty, nix::unistd::getpgrp());
+    }
+    let status = wait_result?;
     let code = status.code();
     let signal = std::os::unix::process::ExitStatusExt::signal(&status);
     if tracked {
