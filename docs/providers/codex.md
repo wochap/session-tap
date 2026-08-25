@@ -1,0 +1,18 @@
+# Codex compatibility spike
+
+Contract basis: the official [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks),
+checked 2026-08-25 against Codex CLI 0.149.1. Codex discovers user hooks in
+`~/.codex/hooks.json`. Matching command hooks run concurrently. Non-managed
+hooks are trusted by the user against the exact definition hash through
+`/hooks`; SessionTap deliberately does not edit undocumented trust storage.
+
+The MVP installs command hooks for `SessionStart`, `UserPromptSubmit`,
+`PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`.
+SessionTap setup preserves unrelated indices. After setup or refresh, `doctor`
+reports that review is needed and the user must trust the entry in `/hooks`.
+Unsupported versions degrade to process lifecycle observation and never block
+provider launch.
+
+Minimum locally tested version: Codex CLI 0.149.1. Unknown fields/events are
+ignored and raw hook input is never persisted.
+

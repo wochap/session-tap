@@ -1,0 +1,21 @@
+[package]
+name = "sessiontap-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sessiontap-core = { path = "../sessiontap-core" }
+anyhow.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
+

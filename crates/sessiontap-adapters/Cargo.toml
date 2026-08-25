@@ -1,0 +1,21 @@
+[package]
+name = "sessiontap-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sessiontap-core = { path = "../sessiontap-core" }
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+fs2.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+toml.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

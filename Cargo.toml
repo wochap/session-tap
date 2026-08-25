@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/sessiontap-core",
+  "crates/sessiontap-adapters",
+  "crates/sessiontap-storage",
+  "crates/sessiontap",
+  "crates/sessiontapd",
+  "crates/example-receiver",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+fs2 = "0.4"
+hex = "0.4"
+libc = "0.2"
+nix = { version = "0.30", features = ["fs", "process", "signal", "user"] }
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.9"
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

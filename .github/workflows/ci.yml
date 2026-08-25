@@ -1,0 +1,31 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      XDG_SESSION_TYPE: wayland
+      XDG_RUNTIME_DIR: /tmp/sessiontap-runtime
+      WAYLAND_DISPLAY: wayland-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Start headless Wayland session
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes weston
+          install -d -m 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --idle-time=0 > /tmp/weston.log 2>&1 &
+          for attempt in {1..50}; do
+            test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" && exit 0
+            sleep 0.1
+          done
+          cat /tmp/weston.log
+          exit 1
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features

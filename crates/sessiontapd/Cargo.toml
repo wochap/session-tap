@@ -1,0 +1,25 @@
+[package]
+name = "sessiontapd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sessiontap-core = { path = "../sessiontap-core" }
+sessiontap-storage = { path = "../sessiontap-storage" }
+anyhow.workspace = true
+fs2.workspace = true
+libc.workspace = true
+nix.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -5,3 +5,6 @@ CLAUDE.md
 RTK.md
 .codex
 .qwen
+/target
+/result
+/.direnv

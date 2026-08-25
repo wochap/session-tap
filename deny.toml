@@ -1,0 +1,7 @@
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "Unicode-3.0", "Zlib"]
+confidence-threshold = 0.8
+
+[advisories]
+version = 2
+yanked = "deny"
