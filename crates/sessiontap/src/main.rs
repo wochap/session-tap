@@ -30,6 +30,9 @@ enum Cli {
     HookEmit {
         provider: String,
     },
+    Completions {
+        shell: Option<String>,
+    },
     Launch {
         provider: String,
         args: Vec<String>,
@@ -38,7 +41,7 @@ enum Cli {
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
     let Some(first) = args.next() else {
         bail!(
-            "usage: sessiontap <claude|codex|qwen> [args...] | status | listen | setup | doctor | hooks remove"
+            "usage: sessiontap <claude|codex|qwen> [args...] | status | listen | setup | doctor | hooks remove | completions <shell>"
         )
     };
     match first.as_str() {
@@ -59,8 +62,9 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
         "hook" if args.next().as_deref() == Some("emit") => Ok(Cli::HookEmit {
             provider: args.next().context("missing provider")?,
         }),
+        "completions" => Ok(Cli::Completions { shell: args.next() }),
         "--help" | "-h" => bail!(
-            "usage: sessiontap <provider> [provider arguments...] | status | listen | setup | doctor | hooks remove"
+            "usage: sessiontap <provider> [provider arguments...] | status | listen | setup | doctor | hooks remove | completions <shell>"
         ),
         provider => Ok(Cli::Launch {
             provider: provider.into(),
@@ -72,6 +76,9 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = parse(env::args().skip(1))?;
+    if let Cli::Completions { shell } = cli {
+        return completions(shell);
+    }
     let paths = AppPaths::discover()?;
     match cli {
         Cli::Status => status(&paths).await,
@@ -79,6 +86,18 @@ async fn main() -> Result<()> {
         Cli::Setup { provider, action } => setup(&paths, provider, action).await,
         Cli::HookEmit { provider } => hook_emit(&paths, &provider).await,
         Cli::Launch { provider, args } => launch(&paths, &provider, args).await,
+        Cli::Completions { .. } => unreachable!(),
+    }
+}
+
+fn completions(shell: Option<String>) -> Result<()> {
+    match shell.as_deref() {
+        Some("zsh") => {
+            print!("{}", include_str!("../../../completions/zsh/_sessiontap"));
+            Ok(())
+        }
+        Some(other) => bail!("unsupported shell: {other}"),
+        None => bail!("usage: sessiontap completions <shell>"),
     }
 }
 
@@ -433,5 +452,71 @@ mod tests {
                 args: vec!["--help".into(), "a b".into(), "$HOME".into()]
             }
         );
+    }
+
+    #[test]
+    fn completions_zsh_parses() {
+        assert_eq!(
+            parse(vec!["completions".into(), "zsh".into()].into_iter()).unwrap(),
+            Cli::Completions {
+                shell: Some("zsh".into())
+            }
+        );
+    }
+
+    #[test]
+    fn completions_missing_shell_parses_none() {
+        assert_eq!(
+            parse(vec!["completions".into()].into_iter()).unwrap(),
+            Cli::Completions { shell: None }
+        );
+    }
+
+    #[test]
+    fn embedded_completion_script_is_complete() {
+        let script = include_str!("../../../completions/zsh/_sessiontap");
+        assert!(script.starts_with("#compdef sessiontap"));
+        for token in [
+            "setup",
+            "doctor",
+            "hooks",
+            "status",
+            "listen",
+            "completions",
+            "claude",
+            "codex",
+            "qwen",
+        ] {
+            assert!(script.contains(token), "missing {token}");
+        }
+    }
+
+    #[test]
+    fn completion_scripts_pass_zsh_syntax_check() {
+        let zsh_available = std::process::Command::new("which")
+            .arg("zsh")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !zsh_available {
+            eprintln!("skipping: zsh not on PATH");
+            return;
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for script in [
+            "completions/zsh/_sessiontap",
+            "completions/zsh/_sessiontapd",
+        ] {
+            let path = root.join(script);
+            let output = std::process::Command::new("zsh")
+                .args(["-n", &path.to_string_lossy()])
+                .output()
+                .expect("failed to run zsh");
+            assert!(
+                output.status.success(),
+                "{script} failed zsh -n: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }

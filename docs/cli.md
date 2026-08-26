@@ -56,3 +56,29 @@ Failures are retried from the durable outbox. Each sink backlog is capped at
 without bound; local normalized state continues to commit after the cap is
 reached. Credential files must not be symlinks and must have no group/other
 permissions. Provider hooks fail open and produce no provider-visible output.
+
+## Shell completions
+
+`sessiontap completions zsh` prints the zsh completion script to stdout.
+
+Nix package users get completions automatically: both `_sessiontap` and
+`_sessiontapd` are installed under `$out/share/zsh/site-functions/`, which
+NixOS adds to the completion search path.
+
+Manual installation — copy the script into your `fpath`:
+
+```sh
+mkdir -p ~/.zsh/completions
+sessiontap completions zsh > ~/.zsh/completions/_sessiontap
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+Or source it directly (no `fpath` entry needed, but no caching either):
+
+```sh
+eval "$(sessiontap completions zsh)"
+```
+
+`completions` is a reserved token: a custom adapter named `completions` is
+shadowed by the subcommand.

@@ -1,0 +1,49 @@
+#compdef sessiontap
+
+_sessiontap() {
+  local -a subcommands providers
+  subcommands=(
+    'setup:merge managed hooks for a provider'
+    'doctor:diagnose a provider integration'
+    'hooks:manage hooks'
+    'status:show invocation status'
+    'listen:stream invocation updates'
+    'completions:print shell completions'
+  )
+  providers=(claude codex qwen)
+
+  local cfg=${XDG_CONFIG_HOME:-$HOME/.config}/sessiontap/config.toml
+  if [[ -r $cfg ]]; then
+    local line name
+    while IFS= read -r line || [[ -n $line ]]; do
+      [[ $line == '[adapters.'*']' ]] || continue
+      name=${line#'[adapters.'}
+      name=${name%%']'*}
+      if [[ -n $name && $name != *[^A-Za-z0-9_-]* ]]; then
+        providers+=($name)
+      fi
+    done < $cfg
+  fi
+
+  case $CURRENT in
+    2)
+      _describe 'subcommand' subcommands
+      _describe 'provider' providers
+      ;;
+    3)
+      case ${words[2]} in
+        hooks)
+          compadd remove
+          ;;
+        setup|doctor)
+          _describe 'provider' providers
+          ;;
+      esac
+      ;;
+    4)
+      if [[ ${words[2]} == hooks && ${words[3]} == remove ]]; then
+        _describe 'provider' providers
+      fi
+      ;;
+  esac
+}

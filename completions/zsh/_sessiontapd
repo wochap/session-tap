@@ -1,0 +1,5 @@
+#compdef sessiontapd
+
+_sessiontapd() {
+  return 0
+}
