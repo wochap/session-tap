@@ -1,5 +1,9 @@
-use crate::domain::{InvocationId, InvocationSnapshot, NormalizedEvent};
+use crate::domain::{
+    ActiveAttention, AttentionContext, FailureContext, InvocationId, InvocationSnapshot,
+    LiveEventMetadata, NormalizedEvent,
+};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -26,6 +30,10 @@ pub enum Request {
         invocation_id: InvocationId,
         credential: String,
         event: Box<NormalizedEvent>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attention: Option<AttentionContext>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<FailureContext>,
     },
     Status,
     Listen,
@@ -68,11 +76,15 @@ pub enum StreamEnvelope {
         schema_version: u32,
         revision: u64,
         invocations: Vec<InvocationSnapshot>,
+        #[serde(default)]
+        active_attention: BTreeMap<InvocationId, ActiveAttention>,
     },
     Update {
         schema_version: u32,
         revision: u64,
         snapshot: Box<InvocationSnapshot>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        event: Option<LiveEventMetadata>,
     },
 }
 
@@ -102,5 +114,41 @@ mod tests {
             message: "invalid".into(),
         });
         assert_eq!(serde_json::to_value(response).unwrap()["type"], "error");
+    }
+    #[test]
+    fn old_envelopes_remain_readable() {
+        let now = chrono::Utc::now();
+        let snapshot = crate::domain::InvocationSnapshot {
+            schema_version: 1,
+            revision: 1,
+            invocation_id: InvocationId::new(),
+            provider: "test".into(),
+            executable: "test".into(),
+            args: vec![],
+            cwd: "/tmp".into(),
+            process: Default::default(),
+            created_at: now,
+            updated_at: now,
+            lifecycle: crate::domain::Lifecycle::Alive,
+            activity: crate::domain::Activity::Idle,
+            status: crate::domain::PublicStatus::Idle,
+            provider_session: None,
+            usage: None,
+            repository: None,
+            multiplexer: None,
+            capabilities: Default::default(),
+            turn_generation: 0,
+            completed_generation: None,
+        };
+        let old = serde_json::json!({"type":"update","schema_version":1,"revision":1,"snapshot":snapshot});
+        assert!(matches!(
+            serde_json::from_value::<StreamEnvelope>(old).unwrap(),
+            StreamEnvelope::Update { event: None, .. }
+        ));
+        let old =
+            serde_json::json!({"type":"snapshot","schema_version":1,"revision":1,"invocations":[]});
+        assert!(
+            matches!(serde_json::from_value::<StreamEnvelope>(old).unwrap(), StreamEnvelope::Snapshot { active_attention, .. } if active_attention.is_empty())
+        );
     }
 }

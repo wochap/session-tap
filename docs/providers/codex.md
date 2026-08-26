@@ -13,6 +13,11 @@ reports that review is needed and the user must trust the entry in `/hooks`.
 Unsupported versions degrade to process lifecycle observation and never block
 provider launch.
 
+Permission requests carry bounded approval context. Documented
+`UserInputRequest`/question forms map to ordinary input when present, and
+post-tool signals resume work. `Stop` is completion and `SessionEnd` ends the
+session. The supported public contract has no reliable turn-failure hook, so a
+nonzero process exit is not promoted to a turn-level failure.
+
 Minimum locally tested version: Codex CLI 0.149.1. Unknown fields/events are
 ignored and raw hook input is never persisted.
-

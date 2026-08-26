@@ -8,7 +8,12 @@ mark waiting for approval, input notifications mark waiting for input, and
 `Stop`/`StopFailure` return a live process to idle. Raw prompts, tool input,
 transcript paths, and assistant messages are discarded.
 
+Direct `PermissionRequest` carries bounded approval context. `AskUserQuestion`
+and MCP `Elicitation` are ordinary input waits. `agent_needs_input` is an input
+wait, delayed `permission_prompt` is broker-deduplicated, and `idle_prompt` is
+enrichment rather than completion. Post-tool signals resume work. `Stop` means
+completion; `StopFailure` carries only an allowlisted failure category.
+
 Minimum locally tested version: Claude Code 2.1.241. New event fields and
 unknown events are ignored. Live smoke testing is opt-in; see
 `docs/smoke-tests.md`.
-

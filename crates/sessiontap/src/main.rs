@@ -331,7 +331,7 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let Ok(value) = serde_json::from_slice(&raw) else {
         return Ok(());
     };
-    let Ok(event) = adapter.normalize(&uuid, &value) else {
+    let Ok(normalized) = adapter.normalize(&uuid, &value) else {
         return Ok(());
     };
     let future = request(
@@ -340,7 +340,9 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
             provider: provider.into(),
             invocation_id: uuid,
             credential,
-            event: Box::new(event),
+            event: Box::new(normalized.event),
+            attention: normalized.attention,
+            failure: normalized.failure,
         },
     );
     let _ = tokio::time::timeout(Duration::from_millis(250), future).await;

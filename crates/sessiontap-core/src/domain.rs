@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct InvocationId(pub Uuid);
 
@@ -22,6 +22,13 @@ impl Default for InvocationId {
 impl std::fmt::Display for InvocationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl std::str::FromStr for InvocationId {
+    type Err = uuid::Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_str(value).map(Self)
     }
 }
 
@@ -156,6 +163,61 @@ pub enum EventKind {
     Enrichment,
 }
 
+pub const ATTENTION_MAX_CHARS: usize = 160;
+pub const ATTENTION_MAX_BYTES: usize = 512;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttentionSource {
+    Description,
+    ToolSummary,
+    Command,
+    Question,
+    ToolName,
+    GenericInput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttentionContext {
+    pub summary: String,
+    pub source: AttentionSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveAttention {
+    pub kind: EventKind,
+    pub context: AttentionContext,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureContext {
+    Authentication,
+    PermissionDenied,
+    RateLimited,
+    Timeout,
+    ToolError,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveEventMetadata {
+    pub kind: EventKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attention: Option<AttentionContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<FailureContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NormalizedAdapterEvent {
+    pub event: NormalizedEvent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<AttentionContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<FailureContext>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NormalizedEvent {
     pub schema_version: u32,
@@ -252,5 +314,20 @@ mod tests {
         let expected: Vec<String> =
             serde_json::from_str(include_str!("../tests/golden/snapshot-keys.json")).unwrap();
         assert_eq!(keys, expected);
+    }
+    #[test]
+    fn live_metadata_uses_stable_snake_case() {
+        let value = serde_json::to_value(LiveEventMetadata {
+            kind: EventKind::WaitingApproval,
+            attention: Some(AttentionContext {
+                summary: "Run tests".into(),
+                source: AttentionSource::ToolSummary,
+            }),
+            failure: Some(FailureContext::PermissionDenied),
+        })
+        .unwrap();
+        assert_eq!(value["kind"], "waiting_approval");
+        assert_eq!(value["attention"]["source"], "tool_summary");
+        assert_eq!(value["failure"], "permission_denied");
     }
 }

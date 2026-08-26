@@ -86,8 +86,8 @@ The stream is JSONL. The first line is a full snapshot; each later line is a
 single-invocation update:
 
 ```json
-{"type":"snapshot","schema_version":1,"revision":41,"invocations":[ ... ]}
-{"type":"update","schema_version":1,"revision":42,"snapshot":{ ... }}
+{"type":"snapshot","schema_version":1,"revision":41,"invocations":[ ... ],"active_attention":{}}
+{"type":"update","schema_version":1,"revision":42,"snapshot":{ ... },"event":{"kind":"completed"}}
 ```
 
 Each invocation object:
@@ -126,6 +126,12 @@ body, or tool input is stored. Sinks are disabled by default; HTTP sinks require
 HTTPS except loopback development receivers. See `docs/cli.md` for sink and
 custom-adapter configuration, and `docs/smoke-tests.md` for live provider
 testing.
+
+Snapshot envelopes are non-notifying baselines and include the current local
+`active_attention` map. Notify only from later update envelopes. Every update
+from a current daemon includes an effective `event` cause; older daemons may
+omit it. These additions retain schema version 1, and consumers that only read
+the existing `snapshot` field remain compatible.
 
 ## Provenance
 

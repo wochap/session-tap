@@ -7,7 +7,7 @@ use sessiontap_core::{
     paths::AppPaths,
     protocol::{ErrorEnvelope, Request, Response, StreamEnvelope},
 };
-use sessiontap_storage::Storage;
+use sessiontap_storage::{AppliedUpdate, Storage};
 use std::{
     collections::BTreeMap,
     fs::{self, OpenOptions},
@@ -25,7 +25,7 @@ use tokio::{
 #[derive(Clone)]
 struct Broker {
     storage: Arc<Storage>,
-    updates: broadcast::Sender<(u64, sessiontap_core::domain::InvocationSnapshot)>,
+    updates: broadcast::Sender<AppliedUpdate>,
     sinks: Arc<BTreeMap<String, SinkConfig>>,
 }
 
@@ -85,13 +85,14 @@ async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
     let request: Request = serde_json::from_str(&line)?;
     if matches!(request, Request::Listen) {
         let mut rx = broker.updates.subscribe();
-        let (revision, invocations) = broker.storage.snapshot()?;
+        let (revision, invocations, active_attention) = broker.storage.snapshot_with_attention()?;
         write_json(
             &mut write,
             &StreamEnvelope::Snapshot {
                 schema_version: SCHEMA_VERSION,
                 revision,
                 invocations,
+                active_attention,
             },
         )
         .await?;
@@ -103,26 +104,28 @@ async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
                     Err(error) => return Err(error.into()),
                 },
                 received = rx.recv() => match received {
-                    Ok((r, s)) if r > revision => {
+                    Ok(update) if update.snapshot.revision > revision => {
                         write_json(
                             &mut write,
                             &StreamEnvelope::Update {
                                 schema_version: SCHEMA_VERSION,
-                                revision: r,
-                                snapshot: Box::new(s),
+                                revision: update.snapshot.revision,
+                                snapshot: Box::new(update.snapshot),
+                                event: Some(update.event),
                             },
                         )
                         .await?
                     }
                     Ok(_) => {}
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let (r, s) = broker.storage.snapshot()?;
+                        let (r, s, active_attention) = broker.storage.snapshot_with_attention()?;
                         write_json(
                             &mut write,
                             &StreamEnvelope::Snapshot {
                                 schema_version: SCHEMA_VERSION,
                                 revision: r,
                                 invocations: s,
+                                active_attention,
                             },
                         )
                         .await?;
@@ -174,7 +177,14 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
                 child_pid,
                 start_identity,
             )?;
-            let _ = broker.updates.send((s.revision, s));
+            let _ = broker.updates.send(AppliedUpdate {
+                snapshot: s,
+                event: sessiontap_core::domain::LiveEventMetadata {
+                    kind: sessiontap_core::domain::EventKind::Enrichment,
+                    attention: None,
+                    failure: None,
+                },
+            });
             Ok(Response::Ok)
         }
         Request::LifecycleExit {
@@ -186,7 +196,14 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             let s = broker
                 .storage
                 .mark_exit(&invocation_id, &credential, exit_code, signal)?;
-            let _ = broker.updates.send((s.revision, s));
+            let _ = broker.updates.send(AppliedUpdate {
+                snapshot: s,
+                event: sessiontap_core::domain::LiveEventMetadata {
+                    kind: sessiontap_core::domain::EventKind::SessionEnded,
+                    attention: None,
+                    failure: None,
+                },
+            });
             Ok(Response::Ok)
         }
         Request::HookIngest {
@@ -194,6 +211,8 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             invocation_id,
             credential,
             event,
+            attention,
+            failure,
         } => {
             if event.invocation_id != invocation_id
                 || event.provider != provider
@@ -203,8 +222,13 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             {
                 anyhow::bail!("unknown or invalid hook context");
             }
-            if let Some(s) = broker.storage.apply_event(&event, &broker.sinks)? {
-                let _ = broker.updates.send((s.revision, s));
+            if let Some(update) = broker.storage.apply_event_with_context(
+                &event,
+                attention.as_ref(),
+                failure,
+                &broker.sinks,
+            )? {
+                let _ = broker.updates.send(update);
             }
             Ok(Response::Ok)
         }
@@ -486,7 +510,14 @@ mod tests {
             .storage
             .bind_child(&id, "credential", 42, Some("start".into()))
             .unwrap();
-        let _ = broker.updates.send((update.revision, update));
+        let _ = broker.updates.send(AppliedUpdate {
+            snapshot: update,
+            event: sessiontap_core::domain::LiveEventMetadata {
+                kind: EventKind::Enrichment,
+                attention: None,
+                failure: None,
+            },
+        });
         let mut reader = BufReader::new(stream);
         let first = read_stream_line(&mut reader).await;
         let observed = match first {
@@ -518,6 +549,50 @@ mod tests {
             drop(reader);
             task.await.unwrap().unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn hook_broadcast_contains_effective_live_event() {
+        let broker = broker(Storage::memory().unwrap());
+        let initial = snapshot();
+        broker.storage.register(&initial, "credential").unwrap();
+        let mut receiver = broker.updates.subscribe();
+        let event = NormalizedEvent {
+            schema_version: 1,
+            event_id: "approval-live".into(),
+            invocation_id: initial.invocation_id.clone(),
+            provider_event_id: None,
+            provider: initial.provider.clone(),
+            observed_at: Utc::now(),
+            received_at: Utc::now(),
+            source: "test".into(),
+            kind: EventKind::WaitingApproval,
+            provider_session_id: None,
+            usage: None,
+            turn_id: None,
+        };
+        let attention = sessiontap_core::domain::AttentionContext {
+            summary: "Approve tests".into(),
+            source: sessiontap_core::domain::AttentionSource::Description,
+        };
+        assert!(matches!(
+            process(
+                Request::HookIngest {
+                    provider: initial.provider,
+                    invocation_id: initial.invocation_id,
+                    credential: "credential".into(),
+                    event: Box::new(event),
+                    attention: Some(attention.clone()),
+                    failure: None
+                },
+                &broker
+            )
+            .unwrap(),
+            Response::Ok
+        ));
+        let update = receiver.recv().await.unwrap();
+        assert_eq!(update.event.kind, EventKind::WaitingApproval);
+        assert_eq!(update.event.attention, Some(attention));
     }
 
     #[tokio::test]

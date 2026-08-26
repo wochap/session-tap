@@ -12,3 +12,10 @@ No Qwen binary was available in the 2026-08-25 development environment, so a
 minimum tested version is not yet claimed. Hook-only observation is the safe
 fallback. Side-channel lines are bounded, parsed only after a newline, and
 restart at offset zero after truncation.
+
+Direct permission requests carry bounded approval context;
+`ask_user_question` and documented input-needed notifications are ordinary
+input waits. Delayed permission reminders are broker-deduplicated,
+`idle_prompt` is enrichment, and post-tool signals resume work. `Stop` means
+completion; `StopFailure` carries only an allowlisted category. Raw failure
+details and assistant messages are excluded.

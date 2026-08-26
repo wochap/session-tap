@@ -5,7 +5,10 @@ use fs2::FileExt;
 use serde_json::{Value, json};
 use sessiontap_core::{
     config::Config,
-    domain::{EventKind, InvocationId, NormalizedEvent, Usage},
+    domain::{
+        ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, AttentionContext, AttentionSource, EventKind,
+        FailureContext, InvocationId, NormalizedAdapterEvent, NormalizedEvent, Usage,
+    },
 };
 use std::{
     collections::HashMap,
@@ -55,7 +58,11 @@ pub trait AgentAdapter: Send + Sync {
     fn prepare_launch(&self, _args: &[String], _private_dir: &Path) -> Result<LaunchPreparation> {
         Ok(LaunchPreparation::default())
     }
-    fn normalize(&self, invocation_id: &InvocationId, raw: &Value) -> Result<NormalizedEvent>;
+    fn normalize(
+        &self,
+        invocation_id: &InvocationId,
+        raw: &Value,
+    ) -> Result<NormalizedAdapterEvent>;
     async fn setup(
         &self,
         home: &Path,
@@ -121,7 +128,11 @@ impl AgentAdapter for BuiltinAdapter {
             Ok(LaunchPreparation::default())
         }
     }
-    fn normalize(&self, invocation_id: &InvocationId, raw: &Value) -> Result<NormalizedEvent> {
+    fn normalize(
+        &self,
+        invocation_id: &InvocationId,
+        raw: &Value,
+    ) -> Result<NormalizedAdapterEvent> {
         normalize_provider(self.dialect, invocation_id, raw)
     }
     async fn setup(
@@ -183,7 +194,11 @@ pub fn redact_args(args: &[String]) -> Vec<String> {
     out
 }
 
-fn normalize_provider(provider: &str, id: &InvocationId, raw: &Value) -> Result<NormalizedEvent> {
+fn normalize_provider(
+    provider: &str,
+    id: &InvocationId,
+    raw: &Value,
+) -> Result<NormalizedAdapterEvent> {
     let name = raw
         .get("hook_event_name")
         .or_else(|| raw.get("event_name"))
@@ -204,16 +219,21 @@ fn normalize_provider(provider: &str, id: &InvocationId, raw: &Value) -> Result<
     } else if lower.contains("permission") || notification.contains("permission_prompt") {
         EventKind::WaitingApproval
     } else if lower.contains("question")
+        || lower.contains("elicitation")
         || lower.contains("needs_input")
         || lower.contains("userinputrequest")
         || notification.contains("needs_input")
     {
         EventKind::WaitingInput
-    } else if lower.contains("pretool") || lower.contains("toolstart") {
+    } else if lower.contains("pretool")
+        || lower.contains("posttool")
+        || lower.contains("toolstart")
+        || lower.contains("toolend")
+    {
         EventKind::Working
-    } else if lower.contains("failure") {
+    } else if provider != "codex" && lower.contains("failure") {
         EventKind::Failed
-    } else if lower == "stop" || lower.contains("turnend") || notification.contains("idle_prompt") {
+    } else if lower == "stop" || lower.contains("turnend") {
         EventKind::Completed
     } else if lower.contains("sessionend") {
         EventKind::SessionEnded
@@ -225,32 +245,185 @@ fn normalize_provider(provider: &str, id: &InvocationId, raw: &Value) -> Result<
         output_tokens: u.get("output_tokens").and_then(Value::as_u64),
         context_tokens: u.get("context_tokens").and_then(Value::as_u64),
     });
-    Ok(NormalizedEvent {
-        schema_version: 1,
-        event_id: raw
-            .get("event_id")
-            .and_then(Value::as_str)
-            .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned),
-        invocation_id: id.clone(),
-        provider_event_id: raw
-            .get("event_id")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        provider: provider.into(),
-        observed_at: Utc::now(),
-        received_at: Utc::now(),
-        source: "hook".into(),
-        kind,
-        provider_session_id: raw
-            .get("session_id")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        usage,
-        turn_id: raw
-            .get("turn_id")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
+    let attention = match kind {
+        EventKind::WaitingApproval => attention_context(raw, false),
+        EventKind::WaitingInput => attention_context(raw, true),
+        _ => None,
+    };
+    let failure = (kind == EventKind::Failed).then(|| failure_context(raw));
+    Ok(NormalizedAdapterEvent {
+        event: NormalizedEvent {
+            schema_version: 1,
+            event_id: raw
+                .get("event_id")
+                .and_then(Value::as_str)
+                .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned),
+            invocation_id: id.clone(),
+            provider_event_id: raw
+                .get("event_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            provider: provider.into(),
+            observed_at: Utc::now(),
+            received_at: Utc::now(),
+            source: "hook".into(),
+            kind,
+            provider_session_id: raw
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            usage,
+            turn_id: raw
+                .get("turn_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        },
+        attention,
+        failure,
     })
+}
+
+fn bounded_one_line(value: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut spaced = false;
+    for ch in value.chars().filter(|ch| !ch.is_control()) {
+        if ch.is_whitespace() {
+            spaced = !out.is_empty();
+            continue;
+        }
+        if spaced && !out.ends_with(' ') {
+            out.push(' ');
+        }
+        spaced = false;
+        if out.chars().count() >= ATTENTION_MAX_CHARS
+            || out.len() + ch.len_utf8() > ATTENTION_MAX_BYTES
+        {
+            break;
+        }
+        out.push(ch);
+    }
+    let out = out.trim().to_owned();
+    (!out.is_empty()).then_some(out)
+}
+
+fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
+    names
+        .iter()
+        .find_map(|name| raw.get(*name).and_then(Value::as_str))
+}
+
+fn attention_context(raw: &Value, input: bool) -> Option<AttentionContext> {
+    if let Some(summary) = field(raw, &["description", "message"]).and_then(bounded_one_line) {
+        return Some(AttentionContext {
+            summary,
+            source: AttentionSource::Description,
+        });
+    }
+    let tool = field(raw, &["tool_name", "tool", "name"]);
+    let args = raw
+        .get("tool_input")
+        .or_else(|| raw.get("arguments"))
+        .or_else(|| raw.get("input"));
+    if input {
+        let question = field(raw, &["question", "prompt"])
+            .or_else(|| args.and_then(|v| field(v, &["question", "prompt", "message"])))
+            .or_else(|| {
+                args.and_then(|v| {
+                    v.get("questions")?
+                        .as_array()?
+                        .first()?
+                        .get("question")?
+                        .as_str()
+                })
+            });
+        if let Some(summary) = question.and_then(bounded_one_line) {
+            return Some(AttentionContext {
+                summary,
+                source: AttentionSource::Question,
+            });
+        }
+    }
+    if let Some(tool) = tool {
+        let lower = tool.to_ascii_lowercase();
+        if lower.contains("patch") {
+            return Some(AttentionContext {
+                summary: "Apply a patch".into(),
+                source: AttentionSource::ToolSummary,
+            });
+        }
+        if ["read", "write", "edit", "glob", "grep"]
+            .iter()
+            .any(|name| lower == *name || lower.ends_with(&format!("__{name}")))
+        {
+            if let Some(path) = args.and_then(|v| field(v, &["file_path", "path"])) {
+                let base = Path::new(path)
+                    .file_name()
+                    .and_then(|v| v.to_str())
+                    .unwrap_or("file");
+                return bounded_one_line(&format!("{tool}: {base}")).map(|summary| {
+                    AttentionContext {
+                        summary,
+                        source: AttentionSource::ToolSummary,
+                    }
+                });
+            }
+        }
+        if ["bash", "shell", "command", "exec_command"]
+            .iter()
+            .any(|name| lower.contains(name))
+        {
+            if let Some(command) = args.and_then(|v| field(v, &["command", "cmd"])) {
+                let suspicious = [
+                    "token",
+                    "secret",
+                    "password",
+                    "authorization",
+                    "api_key",
+                    "api-key",
+                    "bearer",
+                    "sk-",
+                ]
+                .iter()
+                .any(|needle| command.to_ascii_lowercase().contains(needle));
+                let summary = if suspicious {
+                    Some("Run a shell command".into())
+                } else {
+                    bounded_one_line(command)
+                };
+                return summary.map(|summary| AttentionContext {
+                    summary,
+                    source: AttentionSource::Command,
+                });
+            }
+        }
+        return bounded_one_line(tool).map(|summary| AttentionContext {
+            summary,
+            source: AttentionSource::ToolName,
+        });
+    }
+    input.then(|| AttentionContext {
+        summary: "Input requested".into(),
+        source: AttentionSource::GenericInput,
+    })
+}
+
+fn failure_context(raw: &Value) -> FailureContext {
+    let category = field(raw, &["error_category", "failure_category", "reason"])
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if category.contains("auth") {
+        FailureContext::Authentication
+    } else if category.contains("permission") || category.contains("denied") {
+        FailureContext::PermissionDenied
+    } else if category.contains("rate") {
+        FailureContext::RateLimited
+    } else if category.contains("timeout") {
+        FailureContext::Timeout
+    } else if category.contains("tool") {
+        FailureContext::ToolError
+    } else {
+        FailureContext::Unknown
+    }
 }
 
 pub fn qwen_has_user_side_channel(args: &[String]) -> bool {
@@ -360,6 +533,7 @@ fn events(provider: &str) -> &'static [&'static str] {
             "UserPromptSubmit",
             "PreToolUse",
             "PermissionRequest",
+            "Elicitation",
             "Notification",
             "Stop",
             "StopFailure",
@@ -370,6 +544,7 @@ fn events(provider: &str) -> &'static [&'static str] {
             "UserPromptSubmit",
             "PreToolUse",
             "PermissionRequest",
+            "UserInputRequest",
             "PostToolUse",
             "Stop",
             "SessionEnd",
@@ -379,6 +554,7 @@ fn events(provider: &str) -> &'static [&'static str] {
             "UserPromptSubmit",
             "PreToolUse",
             "PermissionRequest",
+            "AskUserQuestion",
             "Notification",
             "Stop",
             "StopFailure",
@@ -676,15 +852,18 @@ mod tests {
         let qwen: Value =
             serde_json::from_str(include_str!("../tests/fixtures/qwen-stop.json")).unwrap();
         assert_eq!(
-            normalize_provider("claude", &id, &claude).unwrap().kind,
+            normalize_provider("claude", &id, &claude)
+                .unwrap()
+                .event
+                .kind,
             EventKind::WaitingApproval
         );
         assert_eq!(
-            normalize_provider("codex", &id, &codex).unwrap().kind,
+            normalize_provider("codex", &id, &codex).unwrap().event.kind,
             EventKind::WaitingInput
         );
         assert_eq!(
-            normalize_provider("qwen", &id, &qwen).unwrap().kind,
+            normalize_provider("qwen", &id, &qwen).unwrap().event.kind,
             EventKind::Completed
         );
         assert!(
@@ -692,6 +871,59 @@ mod tests {
                 .unwrap()
                 .contains("context_usage")
         );
+    }
+
+    #[test]
+    fn attention_fallbacks_are_bounded_and_safe() {
+        let id = InvocationId::new();
+        let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"echo\nsecret token=abc"}});
+        assert_eq!(
+            normalize_provider("claude", &id, &raw)
+                .unwrap()
+                .attention
+                .unwrap()
+                .summary,
+            "Run a shell command"
+        );
+        let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"apply_patch","tool_input":{"patch":"PRIVATE"}});
+        assert_eq!(
+            normalize_provider("claude", &id, &raw)
+                .unwrap()
+                .attention
+                .unwrap()
+                .summary,
+            "Apply a patch"
+        );
+        let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Unknown","tool_input":{"private":"PRIVATE"}});
+        assert_eq!(
+            normalize_provider("claude", &id, &raw)
+                .unwrap()
+                .attention
+                .unwrap()
+                .summary,
+            "Unknown"
+        );
+    }
+
+    #[test]
+    fn messages_and_raw_failures_are_excluded() {
+        let id = InvocationId::new();
+        let done = normalize_provider(
+            "claude",
+            &id,
+            &json!({"hook_event_name":"Stop","last_assistant_message":"PRIVATE"}),
+        )
+        .unwrap();
+        assert_eq!(done.event.kind, EventKind::Completed);
+        assert!(done.attention.is_none());
+        let failed = normalize_provider(
+            "qwen",
+            &id,
+            &json!({"hook_event_name":"StopFailure","reason":"timeout","error":"PRIVATE"}),
+        )
+        .unwrap();
+        assert_eq!(failed.failure, Some(FailureContext::Timeout));
+        assert!(!serde_json::to_string(&failed).unwrap().contains("PRIVATE"));
     }
 
     #[test]

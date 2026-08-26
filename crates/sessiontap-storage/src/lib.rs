@@ -4,8 +4,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sessiontap_core::{
     config::SinkConfig,
     domain::{
-        Activity, EventKind, InvocationId, InvocationSnapshot, Lifecycle, NormalizedEvent,
-        derive_status,
+        ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, ActiveAttention, Activity, AttentionContext,
+        EventKind, FailureContext, InvocationId, InvocationSnapshot, Lifecycle, LiveEventMetadata,
+        NormalizedEvent, derive_status,
     },
     protocol::SinkEvent,
 };
@@ -30,6 +31,11 @@ CREATE TABLE IF NOT EXISTS sink_outbox (
  sink_name TEXT NOT NULL, event_id TEXT NOT NULL, revision INTEGER NOT NULL,
  payload BLOB NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL,
  PRIMARY KEY(sink_name,event_id)
+);
+CREATE TABLE IF NOT EXISTS local_active_attention (
+ invocation_id TEXT PRIMARY KEY REFERENCES invocations(invocation_id) ON DELETE CASCADE,
+ kind TEXT NOT NULL, attention_json TEXT NOT NULL CHECK(length(attention_json) <= 2048),
+ updated_at TEXT NOT NULL
 );
 "#;
 const MAX_OUTBOX_RECORDS_PER_SINK: u64 = 1_024;
@@ -113,7 +119,7 @@ impl Storage {
         pid: u32,
         identity: Option<String>,
     ) -> Result<InvocationSnapshot> {
-        self.mutate_authenticated(id, credential, |snapshot| {
+        self.mutate_authenticated(id, credential, false, |snapshot| {
             snapshot.process.child_pid = Some(pid);
             snapshot.process.start_identity = identity;
             snapshot.lifecycle = Lifecycle::Alive;
@@ -127,7 +133,7 @@ impl Storage {
         code: Option<i32>,
         signal: Option<i32>,
     ) -> Result<InvocationSnapshot> {
-        self.mutate_authenticated(id, credential, |snapshot| {
+        self.mutate_authenticated(id, credential, true, |snapshot| {
             snapshot.process.exit_code = code;
             snapshot.process.signal = signal;
             snapshot.lifecycle = Lifecycle::Exited;
@@ -138,6 +144,7 @@ impl Storage {
         &self,
         id: &InvocationId,
         credential: &str,
+        clear_attention: bool,
         f: impl FnOnce(&mut InvocationSnapshot),
     ) -> Result<InvocationSnapshot> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
@@ -157,6 +164,9 @@ impl Storage {
         snapshot.updated_at = Utc::now();
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
         persist_snapshot(&tx, &snapshot, credential)?;
+        if clear_attention {
+            clear_attention_row(&tx, id)?;
+        }
         tx.commit()?;
         Ok(snapshot)
     }
@@ -166,6 +176,26 @@ impl Storage {
         event: &NormalizedEvent,
         sinks: &BTreeMap<String, SinkConfig>,
     ) -> Result<Option<InvocationSnapshot>> {
+        Ok(self
+            .apply_event_with_context(event, None, None, sinks)?
+            .map(|update| update.snapshot))
+    }
+
+    pub fn apply_event_with_context(
+        &self,
+        event: &NormalizedEvent,
+        attention: Option<&AttentionContext>,
+        failure: Option<FailureContext>,
+        sinks: &BTreeMap<String, SinkConfig>,
+    ) -> Result<Option<AppliedUpdate>> {
+        if attention.is_some_and(|context| {
+            context.summary.is_empty()
+                || context.summary.len() > ATTENTION_MAX_BYTES
+                || context.summary.chars().count() > ATTENTION_MAX_CHARS
+                || context.summary.chars().any(char::is_control)
+        }) {
+            bail!("attention context is not bounded normalized text");
+        }
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
         if tx
@@ -186,12 +216,44 @@ impl Storage {
         let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
+        let mut effective_kind = event.kind.clone();
+        if matches!(event.kind, EventKind::Completed | EventKind::Failed)
+            && snapshot.completed_generation == Some(snapshot.turn_generation)
+        {
+            effective_kind = EventKind::Enrichment;
+        }
+        if matches!(
+            event.kind,
+            EventKind::WaitingApproval | EventKind::WaitingInput
+        ) && matches!(
+            snapshot.activity,
+            Activity::WaitingApproval | Activity::WaitingInput
+        ) {
+            effective_kind = EventKind::Enrichment;
+        }
         reduce(&mut snapshot, event);
         let revision = next_revision(&tx)?;
         snapshot.revision = revision;
         snapshot.updated_at = Utc::now();
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
         persist_snapshot(&tx, &snapshot, &credential)?;
+        match event.kind {
+            EventKind::WaitingApproval | EventKind::WaitingInput => {
+                if let Some(context) = attention {
+                    let active = ActiveAttention {
+                        kind: event.kind.clone(),
+                        context: context.clone(),
+                    };
+                    tx.execute("INSERT INTO local_active_attention(invocation_id,kind,attention_json,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(invocation_id) DO UPDATE SET kind=excluded.kind,attention_json=excluded.attention_json,updated_at=excluded.updated_at", params![event.invocation_id.to_string(), serde_json::to_string(&event.kind)?, serde_json::to_string(&active)?, Utc::now().to_rfc3339()])?;
+                }
+            }
+            EventKind::NewTurn
+            | EventKind::Working
+            | EventKind::Completed
+            | EventKind::Failed
+            | EventKind::SessionEnded => clear_attention_row(&tx, &event.invocation_id)?,
+            EventKind::Enrichment => {}
+        }
         tx.execute(
             "INSERT INTO event_dedup(event_id,committed_at) VALUES (?1,?2)",
             params![event.event_id, Utc::now().to_rfc3339()],
@@ -240,7 +302,14 @@ impl Storage {
             }
         }
         tx.commit()?;
-        Ok(Some(snapshot))
+        Ok(Some(AppliedUpdate {
+            snapshot,
+            event: LiveEventMetadata {
+                kind: effective_kind,
+                attention: attention.cloned(),
+                failure,
+            },
+        }))
     }
 
     pub fn snapshot(&self) -> Result<(u64, Vec<InvocationSnapshot>)> {
@@ -268,6 +337,50 @@ impl Storage {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok((revision, values))
+    }
+
+    pub fn snapshot_with_attention(
+        &self,
+    ) -> Result<(
+        u64,
+        Vec<InvocationSnapshot>,
+        BTreeMap<InvocationId, ActiveAttention>,
+    )> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let revision = conn.query_row(
+            "SELECT value FROM broker_meta WHERE key='revision'",
+            [],
+            |r| r.get(0),
+        )?;
+        let mut snapshots_stmt = conn.prepare("SELECT snapshot_json,turn_generation,completed_generation FROM invocations ORDER BY rowid")?;
+        let snapshots = snapshots_stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, Option<u64>>(2)?,
+                ))
+            })?
+            .map(|row| {
+                let (raw, generation, completed) = row?;
+                let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
+                snapshot.turn_generation = generation;
+                snapshot.completed_generation = completed;
+                Ok(snapshot)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut stmt =
+            conn.prepare("SELECT invocation_id,attention_json FROM local_active_attention")?;
+        let attention = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .map(|row| {
+                let (id, raw) = row?;
+                Ok((id.parse()?, serde_json::from_str(&raw)?))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        Ok((revision, snapshots, attention))
     }
 
     pub fn invocation(&self, id: &InvocationId) -> Result<InvocationSnapshot> {
@@ -312,6 +425,7 @@ impl Storage {
                     |r| r.get(0),
                 )?;
                 persist_snapshot(&tx, &lost, &credential)?;
+                clear_attention_row(&tx, &lost.invocation_id)?;
                 tx.commit()?;
                 changed += 1;
             }
@@ -362,6 +476,20 @@ pub struct OutboxRecord {
     pub event_id: String,
     pub payload: Vec<u8>,
     pub attempts: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct AppliedUpdate {
+    pub snapshot: InvocationSnapshot,
+    pub event: LiveEventMetadata,
+}
+
+fn clear_attention_row(tx: &Transaction<'_>, id: &InvocationId) -> Result<()> {
+    tx.execute(
+        "DELETE FROM local_active_attention WHERE invocation_id=?1",
+        [id.to_string()],
+    )?;
+    Ok(())
 }
 
 fn next_revision(tx: &Transaction<'_>) -> Result<u64> {
@@ -491,6 +619,143 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+    #[test]
+    fn active_attention_replaces_restores_and_clears() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        let s = snapshot();
+        let db = Storage::open(&path).unwrap();
+        db.register(&s, "secret").unwrap();
+        let first = AttentionContext {
+            summary: "First".into(),
+            source: sessiontap_core::domain::AttentionSource::Question,
+        };
+        let second = AttentionContext {
+            summary: "Second".into(),
+            source: sessiontap_core::domain::AttentionSource::Description,
+        };
+        let update = db
+            .apply_event_with_context(
+                &event(&s, EventKind::WaitingInput, "a"),
+                Some(&first),
+                None,
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.event.kind, EventKind::WaitingInput);
+        let update = db
+            .apply_event_with_context(
+                &event(&s, EventKind::WaitingInput, "b"),
+                Some(&second),
+                None,
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.event.kind, EventKind::Enrichment);
+        drop(db);
+        let db = Storage::open(&path).unwrap();
+        let (_, _, active) = db.snapshot_with_attention().unwrap();
+        assert_eq!(active[&s.invocation_id].context.summary, "Second");
+        db.apply_event(&event(&s, EventKind::Working, "c"), &BTreeMap::new())
+            .unwrap();
+        assert!(db.snapshot_with_attention().unwrap().2.is_empty());
+    }
+
+    #[test]
+    fn repeated_terminal_is_enrichment_and_private_context_is_not_persisted_publicly() {
+        let db = Storage::memory().unwrap();
+        let s = snapshot();
+        db.register(&s, "secret").unwrap();
+        let attention = AttentionContext {
+            summary: "PRIVATE".into(),
+            source: sessiontap_core::domain::AttentionSource::Description,
+        };
+        db.apply_event_with_context(
+            &event(&s, EventKind::WaitingApproval, "a"),
+            Some(&attention),
+            None,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let first = db
+            .apply_event_with_context(
+                &event(&s, EventKind::Completed, "b"),
+                None,
+                None,
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        let second = db
+            .apply_event_with_context(
+                &event(&s, EventKind::Completed, "c"),
+                None,
+                None,
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.event.kind, EventKind::Completed);
+        assert_eq!(second.event.kind, EventKind::Enrichment);
+        assert!(
+            !serde_json::to_string(&db.invocation(&s.invocation_id).unwrap())
+                .unwrap()
+                .contains("PRIVATE")
+        );
+    }
+
+    #[test]
+    fn local_context_never_enters_event_history_or_sink_outbox() {
+        let db = Storage::memory().unwrap();
+        let s = snapshot();
+        db.register(&s, "secret").unwrap();
+        let mut sinks = BTreeMap::new();
+        sinks.insert(
+            "debug".into(),
+            SinkConfig::Stdout {
+                enabled: true,
+                fields: vec![],
+            },
+        );
+        let attention = AttentionContext {
+            summary: "PRIVATE-CONTEXT".into(),
+            source: sessiontap_core::domain::AttentionSource::Description,
+        };
+        db.apply_event_with_context(
+            &event(&s, EventKind::WaitingApproval, "private-boundary"),
+            Some(&attention),
+            Some(FailureContext::Unknown),
+            &sinks,
+        )
+        .unwrap();
+        let conn = db.conn.lock().unwrap();
+        let history: String = conn
+            .query_row(
+                "SELECT event_json FROM normalized_events WHERE event_id='private-boundary'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let payload: Vec<u8> = conn
+            .query_row(
+                "SELECT payload FROM sink_outbox WHERE event_id='private-boundary'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let persisted: String = conn
+            .query_row(
+                "SELECT snapshot_json FROM invocations WHERE invocation_id=?1",
+                [s.invocation_id.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        for value in [history.as_bytes(), payload.as_slice(), persisted.as_bytes()] {
+            assert!(!String::from_utf8_lossy(value).contains("PRIVATE-CONTEXT"));
+        }
     }
     #[test]
     fn concurrent_hook_burst_is_idempotent() {

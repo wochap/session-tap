@@ -32,6 +32,19 @@ SQLite database under `$XDG_STATE_HOME/sessiontap`. If tracking initialization
 fails, the provider launches untracked. Status fields are sanitized: no raw
 prompt, transcript, terminal output, hook body, or tool input is stored.
 
+`listen` snapshots contain a non-notifying `active_attention` baseline keyed by
+invocation ID. Updates retain `snapshot` and add optional `event` metadata with
+a snake-case `kind`, bounded attention, and an allowlisted failure category.
+Current daemons always populate it; clients accept omission by older daemons.
+The additive protocol remains schema version 1. Notify only on post-baseline
+updates, never on initial or lag-recovery snapshots.
+
+Attention prefers a provider description, safe tool summary, bounded command
+or first question, tool name, then generic input text. It is flattened to one
+line and capped at 160 characters and 512 UTF-8 bytes. Only the current object
+is stored locally and it is cleared when work resumes or terminates. Arbitrary
+command redaction is best effort and cannot cover every credential syntax.
+
 When launched inside tmux, snapshots contain descriptive socket/session/window/
 pane metadata. Capture and input are local-only capabilities; the broker must
 resolve an invocation and revalidate the server and pane before control. Input
@@ -56,6 +69,9 @@ Failures are retried from the durable outbox. Each sink backlog is capped at
 without bound; local normalized state continues to commit after the cap is
 reached. Credential files must not be symlinks and must have no group/other
 permissions. Provider hooks fail open and produce no provider-visible output.
+Live metadata, active attention, commands, questions, raw failure details,
+prompts, transcripts, and assistant messages never enter stdout or HTTP sink
+payloads.
 
 ## Shell completions
 
