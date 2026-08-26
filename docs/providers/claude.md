@@ -7,6 +7,9 @@ The MVP maps `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 mark waiting for approval, input notifications mark waiting for input, and
 `Stop`/`StopFailure` return a live process to idle. Raw prompts, tool input,
 transcript paths, and assistant messages are discarded.
+When a readable `transcript_path` is supplied, SessionTap extracts only the
+latest bounded `aiTitle` or `customTitle` value for provider-session metadata;
+the transcript body and path are not normalized or persisted.
 
 Direct `PermissionRequest` carries bounded approval context. `AskUserQuestion`
 and MCP `Elicitation` are ordinary input waits. `agent_needs_input` is an input

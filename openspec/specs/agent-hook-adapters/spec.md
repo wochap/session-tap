@@ -59,6 +59,10 @@ Built-in adapters SHALL derive optional attention context while the raw hook pay
 ### Requirement: Raw conversational content remains private
 Adapters SHALL discard prompts, transcripts, assistant messages, raw error details, and unselected tool input, and SHALL treat command redaction as conservative best effort rather than a guarantee.
 
+#### Scenario: Claude transcript contains a session title
+- **WHEN** a Claude hook supplies a readable transcript path containing `aiTitle` or `customTitle` metadata
+- **THEN** the adapter exposes only the latest bounded one-line title as the provider session name and does not normalize or persist the transcript path or body
+
 #### Scenario: Stop includes an assistant message
 - **WHEN** a provider stop hook includes `last_assistant_message`
 - **THEN** SessionTap emits the completion cause without copying that message into normalized state, active attention, or live event metadata

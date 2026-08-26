@@ -251,6 +251,9 @@ fn normalize_provider(
         _ => None,
     };
     let failure = (kind == EventKind::Failed).then(|| failure_context(raw));
+    let provider_session_name = (provider == "claude")
+        .then(|| claude_session_name(raw))
+        .flatten();
     Ok(NormalizedAdapterEvent {
         event: NormalizedEvent {
             schema_version: 1,
@@ -272,6 +275,7 @@ fn normalize_provider(
                 .get("session_id")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            provider_session_name,
             usage,
             turn_id: raw
                 .get("turn_id")
@@ -281,6 +285,71 @@ fn normalize_provider(
         attention,
         failure,
     })
+}
+
+fn claude_session_name(raw: &Value) -> Option<String> {
+    let path = raw.get("transcript_path")?.as_str()?;
+    latest_transcript_title(Path::new(path)).ok().flatten()
+}
+
+fn latest_transcript_title(path: &Path) -> Result<Option<String>> {
+    const CHUNK_BYTES: usize = 8 * 1024;
+    const MAX_LINE_BYTES: usize = 64 * 1024;
+
+    let mut file = File::open(path)?;
+    let mut cursor = file.metadata()?.len();
+    let mut reversed_line = Vec::new();
+    let mut line_too_long = false;
+
+    while cursor > 0 {
+        let amount = usize::try_from(cursor.min(CHUNK_BYTES as u64))?;
+        cursor -= amount as u64;
+        file.seek(SeekFrom::Start(cursor))?;
+        let mut chunk = vec![0; amount];
+        std::io::Read::read_exact(&mut file, &mut chunk)?;
+
+        for byte in chunk.into_iter().rev() {
+            if byte == b'\n' {
+                if !line_too_long {
+                    reversed_line.reverse();
+                    if let Some(title) = title_from_transcript_line(&reversed_line) {
+                        return Ok(Some(title));
+                    }
+                }
+                reversed_line.clear();
+                line_too_long = false;
+            } else if reversed_line.len() < MAX_LINE_BYTES {
+                reversed_line.push(byte);
+            } else {
+                line_too_long = true;
+            }
+        }
+    }
+
+    if !line_too_long {
+        reversed_line.reverse();
+        if let Some(title) = title_from_transcript_line(&reversed_line) {
+            return Ok(Some(title));
+        }
+    }
+    Ok(None)
+}
+
+fn title_from_transcript_line(line: &[u8]) -> Option<String> {
+    if !line
+        .windows(b"aiTitle".len())
+        .any(|part| part == b"aiTitle")
+        && !line
+            .windows(b"customTitle".len())
+            .any(|part| part == b"customTitle")
+    {
+        return None;
+    }
+    let value: Value = serde_json::from_slice(line).ok()?;
+    ["customTitle", "aiTitle"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .and_then(bounded_one_line)
 }
 
 fn bounded_one_line(value: &str) -> Option<String> {
@@ -924,6 +993,40 @@ mod tests {
         .unwrap();
         assert_eq!(failed.failure, Some(FailureContext::Timeout));
         assert!(!serde_json::to_string(&failed).unwrap().contains("PRIVATE"));
+    }
+
+    #[test]
+    fn claude_uses_latest_bounded_transcript_title() {
+        let temp = tempfile::tempdir().unwrap();
+        let transcript = temp.path().join("session.jsonl");
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"aiTitle\":\"Initial title\"}\n",
+                "{\"message\":\"PRIVATE transcript content\"}\n",
+                "{\"customTitle\":\"  Renamed\\n session  \"}\n"
+            ),
+        )
+        .unwrap();
+        let id = InvocationId::new();
+        let normalized = normalize_provider(
+            "claude",
+            &id,
+            &json!({
+                "hook_event_name": "Stop",
+                "session_id": "provider-session",
+                "transcript_path": transcript,
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            normalized.event.provider_session_name.as_deref(),
+            Some("Renamed session")
+        );
+        let serialized = serde_json::to_string(&normalized).unwrap();
+        assert!(!serialized.contains("PRIVATE"));
+        assert!(!serialized.contains("session.jsonl"));
     }
 
     #[test]

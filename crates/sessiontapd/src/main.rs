@@ -568,6 +568,7 @@ mod tests {
             source: "test".into(),
             kind: EventKind::WaitingApproval,
             provider_session_id: None,
+            provider_session_name: None,
             usage: None,
             turn_id: None,
         };
@@ -676,6 +677,7 @@ mod tests {
             source: "test".into(),
             kind: EventKind::NewTurn,
             provider_session_id: None,
+            provider_session_name: None,
             usage: None,
             turn_id: None,
         };

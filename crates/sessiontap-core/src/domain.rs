@@ -230,6 +230,8 @@ pub struct NormalizedEvent {
     pub source: String,
     pub kind: EventKind,
     pub provider_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_session_name: Option<String>,
     pub usage: Option<Usage>,
     pub turn_id: Option<String>,
 }

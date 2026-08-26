@@ -536,7 +536,13 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
     if let Some(id) = &event.provider_session_id {
         snapshot.provider_session = Some(sessiontap_core::domain::ProviderSession {
             id: id.clone(),
-            name: None,
+            name: event.provider_session_name.clone().or_else(|| {
+                snapshot
+                    .provider_session
+                    .as_ref()
+                    .filter(|session| session.id == *id)
+                    .and_then(|session| session.name.clone())
+            }),
         });
     }
     if event.usage.is_some() {
@@ -596,6 +602,7 @@ mod tests {
             source: "test".into(),
             kind,
             provider_session_id: None,
+            provider_session_name: None,
             usage: None,
             turn_id: None,
         }
@@ -618,6 +625,36 @@ mod tests {
             db.apply_event(&event(&s, EventKind::Working, "3"), &BTreeMap::new())
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn provider_session_name_updates_and_is_preserved() {
+        let mut snapshot = snapshot();
+        let mut named = event(&snapshot, EventKind::Working, "named");
+        named.provider_session_id = Some("provider-session".into());
+        named.provider_session_name = Some("First name".into());
+        reduce(&mut snapshot, &named);
+        assert_eq!(
+            snapshot.provider_session.as_ref().unwrap().name.as_deref(),
+            Some("First name")
+        );
+
+        let mut unnamed = event(&snapshot, EventKind::Working, "unnamed");
+        unnamed.provider_session_id = Some("provider-session".into());
+        reduce(&mut snapshot, &unnamed);
+        assert_eq!(
+            snapshot.provider_session.as_ref().unwrap().name.as_deref(),
+            Some("First name")
+        );
+
+        let mut renamed = event(&snapshot, EventKind::Working, "renamed");
+        renamed.provider_session_id = Some("provider-session".into());
+        renamed.provider_session_name = Some("Second name".into());
+        reduce(&mut snapshot, &renamed);
+        assert_eq!(
+            snapshot.provider_session.unwrap().name.as_deref(),
+            Some("Second name")
         );
     }
     #[test]
