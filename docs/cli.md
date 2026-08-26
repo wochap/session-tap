@@ -1,7 +1,9 @@
 # CLI guide
 
 Build with `nix build` or enter the development environment with `nix develop`.
-Keep `sessiontap` and `sessiontapd` together on `PATH`.
+Keep `sessiontap` and `sessiontapd` together on `PATH`. The optional
+`sessiontap-hub` service merges streams from multiple daemons; see
+`docs/hub.md`.
 
 ```sh
 sessiontap setup                 # merge all managed hooks
@@ -13,6 +15,8 @@ sessiontap qwen [args...]
 sessiontap status                # JSON array
 sessiontap listen                # snapshot then JSONL updates
 sessiontap inspect-hooks         # ephemeral raw managed-hook JSONL
+sessiontap-hub                   # merged multi-source service
+sessiontap-hub listen            # merged snapshot then JSONL updates
 ```
 
 SessionTap option parsing ends at the provider token; every later argument is
@@ -95,6 +99,22 @@ timeout_ms = 3000
 max_payload_bytes = 262144
 ```
 
+Hub sinks deliver the canonical versioned source stream (snapshots and
+updates) to a `sessiontap-hub` service and require a stable `source_id`; see
+`docs/hub.md`. Cleartext HTTP is limited to loopback or the sink's explicitly
+configured `trusted_addresses`:
+
+```toml
+source_id = "host"
+source_name = "Host machine"
+
+[sinks.hub]
+type = "hub"
+enabled = true
+url = "http://127.0.0.1:8931/ingest"
+token_file = "/run/keys/sessiontap-hub-token"
+```
+
 Failures are retried from the durable outbox. Each sink backlog is capped at
 1,024 records so a persistently unavailable receiver cannot grow broker storage
 without bound; local normalized state continues to commit after the cap is
@@ -108,9 +128,10 @@ payloads.
 
 `sessiontap completions zsh` prints the zsh completion script to stdout.
 
-Nix package users get completions automatically: both `_sessiontap` and
-`_sessiontapd` are installed under `$out/share/zsh/site-functions/`, which
-NixOS adds to the completion search path.
+Nix package users get completions automatically: `_sessiontap`,
+`_sessiontapd`, and `_sessiontap-hub` are installed under
+`$out/share/zsh/site-functions/`, which NixOS adds to the completion search
+path.
 
 Manual installation — copy the script into your `fpath`:
 

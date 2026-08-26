@@ -2,19 +2,24 @@ use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sessiontap_core::{
+    SCHEMA_VERSION,
     config::SinkConfig,
     domain::{
         ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, ActiveAttention, Activity, AttentionContext,
         EventKind, FailureContext, InvocationId, InvocationSnapshot, Lifecycle, LiveEventMetadata,
         NormalizedEvent, derive_status,
     },
-    protocol::SinkEvent,
+    protocol::{
+        HUB_SCHEMA_VERSION, HubEnvelope, HubEventMetadata, SinkEvent, SourceCapabilities,
+        SourceIdentity,
+    },
 };
 use std::{collections::BTreeMap, path::Path, sync::Mutex};
 
 const MIGRATION: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (1,CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (2,CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS broker_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT OR IGNORE INTO broker_meta(key,value) VALUES ('revision',0);
 CREATE TABLE IF NOT EXISTS invocations (
@@ -37,8 +42,19 @@ CREATE TABLE IF NOT EXISTS local_active_attention (
  kind TEXT NOT NULL, attention_json TEXT NOT NULL CHECK(length(attention_json) <= 2048),
  updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hub_sink_state (
+ sink_name TEXT PRIMARY KEY,
+ snapshot_revision INTEGER
+);
 "#;
 const MAX_OUTBOX_RECORDS_PER_SINK: u64 = 1_024;
+
+/// Delivery context shared by every transition that must become sink-visible.
+pub struct Publish<'a> {
+    pub sinks: &'a BTreeMap<String, SinkConfig>,
+    pub source_id: &'a str,
+    pub source_name: Option<&'a str>,
+}
 
 pub struct Storage {
     conn: Mutex<Connection>,
@@ -81,13 +97,32 @@ impl Storage {
         )?)
     }
 
-    pub fn register(&self, snapshot: &InvocationSnapshot, credential: &str) -> Result<u64> {
+    pub fn register(
+        &self,
+        snapshot: &InvocationSnapshot,
+        credential: &str,
+        publish: Option<&Publish<'_>>,
+    ) -> Result<u64> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
         let revision = next_revision(&tx)?;
         let mut value = snapshot.clone();
         value.revision = revision;
         persist_snapshot(&tx, &value, credential)?;
+        let event_id = synthetic_event_id("register", &value.invocation_id, revision);
+        enqueue_transition(
+            &tx,
+            publish,
+            &value,
+            &event_id,
+            HubEventMetadata {
+                kind: EventKind::Enrichment,
+                observed_at: value.updated_at,
+                received_at: value.updated_at,
+                failure: None,
+            },
+            None,
+        )?;
         tx.commit()?;
         Ok(revision)
     }
@@ -118,12 +153,21 @@ impl Storage {
         credential: &str,
         pid: u32,
         identity: Option<String>,
+        publish: Option<&Publish<'_>>,
     ) -> Result<InvocationSnapshot> {
-        self.mutate_authenticated(id, credential, false, |snapshot| {
-            snapshot.process.child_pid = Some(pid);
-            snapshot.process.start_identity = identity;
-            snapshot.lifecycle = Lifecycle::Alive;
-        })
+        self.mutate_authenticated(
+            id,
+            credential,
+            false,
+            |snapshot| {
+                snapshot.process.child_pid = Some(pid);
+                snapshot.process.start_identity = identity;
+                snapshot.lifecycle = Lifecycle::Alive;
+            },
+            EventKind::Enrichment,
+            "bind_child",
+            publish,
+        )
     }
 
     pub fn mark_exit(
@@ -132,20 +176,33 @@ impl Storage {
         credential: &str,
         code: Option<i32>,
         signal: Option<i32>,
+        publish: Option<&Publish<'_>>,
     ) -> Result<InvocationSnapshot> {
-        self.mutate_authenticated(id, credential, true, |snapshot| {
-            snapshot.process.exit_code = code;
-            snapshot.process.signal = signal;
-            snapshot.lifecycle = Lifecycle::Exited;
-        })
+        self.mutate_authenticated(
+            id,
+            credential,
+            true,
+            |snapshot| {
+                snapshot.process.exit_code = code;
+                snapshot.process.signal = signal;
+                snapshot.lifecycle = Lifecycle::Exited;
+            },
+            EventKind::SessionEnded,
+            "lifecycle_exit",
+            publish,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn mutate_authenticated(
         &self,
         id: &InvocationId,
         credential: &str,
         clear_attention: bool,
         f: impl FnOnce(&mut InvocationSnapshot),
+        kind: EventKind,
+        synthetic_label: &str,
+        publish: Option<&Publish<'_>>,
     ) -> Result<InvocationSnapshot> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
@@ -167,6 +224,21 @@ impl Storage {
         if clear_attention {
             clear_attention_row(&tx, id)?;
         }
+        let attention = current_attention(&tx, id)?;
+        let event_id = synthetic_event_id(synthetic_label, id, snapshot.revision);
+        enqueue_transition(
+            &tx,
+            publish,
+            &snapshot,
+            &event_id,
+            HubEventMetadata {
+                kind,
+                observed_at: snapshot.updated_at,
+                received_at: snapshot.updated_at,
+                failure: None,
+            },
+            attention,
+        )?;
         tx.commit()?;
         Ok(snapshot)
     }
@@ -174,10 +246,10 @@ impl Storage {
     pub fn apply_event(
         &self,
         event: &NormalizedEvent,
-        sinks: &BTreeMap<String, SinkConfig>,
+        publish: Option<&Publish<'_>>,
     ) -> Result<Option<InvocationSnapshot>> {
         Ok(self
-            .apply_event_with_context(event, None, None, sinks)?
+            .apply_event_with_context(event, None, None, publish)?
             .map(|update| update.snapshot))
     }
 
@@ -186,7 +258,7 @@ impl Storage {
         event: &NormalizedEvent,
         attention: Option<&AttentionContext>,
         failure: Option<FailureContext>,
-        sinks: &BTreeMap<String, SinkConfig>,
+        publish: Option<&Publish<'_>>,
     ) -> Result<Option<AppliedUpdate>> {
         if attention.is_some_and(|context| {
             context.summary.is_empty()
@@ -259,48 +331,20 @@ impl Storage {
             params![event.event_id, Utc::now().to_rfc3339()],
         )?;
         tx.execute("INSERT INTO normalized_events(event_id,invocation_id,revision,received_at,event_json) VALUES (?1,?2,?3,?4,?5)", params![event.event_id, event.invocation_id.to_string(), revision, event.received_at.to_rfc3339(), serde_json::to_string(event)?])?;
-        let sink_event = SinkEvent {
-            schema_version: 1,
-            event_id: event.event_id.clone(),
-            revision,
-            snapshot: snapshot.clone(),
-        };
-        for (name, config) in sinks.iter().filter(|(_, c)| c.enabled()) {
-            let mut safe = serde_json::to_value(&sink_event)?;
-            if !config.fields().is_empty() {
-                if let Some(snapshot) = safe
-                    .get_mut("snapshot")
-                    .and_then(serde_json::Value::as_object_mut)
-                {
-                    snapshot.retain(|field, _| {
-                        matches!(
-                            field.as_str(),
-                            "schema_version"
-                                | "revision"
-                                | "invocation_id"
-                                | "provider"
-                                | "lifecycle"
-                                | "activity"
-                                | "status"
-                                | "updated_at"
-                        ) || config.fields().iter().any(|allowed| allowed == field)
-                    });
-                }
-            }
-            let payload = serde_json::to_vec(&safe)?;
-            let max = match config {
-                SinkConfig::Http {
-                    max_payload_bytes, ..
-                } => *max_payload_bytes,
-                SinkConfig::Stdout { .. } => 256 * 1024,
-            };
-            if payload.len() <= max {
-                tx.execute(
-                    "INSERT OR IGNORE INTO sink_outbox(sink_name,event_id,revision,payload,next_attempt_at) SELECT ?1,?2,?3,?4,?5 WHERE (SELECT COUNT(*) FROM sink_outbox WHERE sink_name=?1) < ?6",
-                    params![name, event.event_id, revision, payload, Utc::now().to_rfc3339(), MAX_OUTBOX_RECORDS_PER_SINK],
-                )?;
-            }
-        }
+        let current = current_attention(&tx, &event.invocation_id)?;
+        enqueue_transition(
+            &tx,
+            publish,
+            &snapshot,
+            &event.event_id,
+            HubEventMetadata {
+                kind: effective_kind.clone(),
+                observed_at: event.observed_at,
+                received_at: event.received_at,
+                failure,
+            },
+            current,
+        )?;
         tx.commit()?;
         Ok(Some(AppliedUpdate {
             snapshot,
@@ -383,6 +427,72 @@ impl Storage {
         Ok((revision, snapshots, attention))
     }
 
+    /// Builds a canonical versioned source snapshot envelope at the current
+    /// consistent revision. The mutex guarantees the snapshot and revision are
+    /// captured atomically with respect to committed transitions.
+    pub fn hub_source_snapshot(
+        &self,
+        source_id: &str,
+        source_name: Option<&str>,
+    ) -> Result<(u64, Vec<u8>)> {
+        let (revision, invocations, active_attention) = self.snapshot_with_attention()?;
+        let envelope = HubEnvelope::Snapshot {
+            schema_version: HUB_SCHEMA_VERSION,
+            source: SourceIdentity {
+                id: source_id.to_owned(),
+                display_name: source_name.map(str::to_owned),
+                capabilities: SourceCapabilities::default(),
+            },
+            revision,
+            invocations,
+            active_attention,
+        };
+        Ok((revision, serde_json::to_vec(&envelope)?))
+    }
+
+    /// Returns true when the hub sink has not yet delivered a baseline
+    /// snapshot (new sink or repair required).
+    pub fn hub_snapshot_due(&self, sink: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        conn.execute(
+            "INSERT OR IGNORE INTO hub_sink_state(sink_name,snapshot_revision) VALUES (?1,NULL)",
+            [sink],
+        )?;
+        Ok(conn
+            .query_row(
+                "SELECT snapshot_revision FROM hub_sink_state WHERE sink_name=?1",
+                [sink],
+                |r| r.get::<_, Option<u64>>(0),
+            )?
+            .is_none())
+    }
+
+    /// Records a successful baseline snapshot delivery at `revision` and
+    /// removes outbox updates subsumed by that snapshot.
+    pub fn hub_snapshot_delivered(&self, sink: &str, revision: u64) -> Result<()> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        conn.execute(
+            "INSERT INTO hub_sink_state(sink_name,snapshot_revision) VALUES (?1,?2) ON CONFLICT(sink_name) DO UPDATE SET snapshot_revision=excluded.snapshot_revision",
+            params![sink, revision],
+        )?;
+        conn.execute(
+            "DELETE FROM sink_outbox WHERE sink_name=?1 AND revision<=?2",
+            params![sink, revision],
+        )?;
+        Ok(())
+    }
+
+    /// Marks the sink as needing a fresh baseline snapshot, for example after
+    /// the receiver reported that it has no state for this source.
+    pub fn hub_reset_snapshot(&self, sink: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        conn.execute(
+            "INSERT INTO hub_sink_state(sink_name,snapshot_revision) VALUES (?1,NULL) ON CONFLICT(sink_name) DO UPDATE SET snapshot_revision=NULL",
+            [sink],
+        )?;
+        Ok(())
+    }
+
     pub fn invocation(&self, id: &InvocationId) -> Result<InvocationSnapshot> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let (raw, generation, completed): (String, u64, Option<u64>) = conn
@@ -402,6 +512,7 @@ impl Storage {
         &self,
         is_alive: impl Fn(u32, Option<&str>) -> bool,
         retention_days: u64,
+        publish: Option<&Publish<'_>>,
     ) -> Result<usize> {
         let (_, snapshots) = self.snapshot()?;
         let mut changed = 0;
@@ -426,6 +537,21 @@ impl Storage {
                 )?;
                 persist_snapshot(&tx, &lost, &credential)?;
                 clear_attention_row(&tx, &lost.invocation_id)?;
+                let event_id =
+                    synthetic_event_id("reconcile_lost", &lost.invocation_id, lost.revision);
+                enqueue_transition(
+                    &tx,
+                    publish,
+                    &lost,
+                    &event_id,
+                    HubEventMetadata {
+                        kind: EventKind::SessionEnded,
+                        observed_at: lost.updated_at,
+                        received_at: lost.updated_at,
+                        failure: None,
+                    },
+                    None,
+                )?;
                 tx.commit()?;
                 changed += 1;
             }
@@ -482,6 +608,91 @@ pub struct OutboxRecord {
 pub struct AppliedUpdate {
     pub snapshot: InvocationSnapshot,
     pub event: LiveEventMetadata,
+}
+
+/// Stable source-scoped identity for transitions that have no provider event.
+fn synthetic_event_id(label: &str, invocation_id: &InvocationId, revision: u64) -> String {
+    format!("synthetic:{label}:{invocation_id}:{revision}")
+}
+
+fn current_attention(tx: &Transaction<'_>, id: &InvocationId) -> Result<Option<ActiveAttention>> {
+    let raw: Option<String> = tx
+        .query_row(
+            "SELECT attention_json FROM local_active_attention WHERE invocation_id=?1",
+            [id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
+        .transpose()
+}
+
+/// Enqueues one delivery per enabled sink in the same transaction as the
+/// committed transition. Hub sinks receive the canonical versioned update
+/// envelope; legacy stdout/HTTP sinks keep the sanitized `SinkEvent` shape.
+fn enqueue_transition(
+    tx: &Transaction<'_>,
+    publish: Option<&Publish<'_>>,
+    snapshot: &InvocationSnapshot,
+    event_id: &str,
+    event: HubEventMetadata,
+    attention: Option<ActiveAttention>,
+) -> Result<()> {
+    let Some(publish) = publish else {
+        return Ok(());
+    };
+    for (name, config) in publish.sinks.iter().filter(|(_, c)| c.enabled()) {
+        let payload = if config.is_hub() {
+            if publish.source_id.is_empty() {
+                continue;
+            }
+            serde_json::to_vec(&HubEnvelope::Update {
+                schema_version: HUB_SCHEMA_VERSION,
+                source_id: publish.source_id.to_owned(),
+                event_id: event_id.to_owned(),
+                revision: snapshot.revision,
+                event: event.clone(),
+                snapshot: Box::new(snapshot.clone()),
+                attention: attention.clone(),
+            })?
+        } else {
+            let sink_event = SinkEvent {
+                schema_version: SCHEMA_VERSION,
+                event_id: event_id.to_owned(),
+                revision: snapshot.revision,
+                snapshot: snapshot.clone(),
+            };
+            let mut safe = serde_json::to_value(&sink_event)?;
+            if !config.fields().is_empty() {
+                if let Some(snapshot) = safe
+                    .get_mut("snapshot")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    snapshot.retain(|field, _| {
+                        matches!(
+                            field.as_str(),
+                            "schema_version"
+                                | "revision"
+                                | "invocation_id"
+                                | "provider"
+                                | "lifecycle"
+                                | "activity"
+                                | "status"
+                                | "updated_at"
+                        ) || config.fields().iter().any(|allowed| allowed == field)
+                    });
+                }
+            }
+            serde_json::to_vec(&safe)?
+        };
+        if payload.len() <= config.max_payload_bytes() {
+            tx.execute(
+                "INSERT OR IGNORE INTO sink_outbox(sink_name,event_id,revision,payload,next_attempt_at) SELECT ?1,?2,?3,?4,?5 WHERE (SELECT COUNT(*) FROM sink_outbox WHERE sink_name=?1) < ?6",
+                params![name, event_id, snapshot.revision, payload, Utc::now().to_rfc3339(), MAX_OUTBOX_RECORDS_PER_SINK],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn clear_attention_row(tx: &Transaction<'_>, id: &InvocationId) -> Result<()> {
@@ -560,10 +771,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sessiontap_core::{
-        SCHEMA_VERSION,
-        domain::{Capabilities, ProcessMetadata},
-    };
+    use sessiontap_core::domain::{Capabilities, ProcessMetadata};
     use uuid::Uuid;
     fn snapshot() -> InvocationSnapshot {
         let now = Utc::now();
@@ -607,22 +815,55 @@ mod tests {
             turn_id: None,
         }
     }
+    fn hub_sinks() -> BTreeMap<String, SinkConfig> {
+        let mut sinks = BTreeMap::new();
+        sinks.insert(
+            "hub".into(),
+            SinkConfig::Hub {
+                enabled: true,
+                url: "http://127.0.0.1:8931/ingest".into(),
+                token_env: None,
+                token_file: None,
+                timeout_ms: 100,
+                max_payload_bytes: 64 * 1024,
+                trusted_addresses: vec![],
+            },
+        );
+        sinks
+    }
+    fn hub_publish(sinks: &BTreeMap<String, SinkConfig>) -> Publish<'_> {
+        Publish {
+            sinks,
+            source_id: "host",
+            source_name: Some("Host"),
+        }
+    }
+    fn hub_updates(db: &Storage) -> Vec<HubEnvelope> {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT payload FROM sink_outbox WHERE sink_name='hub' ORDER BY revision")
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))
+            .unwrap()
+            .map(|raw| serde_json::from_slice(&raw.unwrap()).unwrap())
+            .collect()
+    }
     #[test]
     fn duplicate_and_late_work_are_ignored() {
         let db = Storage::memory().unwrap();
         let s = snapshot();
-        db.register(&s, "secret").unwrap();
-        db.apply_event(&event(&s, EventKind::NewTurn, "1"), &BTreeMap::new())
+        db.register(&s, "secret", None).unwrap();
+        db.apply_event(&event(&s, EventKind::NewTurn, "1"), None)
             .unwrap();
-        db.apply_event(&event(&s, EventKind::Completed, "2"), &BTreeMap::new())
+        db.apply_event(&event(&s, EventKind::Completed, "2"), None)
             .unwrap();
         let late = db
-            .apply_event(&event(&s, EventKind::Working, "3"), &BTreeMap::new())
+            .apply_event(&event(&s, EventKind::Working, "3"), None)
             .unwrap()
             .unwrap();
         assert_eq!(late.activity, Activity::Idle);
         assert!(
-            db.apply_event(&event(&s, EventKind::Working, "3"), &BTreeMap::new())
+            db.apply_event(&event(&s, EventKind::Working, "3"), None)
                 .unwrap()
                 .is_none()
         );
@@ -663,7 +904,7 @@ mod tests {
         let path = temp.path().join("state.sqlite3");
         let s = snapshot();
         let db = Storage::open(&path).unwrap();
-        db.register(&s, "secret").unwrap();
+        db.register(&s, "secret", None).unwrap();
         let first = AttentionContext {
             summary: "First".into(),
             source: sessiontap_core::domain::AttentionSource::Question,
@@ -677,7 +918,7 @@ mod tests {
                 &event(&s, EventKind::WaitingInput, "a"),
                 Some(&first),
                 None,
-                &BTreeMap::new(),
+                None,
             )
             .unwrap()
             .unwrap();
@@ -687,7 +928,7 @@ mod tests {
                 &event(&s, EventKind::WaitingInput, "b"),
                 Some(&second),
                 None,
-                &BTreeMap::new(),
+                None,
             )
             .unwrap()
             .unwrap();
@@ -696,7 +937,7 @@ mod tests {
         let db = Storage::open(&path).unwrap();
         let (_, _, active) = db.snapshot_with_attention().unwrap();
         assert_eq!(active[&s.invocation_id].context.summary, "Second");
-        db.apply_event(&event(&s, EventKind::Working, "c"), &BTreeMap::new())
+        db.apply_event(&event(&s, EventKind::Working, "c"), None)
             .unwrap();
         assert!(db.snapshot_with_attention().unwrap().2.is_empty());
     }
@@ -705,7 +946,7 @@ mod tests {
     fn repeated_terminal_is_enrichment_and_private_context_is_not_persisted_publicly() {
         let db = Storage::memory().unwrap();
         let s = snapshot();
-        db.register(&s, "secret").unwrap();
+        db.register(&s, "secret", None).unwrap();
         let attention = AttentionContext {
             summary: "PRIVATE".into(),
             source: sessiontap_core::domain::AttentionSource::Description,
@@ -714,25 +955,15 @@ mod tests {
             &event(&s, EventKind::WaitingApproval, "a"),
             Some(&attention),
             None,
-            &BTreeMap::new(),
+            None,
         )
         .unwrap();
         let first = db
-            .apply_event_with_context(
-                &event(&s, EventKind::Completed, "b"),
-                None,
-                None,
-                &BTreeMap::new(),
-            )
+            .apply_event_with_context(&event(&s, EventKind::Completed, "b"), None, None, None)
             .unwrap()
             .unwrap();
         let second = db
-            .apply_event_with_context(
-                &event(&s, EventKind::Completed, "c"),
-                None,
-                None,
-                &BTreeMap::new(),
-            )
+            .apply_event_with_context(&event(&s, EventKind::Completed, "c"), None, None, None)
             .unwrap()
             .unwrap();
         assert_eq!(first.event.kind, EventKind::Completed);
@@ -748,7 +979,7 @@ mod tests {
     fn local_context_never_enters_event_history_or_sink_outbox() {
         let db = Storage::memory().unwrap();
         let s = snapshot();
-        db.register(&s, "secret").unwrap();
+        db.register(&s, "secret", None).unwrap();
         let mut sinks = BTreeMap::new();
         sinks.insert(
             "debug".into(),
@@ -757,6 +988,11 @@ mod tests {
                 fields: vec![],
             },
         );
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "",
+            source_name: None,
+        };
         let attention = AttentionContext {
             summary: "PRIVATE-CONTEXT".into(),
             source: sessiontap_core::domain::AttentionSource::Description,
@@ -765,7 +1001,7 @@ mod tests {
             &event(&s, EventKind::WaitingApproval, "private-boundary"),
             Some(&attention),
             Some(FailureContext::Unknown),
-            &sinks,
+            Some(&publish),
         )
         .unwrap();
         let conn = db.conn.lock().unwrap();
@@ -799,12 +1035,12 @@ mod tests {
         use std::sync::Arc;
         let db = Arc::new(Storage::memory().unwrap());
         let s = snapshot();
-        db.register(&s, "s").unwrap();
+        db.register(&s, "s", None).unwrap();
         let joins = (0..20)
             .map(|n| {
                 let db = db.clone();
                 let e = event(&s, EventKind::Working, &format!("{n}"));
-                std::thread::spawn(move || db.apply_event(&e, &BTreeMap::new()).unwrap())
+                std::thread::spawn(move || db.apply_event(&e, None).unwrap())
             })
             .collect::<Vec<_>>();
         for j in joins {
@@ -816,7 +1052,7 @@ mod tests {
     fn credential_and_provider_must_match() {
         let db = Storage::memory().unwrap();
         let s = snapshot();
-        db.register(&s, "secret").unwrap();
+        db.register(&s, "secret", None).unwrap();
         assert!(
             db.credential_matches(&s.invocation_id, "claude", "secret")
                 .unwrap()
@@ -852,29 +1088,39 @@ mod tests {
                 fields: vec!["cwd".into()],
             },
         );
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "",
+            source_name: None,
+        };
         {
             let db = Storage::open(&path).unwrap();
-            db.register(&snapshot, "secret").unwrap();
+            db.register(&snapshot, "secret", Some(&publish)).unwrap();
             db.apply_event(
                 &event(&snapshot, EventKind::NewTurn, "stable-event"),
-                &sinks,
+                Some(&publish),
             )
             .unwrap();
         }
         let db = Storage::open(&path).unwrap();
-        let records = db.due_outbox(10).unwrap();
+        let mut records = db.due_outbox(10).unwrap();
+        records.retain(|r| r.event_id == "stable-event");
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].event_id, "stable-event");
         db.acknowledge("remote", "stable-event").unwrap();
-        assert!(db.due_outbox(10).unwrap().is_empty());
+        assert!(
+            db.due_outbox(10)
+                .unwrap()
+                .iter()
+                .all(|r| r.event_id != "stable-event")
+        );
     }
     #[test]
     fn startup_reconciles_lost_processes_and_expires_old_stopped_rows() {
         let db = Storage::memory().unwrap();
         let mut live = snapshot();
         live.process.child_pid = Some(424_242);
-        db.register(&live, "live-secret").unwrap();
-        assert_eq!(db.reconcile(|_, _| false, 7).unwrap(), 1);
+        db.register(&live, "live-secret", None).unwrap();
+        assert_eq!(db.reconcile(|_, _| false, 7, None).unwrap(), 1);
         assert_eq!(
             db.invocation(&live.invocation_id).unwrap().lifecycle,
             Lifecycle::Lost
@@ -885,8 +1131,8 @@ mod tests {
         old.lifecycle = Lifecycle::Exited;
         old.updated_at = Utc::now() - Duration::days(8);
         old.status = derive_status(old.lifecycle, old.activity);
-        db.register(&old, "old-secret").unwrap();
-        db.reconcile(|_, _| false, 7).unwrap();
+        db.register(&old, "old-secret", None).unwrap();
+        db.reconcile(|_, _| false, 7, None).unwrap();
         assert!(db.invocation(&old.invocation_id).is_err());
     }
 
@@ -920,7 +1166,7 @@ mod tests {
                 std::thread::spawn(move || {
                     let snapshot = snapshot();
                     let id = snapshot.invocation_id.clone();
-                    db.register(&snapshot, "credential").unwrap();
+                    db.register(&snapshot, "credential", None).unwrap();
                     id
                 })
             })
@@ -939,7 +1185,6 @@ mod tests {
     fn sink_backlog_is_bounded_under_burst_load() {
         let db = Storage::memory().unwrap();
         let snapshot = snapshot();
-        db.register(&snapshot, "credential").unwrap();
         let mut sinks = BTreeMap::new();
         sinks.insert(
             "slow".into(),
@@ -953,10 +1198,17 @@ mod tests {
                 fields: vec![],
             },
         );
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "",
+            source_name: None,
+        };
+        db.register(&snapshot, "credential", Some(&publish))
+            .unwrap();
         for index in 0..(MAX_OUTBOX_RECORDS_PER_SINK + 128) {
             db.apply_event(
                 &event(&snapshot, EventKind::Working, &format!("load-{index}")),
-                &sinks,
+                Some(&publish),
             )
             .unwrap();
         }
@@ -969,5 +1221,329 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, MAX_OUTBOX_RECORDS_PER_SINK);
+    }
+
+    #[test]
+    fn registration_binding_exit_and_reconciliation_are_hub_visible() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let mut s = snapshot();
+        s.lifecycle = Lifecycle::Starting;
+        s.status = derive_status(Lifecycle::Starting, Activity::Idle);
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        db.bind_child(&s.invocation_id, "secret", 42, None, Some(&publish))
+            .unwrap();
+        db.mark_exit(&s.invocation_id, "secret", Some(0), None, Some(&publish))
+            .unwrap();
+        let updates = hub_updates(&db);
+        assert_eq!(updates.len(), 3);
+        let kinds: Vec<EventKind> = updates
+            .iter()
+            .map(|u| match u {
+                HubEnvelope::Update { event, .. } => event.kind.clone(),
+                _ => panic!("expected update"),
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EventKind::Enrichment,
+                EventKind::Enrichment,
+                EventKind::SessionEnded
+            ]
+        );
+        for (index, update) in updates.iter().enumerate() {
+            match update {
+                HubEnvelope::Update {
+                    source_id,
+                    snapshot,
+                    revision,
+                    ..
+                } => {
+                    assert_eq!(source_id, "host");
+                    assert_eq!(*revision, snapshot.revision);
+                    assert_eq!(snapshot.revision, (index + 1) as u64);
+                }
+                _ => panic!("expected update"),
+            }
+        }
+    }
+
+    #[test]
+    fn reconciliation_lost_transition_reaches_hub_sinks() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let mut s = snapshot();
+        s.process.child_pid = Some(424_242);
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        assert_eq!(db.reconcile(|_, _| false, 7, Some(&publish)).unwrap(), 1);
+        let updates = hub_updates(&db);
+        let last = updates.last().unwrap();
+        match last {
+            HubEnvelope::Update {
+                event, snapshot, ..
+            } => {
+                assert_eq!(event.kind, EventKind::SessionEnded);
+                assert_eq!(snapshot.lifecycle, Lifecycle::Lost);
+            }
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn hub_update_carries_attention_then_explicit_null_when_cleared() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        let attention = AttentionContext {
+            summary: "Approve tests".into(),
+            source: sessiontap_core::domain::AttentionSource::ToolSummary,
+        };
+        db.apply_event_with_context(
+            &event(&s, EventKind::WaitingApproval, "wait-1"),
+            Some(&attention),
+            None,
+            Some(&publish),
+        )
+        .unwrap();
+        db.apply_event(&event(&s, EventKind::Working, "resume"), Some(&publish))
+            .unwrap();
+        let updates = hub_updates(&db);
+        match &updates[1] {
+            HubEnvelope::Update {
+                attention, event, ..
+            } => {
+                assert_eq!(event.kind, EventKind::WaitingApproval);
+                let active = attention.as_ref().unwrap();
+                assert_eq!(active.kind, EventKind::WaitingApproval);
+                assert_eq!(active.context.summary, "Approve tests");
+            }
+            _ => panic!("expected update"),
+        }
+        match &updates[2] {
+            HubEnvelope::Update { attention, .. } => assert!(attention.is_none()),
+            _ => panic!("expected update"),
+        }
+        let raw: Vec<u8> = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM sink_outbox WHERE sink_name='hub' AND event_id='resume'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert!(value["attention"].is_null());
+        assert!(value.as_object().unwrap().contains_key("attention"));
+    }
+
+    #[test]
+    fn hub_update_carries_failure_category_without_raw_context() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        db.apply_event_with_context(
+            &event(&s, EventKind::Failed, "failed-1"),
+            None,
+            Some(FailureContext::RateLimited),
+            Some(&publish),
+        )
+        .unwrap();
+        match hub_updates(&db).pop().unwrap() {
+            HubEnvelope::Update { event, .. } => {
+                assert_eq!(event.kind, EventKind::Failed);
+                assert_eq!(event.failure, Some(FailureContext::RateLimited));
+            }
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn semantically_suppressed_duplicates_are_not_delivered() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        db.apply_event(&event(&s, EventKind::NewTurn, "turn"), Some(&publish))
+            .unwrap();
+        assert!(
+            db.apply_event(&event(&s, EventKind::NewTurn, "turn"), Some(&publish))
+                .unwrap()
+                .is_none()
+        );
+        let updates = hub_updates(&db);
+        // registration plus exactly one accepted turn; the duplicate added none
+        assert_eq!(updates.len(), 2);
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|u| matches!(u, HubEnvelope::Update { event_id, .. } if event_id == "turn"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn repeated_waiting_attention_is_enrichment_but_still_delivered_with_state() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        let attention = AttentionContext {
+            summary: "First".into(),
+            source: sessiontap_core::domain::AttentionSource::Question,
+        };
+        db.apply_event_with_context(
+            &event(&s, EventKind::WaitingInput, "w1"),
+            Some(&attention),
+            None,
+            Some(&publish),
+        )
+        .unwrap();
+        let second = AttentionContext {
+            summary: "Second".into(),
+            source: sessiontap_core::domain::AttentionSource::Question,
+        };
+        db.apply_event_with_context(
+            &event(&s, EventKind::WaitingInput, "w2"),
+            Some(&second),
+            None,
+            Some(&publish),
+        )
+        .unwrap();
+        let updates = hub_updates(&db);
+        assert_eq!(updates.len(), 3);
+        match &updates[2] {
+            HubEnvelope::Update {
+                event, attention, ..
+            } => {
+                assert_eq!(event.kind, EventKind::Enrichment);
+                assert_eq!(attention.as_ref().unwrap().context.summary, "Second");
+            }
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn retry_identity_is_stable_across_outbox_redelivery() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        let before = hub_updates(&db);
+        db.retry(
+            "hub",
+            match &before[0] {
+                HubEnvelope::Update { event_id, .. } => event_id,
+                _ => panic!("expected update"),
+            },
+            0,
+        )
+        .unwrap();
+        let after = hub_updates(&db);
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn snapshot_delivery_subsumes_earlier_updates_and_keeps_later_ones() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        db.apply_event(&event(&s, EventKind::NewTurn, "early"), Some(&publish))
+            .unwrap();
+        let (revision, payload) = db.hub_source_snapshot("host", Some("Host")).unwrap();
+        let envelope: HubEnvelope = serde_json::from_slice(&payload).unwrap();
+        match envelope {
+            HubEnvelope::Snapshot {
+                source,
+                revision: snapshot_revision,
+                invocations,
+                ..
+            } => {
+                assert_eq!(source.id, "host");
+                assert_eq!(source.display_name.as_deref(), Some("Host"));
+                assert_eq!(snapshot_revision, revision);
+                assert_eq!(invocations.len(), 1);
+                assert_eq!(invocations[0].revision, 2);
+            }
+            _ => panic!("expected snapshot"),
+        }
+        assert!(db.hub_snapshot_due("hub").unwrap());
+        db.hub_snapshot_delivered("hub", revision).unwrap();
+        assert!(!db.hub_snapshot_due("hub").unwrap());
+        assert!(hub_updates(&db).is_empty());
+        db.apply_event(&event(&s, EventKind::Working, "later"), Some(&publish))
+            .unwrap();
+        let updates = hub_updates(&db);
+        assert_eq!(updates.len(), 1);
+        match &updates[0] {
+            HubEnvelope::Update {
+                revision: later, ..
+            } => assert!(*later > revision),
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn snapshot_reset_allows_repair_after_receiver_state_loss() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        let (revision, _) = db.hub_source_snapshot("host", None).unwrap();
+        db.hub_snapshot_delivered("hub", revision).unwrap();
+        assert!(!db.hub_snapshot_due("hub").unwrap());
+        db.hub_reset_snapshot("hub").unwrap();
+        assert!(db.hub_snapshot_due("hub").unwrap());
+    }
+
+    #[test]
+    fn hub_payload_limit_drops_oversized_updates() {
+        let db = Storage::memory().unwrap();
+        let mut sinks = BTreeMap::new();
+        sinks.insert(
+            "hub".into(),
+            SinkConfig::Hub {
+                enabled: true,
+                url: "http://127.0.0.1:8931/ingest".into(),
+                token_env: None,
+                token_file: None,
+                timeout_ms: 100,
+                max_payload_bytes: 64,
+                trusted_addresses: vec![],
+            },
+        );
+        let publish = hub_publish(&sinks);
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        assert!(hub_updates(&db).is_empty());
+    }
+
+    #[test]
+    fn hub_envelopes_are_skipped_without_source_identity() {
+        let db = Storage::memory().unwrap();
+        let sinks = hub_sinks();
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "",
+            source_name: None,
+        };
+        let s = snapshot();
+        db.register(&s, "secret", Some(&publish)).unwrap();
+        assert!(hub_updates(&db).is_empty());
     }
 }

@@ -6,6 +6,7 @@ members = [
   "crates/sessiontap-storage",
   "crates/sessiontap",
   "crates/sessiontapd",
+  "crates/sessiontap-hub",
   "crates/example-receiver",
 ]
 
@@ -28,6 +29,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"

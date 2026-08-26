@@ -1,0 +1,15 @@
+#compdef sessiontap-hub
+
+_sessiontap-hub() {
+  local -a commands
+  commands=(
+    'run:Run the hub service (default)'
+    'listen:Print the merged snapshot then JSONL updates'
+  )
+  if (( CURRENT == 2 )); then
+    _describe 'command' commands
+  fi
+  return 0
+}
+
+_sessiontap-hub "$@"

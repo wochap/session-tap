@@ -27,6 +27,18 @@ struct Broker {
     storage: Arc<Storage>,
     updates: broadcast::Sender<AppliedUpdate>,
     sinks: Arc<BTreeMap<String, SinkConfig>>,
+    source_id: Arc<str>,
+    source_name: Arc<Option<String>>,
+}
+
+impl Broker {
+    fn publish(&self) -> sessiontap_storage::Publish<'_> {
+        sessiontap_storage::Publish {
+            sinks: &self.sinks,
+            source_id: &self.source_id,
+            source_name: self.source_name.as_deref(),
+        }
+    }
 }
 
 #[tokio::main]
@@ -55,15 +67,29 @@ async fn main() -> Result<()> {
         eprintln!("sessiontapd: configuration disabled: {e}");
         Config::default()
     });
+    if let Err(e) = config.validate() {
+        anyhow::bail!("sessiontapd: invalid configuration: {e}");
+    }
     let storage = Arc::new(Storage::open(&paths.database())?);
-    storage.reconcile(process_alive, config.retention_days)?;
     let (updates, _) = broadcast::channel(1024);
     let broker = Broker {
         storage: storage.clone(),
         updates,
         sinks: Arc::new(config.sinks),
+        source_id: Arc::from(config.source_id.unwrap_or_default()),
+        source_name: Arc::new(config.source_name),
     };
-    tokio::spawn(sink_worker(storage, broker.sinks.clone()));
+    storage.reconcile(
+        process_alive,
+        config.retention_days,
+        Some(&broker.publish()),
+    )?;
+    tokio::spawn(sink_worker(
+        storage,
+        broker.sinks.clone(),
+        broker.source_id.clone(),
+        broker.source_name.clone(),
+    ));
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -162,7 +188,20 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             snapshot,
             credential,
         } => {
-            broker.storage.register(&snapshot, &credential)?;
+            let publish = broker.publish();
+            let revision = broker
+                .storage
+                .register(&snapshot, &credential, Some(&publish))?;
+            let mut registered = *snapshot;
+            registered.revision = revision;
+            let _ = broker.updates.send(AppliedUpdate {
+                snapshot: registered,
+                event: sessiontap_core::domain::LiveEventMetadata {
+                    kind: sessiontap_core::domain::EventKind::Enrichment,
+                    attention: None,
+                    failure: None,
+                },
+            });
             Ok(Response::Ok)
         }
         Request::BindChild {
@@ -171,11 +210,13 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             child_pid,
             start_identity,
         } => {
+            let publish = broker.publish();
             let s = broker.storage.bind_child(
                 &invocation_id,
                 &credential,
                 child_pid,
                 start_identity,
+                Some(&publish),
             )?;
             let _ = broker.updates.send(AppliedUpdate {
                 snapshot: s,
@@ -193,9 +234,14 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             exit_code,
             signal,
         } => {
-            let s = broker
-                .storage
-                .mark_exit(&invocation_id, &credential, exit_code, signal)?;
+            let publish = broker.publish();
+            let s = broker.storage.mark_exit(
+                &invocation_id,
+                &credential,
+                exit_code,
+                signal,
+                Some(&publish),
+            )?;
             let _ = broker.updates.send(AppliedUpdate {
                 snapshot: s,
                 event: sessiontap_core::domain::LiveEventMetadata {
@@ -222,11 +268,12 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             {
                 anyhow::bail!("unknown or invalid hook context");
             }
+            let publish = broker.publish();
             if let Some(update) = broker.storage.apply_event_with_context(
                 &event,
                 attention.as_ref(),
                 failure,
-                &broker.sinks,
+                Some(&publish),
             )? {
                 let _ = broker.updates.send(update);
             }
@@ -288,12 +335,77 @@ fn process_alive(pid: u32, identity: Option<&str>) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
 }
 
-async fn sink_worker(storage: Arc<Storage>, sinks: Arc<BTreeMap<String, SinkConfig>>) {
+/// Drops a permanently failing hub delivery after this many attempts so a
+/// malformed envelope cannot occupy the bounded outbox forever.
+const MAX_HUB_DELIVERY_ATTEMPTS: u32 = 16;
+
+async fn sink_worker(
+    storage: Arc<Storage>,
+    sinks: Arc<BTreeMap<String, SinkConfig>>,
+    source_id: Arc<str>,
+    source_name: Arc<Option<String>>,
+) {
     let client = reqwest::Client::new();
+    let mut snapshot_backoff: std::collections::HashMap<String, (tokio::time::Instant, Duration)> =
+        std::collections::HashMap::new();
     loop {
+        let _ = deliver_hub_snapshots(
+            &storage,
+            &sinks,
+            &client,
+            &source_id,
+            source_name.as_deref(),
+            &mut snapshot_backoff,
+        )
+        .await;
         let _ = process_outbox_once(&storage, &sinks, &client).await;
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+}
+
+/// Delivers the baseline source snapshot for every hub sink that has not yet
+/// established one, before any incremental updates for that sink are sent.
+async fn deliver_hub_snapshots(
+    storage: &Storage,
+    sinks: &BTreeMap<String, SinkConfig>,
+    client: &reqwest::Client,
+    source_id: &str,
+    source_name: Option<&str>,
+    backoff: &mut std::collections::HashMap<String, (tokio::time::Instant, Duration)>,
+) -> Result<()> {
+    if source_id.is_empty() {
+        return Ok(());
+    }
+    for (name, config) in sinks.iter().filter(|(_, c)| c.enabled() && c.is_hub()) {
+        if !storage.hub_snapshot_due(name)? {
+            backoff.remove(name);
+            continue;
+        }
+        if let Some((next, _)) = backoff.get(name) {
+            if tokio::time::Instant::now() < *next {
+                continue;
+            }
+        }
+        let (revision, payload) = storage.hub_source_snapshot(source_id, source_name)?;
+        let outcome = deliver_hub_payload(client, config, &payload).await;
+        match outcome {
+            HubOutcome::Accepted => {
+                storage.hub_snapshot_delivered(name, revision)?;
+                backoff.remove(name);
+            }
+            HubOutcome::SnapshotRequired | HubOutcome::Rejected | HubOutcome::Transient => {
+                let delay = backoff
+                    .get(name)
+                    .map(|(_, delay)| (*delay * 2).min(Duration::from_secs(60)))
+                    .unwrap_or(Duration::from_secs(1));
+                backoff.insert(name.clone(), (tokio::time::Instant::now() + delay, delay));
+                eprintln!(
+                    "sessiontapd: hub sink '{name}' snapshot delivery pending (retry in {delay:?})"
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn process_outbox_once(
@@ -307,10 +419,10 @@ async fn process_outbox_once(
         let Some(config) = sinks.get(&record.sink_name) else {
             continue;
         };
-        let delivered = match config {
+        match config {
             SinkConfig::Stdout { .. } => {
                 println!("{}", String::from_utf8_lossy(&record.payload));
-                true
+                storage.acknowledge(&record.sink_name, &record.event_id)?;
             }
             SinkConfig::Http {
                 url,
@@ -318,24 +430,136 @@ async fn process_outbox_once(
                 token_file,
                 timeout_ms,
                 ..
-            } => deliver_http(
-                client,
-                url,
-                token_env.as_deref(),
-                token_file.as_deref(),
-                *timeout_ms,
-                &record.payload,
-            )
-            .await
-            .unwrap_or(false),
-        };
-        if delivered {
-            storage.acknowledge(&record.sink_name, &record.event_id)?;
-        } else {
-            storage.retry(&record.sink_name, &record.event_id, record.attempts)?;
+            } => {
+                let delivered = deliver_http(
+                    client,
+                    url,
+                    token_env.as_deref(),
+                    token_file.as_deref(),
+                    &[],
+                    *timeout_ms,
+                    &record.payload,
+                )
+                .await
+                .unwrap_or(false);
+                if delivered {
+                    storage.acknowledge(&record.sink_name, &record.event_id)?;
+                } else {
+                    storage.retry(&record.sink_name, &record.event_id, record.attempts)?;
+                }
+            }
+            SinkConfig::Hub { .. } => {
+                if storage.hub_snapshot_due(&record.sink_name)? {
+                    // Hold incremental updates until the baseline snapshot is
+                    // delivered so the receiver never sees an update gap.
+                    continue;
+                }
+                match deliver_hub_payload(client, config, &record.payload).await {
+                    HubOutcome::Accepted => {
+                        storage.acknowledge(&record.sink_name, &record.event_id)?;
+                    }
+                    HubOutcome::SnapshotRequired => {
+                        storage.hub_reset_snapshot(&record.sink_name)?;
+                        storage.retry(&record.sink_name, &record.event_id, record.attempts)?;
+                    }
+                    HubOutcome::Rejected => {
+                        if record.attempts + 1 >= MAX_HUB_DELIVERY_ATTEMPTS {
+                            eprintln!(
+                                "sessiontapd: dropping undeliverable hub event '{}' for sink '{}'",
+                                record.event_id, record.sink_name
+                            );
+                            storage.acknowledge(&record.sink_name, &record.event_id)?;
+                        } else {
+                            storage.retry(&record.sink_name, &record.event_id, record.attempts)?;
+                        }
+                    }
+                    HubOutcome::Transient => {
+                        storage.retry(&record.sink_name, &record.event_id, record.attempts)?;
+                    }
+                }
+            }
         }
     }
     Ok(count)
+}
+
+enum HubOutcome {
+    Accepted,
+    /// The receiver has no baseline state for this source and requested a
+    /// source snapshot before further updates.
+    SnapshotRequired,
+    /// Permanent receiver-side rejection (malformed or stale envelope).
+    Rejected,
+    /// Network or server-side failure eligible for backoff retry.
+    Transient,
+}
+
+async fn deliver_hub_payload(
+    client: &reqwest::Client,
+    config: &SinkConfig,
+    payload: &[u8],
+) -> HubOutcome {
+    let SinkConfig::Hub {
+        url,
+        token_env,
+        token_file,
+        timeout_ms,
+        trusted_addresses,
+        ..
+    } = config
+    else {
+        return HubOutcome::Rejected;
+    };
+    if let Err(error) = sessiontap_core::config::validate_sink_url(url, trusted_addresses) {
+        eprintln!("sessiontapd: hub sink URL rejected: {error}");
+        return HubOutcome::Rejected;
+    }
+    let mut req = client
+        .post(url)
+        .timeout(Duration::from_millis(*timeout_ms))
+        .header("content-type", "application/json")
+        .body(payload.to_vec());
+    if let Some(name) = token_env {
+        if let Ok(token) = std::env::var(name) {
+            req = req.bearer_auth(token);
+        }
+    }
+    if let Some(path) = token_file {
+        match hub_token(path) {
+            Ok(token) => req = req.bearer_auth(token),
+            Err(error) => {
+                eprintln!("sessiontapd: hub token unavailable: {error}");
+                return HubOutcome::Transient;
+            }
+        }
+    }
+    let response = match req.send().await {
+        Ok(response) => response,
+        Err(_) => return HubOutcome::Transient,
+    };
+    let status = response.status();
+    if status.is_success() {
+        return HubOutcome::Accepted;
+    }
+    if status == reqwest::StatusCode::CONFLICT {
+        let body = response.text().await.unwrap_or_default();
+        if body.contains("snapshot_required") {
+            return HubOutcome::SnapshotRequired;
+        }
+        return HubOutcome::Rejected;
+    }
+    if status.is_client_error() {
+        return HubOutcome::Rejected;
+    }
+    HubOutcome::Transient
+}
+
+fn hub_token(path: &str) -> Result<String> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() || meta.permissions().mode() & 0o077 != 0 {
+        anyhow::bail!("token file must be private and not a symlink");
+    }
+    Ok(fs::read_to_string(path)?.trim().to_owned())
 }
 
 async fn deliver_http(
@@ -343,10 +567,12 @@ async fn deliver_http(
     url: &str,
     token_env: Option<&str>,
     token_file: Option<&str>,
+    trusted_addresses: &[String],
     timeout_ms: u64,
     payload: &[u8],
 ) -> Result<bool> {
-    validate_sink_url(url)?;
+    sessiontap_core::config::validate_sink_url(url, trusted_addresses)
+        .map_err(anyhow::Error::msg)?;
     let mut req = client
         .post(url)
         .timeout(Duration::from_millis(timeout_ms))
@@ -365,18 +591,6 @@ async fn deliver_http(
         req = req.bearer_auth(fs::read_to_string(path)?.trim());
     }
     Ok(req.send().await?.status().is_success())
-}
-fn validate_sink_url(raw: &str) -> Result<()> {
-    let url = reqwest::Url::parse(raw)?;
-    let loopback = url
-        .host_str()
-        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
-        .is_some_and(|ip| ip.is_loopback())
-        || url.host_str() == Some("localhost");
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
-        anyhow::bail!("HTTP sinks require HTTPS except for loopback");
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -428,6 +642,8 @@ mod tests {
             storage: Arc::new(storage),
             updates,
             sinks: Arc::new(BTreeMap::new()),
+            source_id: Arc::from(""),
+            source_name: Arc::new(None),
         }
     }
 
@@ -453,8 +669,9 @@ mod tests {
 
     #[test]
     fn remote_http_is_rejected() {
-        assert!(validate_sink_url("http://example.com/hook").is_err());
-        assert!(validate_sink_url("http://127.0.0.1:9/hook").is_ok());
+        use sessiontap_core::config::validate_sink_url;
+        assert!(validate_sink_url("http://example.com/hook", &[]).is_err());
+        assert!(validate_sink_url("http://127.0.0.1:9/hook", &[]).is_ok());
     }
 
     #[tokio::test]
@@ -476,7 +693,7 @@ mod tests {
         let expected = snapshot();
         Storage::open(&path)
             .unwrap()
-            .register(&expected, "credential")
+            .register(&expected, "credential", None)
             .unwrap();
         let reopened = Storage::open(&path).unwrap();
         let (_, restored) = reopened.snapshot().unwrap();
@@ -502,13 +719,16 @@ mod tests {
     async fn subscriber_race_never_omits_child_binding() {
         let broker = broker(Storage::memory().unwrap());
         let expected = snapshot();
-        broker.storage.register(&expected, "credential").unwrap();
+        broker
+            .storage
+            .register(&expected, "credential", None)
+            .unwrap();
         let (mut stream, task) = connected_handle(broker.clone()).await;
         send_request(&mut stream, &Request::Listen).await;
         let id = expected.invocation_id.clone();
         let update = broker
             .storage
-            .bind_child(&id, "credential", 42, Some("start".into()))
+            .bind_child(&id, "credential", 42, Some("start".into()), None)
             .unwrap();
         let _ = broker.updates.send(AppliedUpdate {
             snapshot: update,
@@ -537,7 +757,10 @@ mod tests {
     #[tokio::test]
     async fn reconnect_starts_with_a_fresh_snapshot() {
         let broker = broker(Storage::memory().unwrap());
-        broker.storage.register(&snapshot(), "credential").unwrap();
+        broker
+            .storage
+            .register(&snapshot(), "credential", None)
+            .unwrap();
         for _ in 0..2 {
             let (mut stream, task) = connected_handle(broker.clone()).await;
             send_request(&mut stream, &Request::Listen).await;
@@ -555,7 +778,10 @@ mod tests {
     async fn hook_broadcast_contains_effective_live_event() {
         let broker = broker(Storage::memory().unwrap());
         let initial = snapshot();
-        broker.storage.register(&initial, "credential").unwrap();
+        broker
+            .storage
+            .register(&initial, "credential", None)
+            .unwrap();
         let mut receiver = broker.updates.subscribe();
         let event = NormalizedEvent {
             schema_version: 1,
@@ -652,7 +878,7 @@ mod tests {
 
         let storage = Storage::memory().unwrap();
         let initial = snapshot();
-        storage.register(&initial, "credential").unwrap();
+        storage.register(&initial, "credential", None).unwrap();
         let mut sinks = BTreeMap::new();
         sinks.insert(
             "receiver".into(),
@@ -666,6 +892,11 @@ mod tests {
                 fields: vec![],
             },
         );
+        let publish = sessiontap_storage::Publish {
+            sinks: &sinks,
+            source_id: "",
+            source_name: None,
+        };
         let event = NormalizedEvent {
             schema_version: 1,
             event_id: "stable-event-id".into(),
@@ -681,7 +912,7 @@ mod tests {
             usage: None,
             turn_id: None,
         };
-        storage.apply_event(&event, &sinks).unwrap();
+        storage.apply_event(&event, Some(&publish)).unwrap();
         let client = reqwest::Client::new();
         assert_eq!(
             process_outbox_once(&storage, &sinks, &client)
@@ -724,6 +955,7 @@ mod tests {
                 "http://127.0.0.1:9/events",
                 None,
                 token.to_str(),
+                &[],
                 10,
                 b"{}"
             )
@@ -740,6 +972,7 @@ mod tests {
                 "http://127.0.0.1:9/events",
                 None,
                 link.to_str(),
+                &[],
                 10,
                 b"{}"
             )

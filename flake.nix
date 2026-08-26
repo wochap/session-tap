@@ -18,7 +18,7 @@
         buildInputs = [ pkgs.openssl pkgs.sqlite ];
         postInstall = ''
           install -d $out/share/zsh/site-functions
-          install -m 644 completions/zsh/_sessiontap completions/zsh/_sessiontapd $out/share/zsh/site-functions/
+          install -m 644 completions/zsh/_sessiontap completions/zsh/_sessiontapd completions/zsh/_sessiontap-hub $out/share/zsh/site-functions/
         '';
         meta = {
           description = "Local observability for explicitly wrapped coding agents";
