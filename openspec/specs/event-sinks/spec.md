@@ -21,11 +21,19 @@ SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sess
 - **THEN** the broker reads the credential from that environment variable at runtime and does not copy it into status or event records
 
 ### Requirement: Forwarded data is sanitized and selectable
-The broker SHALL forward only normalized fields allowed by the sink configuration and SHALL exclude raw hook bodies, transcripts, prompt text, tool inputs, and secrets by default.
+The broker SHALL forward only normalized snapshot fields allowed by the sink configuration and SHALL exclude raw hook bodies, transcripts, prompt text, assistant messages, tool inputs, local live-event metadata, active-attention context, and secrets by default and regardless of optional snapshot field selection.
 
 #### Scenario: Default HTTP sink event
 - **WHEN** a normalized state change is queued for a default HTTP sink
 - **THEN** its payload contains sanitized session metadata and state but no raw provider payload or transcript content
+
+#### Scenario: Attention event is queued for sinks
+- **WHEN** a waiting_approval or waiting_input event updates local active attention while stdout or HTTP sinks are enabled
+- **THEN** each sink payload contains its configured snapshot fields but no attention object, command summary, question summary, or local event metadata
+
+#### Scenario: Failure event is queued for sinks
+- **WHEN** a failed cause contains notification-only local failure context
+- **THEN** that local context is absent from the sink outbox payload
 
 ### Requirement: HTTP delivery is durable and deduplicable
 The broker SHALL enqueue sink deliveries in the same transaction as their normalized event, retry transient failures with bounded exponential backoff, and include a stable event ID that permits receiver deduplication.

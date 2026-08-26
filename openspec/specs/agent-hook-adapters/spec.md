@@ -7,19 +7,72 @@ Session-gated Claude Code, Codex, and Qwen event ingestion — mapping provider 
 ## Requirements
 
 ### Requirement: Built-in providers are normalized
-SessionTap SHALL provide independently implemented adapters for Claude Code, Codex, and Qwen that map documented session, prompt, tool, permission, notification, stop, and session-end signals into the common event model when those signals are available.
+SessionTap SHALL provide independently implemented adapters for Claude Code, Codex, and Qwen that map documented session, prompt, tool, permission, notification, stop, failure-stop, and session-end signals into the common event model when those signals are available.
 
 #### Scenario: New user turn begins
 - **WHEN** a built-in adapter receives its provider's user-prompt or turn-start signal
 - **THEN** it emits working activity and identifies the event as a new turn
 
 #### Scenario: Provider asks a question
-- **WHEN** an adapter can distinguish a user question from a permission approval
+- **WHEN** an adapter can distinguish a user question or elicitation from a permission approval
 - **THEN** it emits waiting_input rather than waiting_approval
 
-#### Scenario: Provider ends a turn
-- **WHEN** a provider emits its normal or failure turn-stop signal
-- **THEN** the adapter emits idle activity without marking the process stopped
+#### Scenario: Provider requests approval
+- **WHEN** a built-in adapter receives a provider permission request
+- **THEN** it emits waiting_approval with optional bounded provider-neutral attention context
+
+#### Scenario: Provider ends a turn normally
+- **WHEN** a provider emits its normal turn-stop signal
+- **THEN** the adapter identifies the event as completed and emits idle activity without marking the process stopped
+
+#### Scenario: Provider turn fails
+- **WHEN** a provider emits a documented failure-stop signal
+- **THEN** the adapter identifies the event as failed and emits idle activity without marking the process stopped
+
+#### Scenario: Provider emits an idle reminder
+- **WHEN** a provider emits an idle-prompt notification without a turn-stop cause
+- **THEN** the adapter emits enrichment rather than completed or failed
+
+### Requirement: Attention context is bounded and provider-neutral
+Built-in adapters SHALL derive optional attention context while the raw hook payload is available, SHALL use deterministic safe fallback rules, and SHALL NOT include the complete hook payload or arbitrary unknown tool input.
+
+#### Scenario: Provider supplies a description
+- **WHEN** a permission request includes a non-empty provider-supplied description
+- **THEN** the adapter uses a sanitized bounded one-line form of that description before considering command text
+
+#### Scenario: File tool has no description
+- **WHEN** a recognized file operation lacks a description but includes a path
+- **THEN** the adapter emits a tool-specific summary containing no file contents and no more path information than required for display
+
+#### Scenario: Patch tool requests approval
+- **WHEN** an apply-patch operation requires approval
+- **THEN** the adapter emits a generic patch summary and does not expose the patch body
+
+#### Scenario: Unknown tool requests approval
+- **WHEN** an unrecognized tool requests approval without a safe description
+- **THEN** the adapter exposes the bounded tool name alone and does not serialize its arguments
+
+#### Scenario: Context contains multiple lines or controls
+- **WHEN** selected display context contains line breaks or control characters
+- **THEN** the adapter removes controls, collapses whitespace to one line, and enforces conservative character and UTF-8 byte limits
+
+### Requirement: Raw conversational content remains private
+Adapters SHALL discard prompts, transcripts, assistant messages, raw error details, and unselected tool input, and SHALL treat command redaction as conservative best effort rather than a guarantee.
+
+#### Scenario: Stop includes an assistant message
+- **WHEN** a provider stop hook includes `last_assistant_message`
+- **THEN** SessionTap emits the completion cause without copying that message into normalized state, active attention, or live event metadata
+
+#### Scenario: Command may contain a credential
+- **WHEN** a command fallback cannot be summarized without potentially exposing sensitive syntax
+- **THEN** the adapter may replace it with a generic shell summary rather than claiming complete redaction
+
+### Requirement: Provider mappings avoid duplicate attention causes
+Adapters and the broker SHALL distinguish direct attention signals from delayed provider reminder notifications so one unresolved attention episode does not produce repeated notification causes.
+
+#### Scenario: Delayed permission notification follows a direct request
+- **WHEN** a provider emits `Notification(permission_prompt)` after an unresolved `PermissionRequest` for the invocation
+- **THEN** SessionTap treats the notification as enrichment of the active attention state rather than a second waiting_approval cause
 
 ### Requirement: Global hooks observe only wrapped sessions
 Managed hook entries SHALL be safe to install in user-level provider configuration but SHALL emit events only when both a valid SessionTap invocation credential is present and the launch provider matches the hook provider.
