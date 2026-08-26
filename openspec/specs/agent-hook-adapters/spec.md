@@ -100,6 +100,17 @@ SessionTap SHALL atomically and idempotently add only its own hook entries, pres
 - **WHEN** the existing provider configuration cannot be parsed safely
 - **THEN** SessionTap leaves it unchanged, reports the problem, and launches the provider in fail-open untracked mode if necessary
 
+### Requirement: Managed hooks support ephemeral raw inspection
+Managed provider hooks SHALL route the complete hook input to the ephemeral inspection channel when an inspector is active. The inspection branch MUST retain provider binding, invocation gating, bounded execution, and fail-open semantics, and MUST run independently of normalization success.
+
+#### Scenario: Inspected wrapped session
+- **WHEN** a managed hook runs for a wrapped provider invocation while the inspector endpoint exists
+- **THEN** it sends the unnormalized hook input to the inspection channel and continues ordinary normalization
+
+#### Scenario: Hook lacks valid inspection context
+- **WHEN** a managed hook runs globally, for a different provider, without valid SessionTap invocation context, or while no inspector is active
+- **THEN** it sends no raw input to an inspection channel and preserves existing session-gated hook behavior
+
 ### Requirement: Codex hook trust is handled independently
 The Codex adapter SHALL satisfy the installed Codex version's hook trust requirements using public contracts or independently verified behavior and SHALL fail diagnostically rather than copying external trust implementations.
 
