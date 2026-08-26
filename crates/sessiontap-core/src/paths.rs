@@ -71,6 +71,14 @@ impl AppPaths {
     pub fn lock(&self) -> PathBuf {
         self.runtime_dir.join("sessiontap.lock")
     }
+    #[must_use]
+    pub fn hook_inspection_socket(&self) -> PathBuf {
+        self.runtime_dir.join("hook-inspection.sock")
+    }
+    #[must_use]
+    pub fn hook_inspection_lock(&self) -> PathBuf {
+        self.runtime_dir.join("hook-inspection.lock")
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +99,10 @@ mod tests {
         assert_eq!(
             paths.socket(),
             PathBuf::from("/home/u/.local/state/runtime/sessiontap/sessiontap.sock")
+        );
+        assert_eq!(
+            paths.hook_inspection_socket(),
+            PathBuf::from("/home/u/.local/state/runtime/sessiontap/hook-inspection.sock")
         );
     }
     #[test]

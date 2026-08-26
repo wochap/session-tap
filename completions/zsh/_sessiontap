@@ -8,6 +8,7 @@ _sessiontap() {
     'hooks:manage hooks'
     'status:show invocation status'
     'listen:stream invocation updates'
+    'inspect-hooks:stream ephemeral raw managed-hook payloads'
     'completions:print shell completions'
   )
   providers=(claude codex qwen)

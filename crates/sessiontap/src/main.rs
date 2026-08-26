@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
+use fs2::FileExt;
 use rand::RngCore;
 use sessiontap_adapters::{AdapterRegistry, SetupAction};
 use sessiontap_core::{
@@ -12,17 +13,32 @@ use sessiontap_core::{
     paths::AppPaths,
     protocol::{Request, Response},
 };
-use std::{env, io::Read, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    env,
+    fs::{self, OpenOptions},
+    io::{Read, Write},
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+    process::Stdio,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::UnixStream,
+    net::{UnixDatagram, UnixStream},
     process::Command,
+    sync::mpsc,
 };
+
+const INSPECTION_MAX_INPUT_BYTES: usize = 32 * 1024;
+const INSPECTION_MAX_DATAGRAM_BYTES: usize = 256 * 1024;
+const INSPECTION_QUEUE_DEPTH: usize = 64;
+const HOOK_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Debug, PartialEq, Eq)]
 enum Cli {
     Status,
     Listen,
+    InspectHooks,
     Setup {
         provider: Option<String>,
         action: SetupAction,
@@ -41,12 +57,13 @@ enum Cli {
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
     let Some(first) = args.next() else {
         bail!(
-            "usage: sessiontap <claude|codex|qwen> [args...] | status | listen | setup | doctor | hooks remove | completions <shell>"
+            "usage: sessiontap <claude|codex|qwen> [args...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
         )
     };
     match first.as_str() {
         "--status" | "status" => Ok(Cli::Status),
         "--listen" | "listen" => Ok(Cli::Listen),
+        "inspect-hooks" => Ok(Cli::InspectHooks),
         "setup" => Ok(Cli::Setup {
             provider: args.next(),
             action: SetupAction::Ensure,
@@ -64,7 +81,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
         }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
         "--help" | "-h" => bail!(
-            "usage: sessiontap <provider> [provider arguments...] | status | listen | setup | doctor | hooks remove | completions <shell>"
+            "usage: sessiontap <provider> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
         ),
         provider => Ok(Cli::Launch {
             provider: provider.into(),
@@ -83,6 +100,7 @@ async fn main() -> Result<()> {
     match cli {
         Cli::Status => status(&paths).await,
         Cli::Listen => listen(&paths).await,
+        Cli::InspectHooks => inspect_hooks(&paths).await,
         Cli::Setup { provider, action } => setup(&paths, provider, action).await,
         Cli::HookEmit { provider } => hook_emit(&paths, &provider).await,
         Cli::Launch { provider, args } => launch(&paths, &provider, args).await,
@@ -136,6 +154,76 @@ async fn listen(paths: &AppPaths) -> Result<()> {
     while let Some(line) = lines.next_line().await? {
         println!("{line}");
     }
+    Ok(())
+}
+
+struct InspectionEndpoint {
+    socket: PathBuf,
+    _lock: std::fs::File,
+}
+
+impl Drop for InspectionEndpoint {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.socket);
+    }
+}
+
+async fn inspect_hooks(paths: &AppPaths) -> Result<()> {
+    AppPaths::prepare_private(&paths.runtime_dir)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(paths.hook_inspection_lock())?;
+    lock.try_lock_exclusive()
+        .context("another hook inspector is already running")?;
+    let socket_path = paths.hook_inspection_socket();
+    if fs::symlink_metadata(&socket_path).is_ok() {
+        fs::remove_file(&socket_path).context("remove stale hook inspection endpoint")?;
+    }
+    eprintln!(
+        "WARNING: raw hook payloads may contain prompts, tool inputs, paths, credentials, and other sensitive data. Terminal scrollback and explicit redirection may retain this output. SessionTap does not persist or forward it."
+    );
+    let socket = UnixDatagram::bind(&socket_path).context("bind hook inspection endpoint")?;
+    let _endpoint = InspectionEndpoint {
+        socket: socket_path,
+        _lock: lock,
+    };
+    fs::set_permissions(&_endpoint.socket, fs::Permissions::from_mode(0o600))?;
+    let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(INSPECTION_QUEUE_DEPTH);
+    let writer = tokio::task::spawn_blocking(move || {
+        let stdout = std::io::stdout();
+        let mut output = stdout.lock();
+        while let Some(record) = receiver.blocking_recv() {
+            if output.write_all(&record).is_err()
+                || output.write_all(b"\n").is_err()
+                || output.flush().is_err()
+            {
+                break;
+            }
+        }
+    });
+    let mut buffer = vec![0_u8; INSPECTION_MAX_DATAGRAM_BYTES];
+    loop {
+        tokio::select! {
+            result = socket.recv(&mut buffer) => {
+                let size = result?;
+                let record = &buffer[..size];
+                if !valid_inspection_record(record) {
+                    eprintln!("sessiontap: dropped malformed hook inspection record");
+                } else if sender.try_send(record.to_vec()).is_err() {
+                    eprintln!("sessiontap: dropped hook inspection record because output is overloaded");
+                }
+            }
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                break;
+            }
+        }
+    }
+    drop(sender);
+    let _ = writer.await;
     Ok(())
 }
 
@@ -310,7 +398,9 @@ async fn wait_with_signal_forwarding(
 
 async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let mut raw = Vec::new();
-    std::io::stdin().read_to_end(&mut raw)?;
+    std::io::stdin()
+        .take((INSPECTION_MAX_INPUT_BYTES + 1) as u64)
+        .read_to_end(&mut raw)?;
     let Ok(id) = env::var("SESSIONTAP_INVOCATION_ID") else {
         return Ok(());
     };
@@ -328,6 +418,7 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let Some((adapter, _)) = registry.resolve(provider) else {
         return Ok(());
     };
+    inspect_hook_best_effort(paths, provider, &raw).await;
     let Ok(value) = serde_json::from_slice(&raw) else {
         return Ok(());
     };
@@ -345,8 +436,75 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
             failure: normalized.failure,
         },
     );
-    let _ = tokio::time::timeout(Duration::from_millis(250), future).await;
+    let _ = tokio::time::timeout(HOOK_TIMEOUT, future).await;
     Ok(())
+}
+
+fn hook_type(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("hook_event_name")
+        .or_else(|| value.get("event_name"))
+        .or_else(|| value.get("type"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn inspection_record(provider: &str, raw: &[u8]) -> Vec<u8> {
+    let (hook_type, payload) = if raw.len() > INSPECTION_MAX_INPUT_BYTES {
+        (
+            None,
+            serde_json::json!({
+                "inspection_error": "oversized_input",
+                "at_least_bytes": raw.len(),
+                "maximum_bytes": INSPECTION_MAX_INPUT_BYTES
+            }),
+        )
+    } else {
+        match serde_json::from_slice::<serde_json::Value>(raw) {
+            Ok(value) => (hook_type(&value).map(str::to_owned), value),
+            Err(_) => (
+                None,
+                serde_json::json!({
+                    "inspection_error": "invalid_json",
+                    "encoding": "hex",
+                    "bytes": hex::encode(raw)
+                }),
+            ),
+        }
+    };
+    serde_json::to_vec(&serde_json::json!({
+        "provider": provider,
+        "hook_type": hook_type,
+        "payload": payload
+    }))
+    .expect("inspection record is serializable")
+}
+
+fn valid_inspection_record(record: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(record) else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.len() == 3
+        && object
+            .get("provider")
+            .is_some_and(serde_json::Value::is_string)
+        && object
+            .get("hook_type")
+            .is_some_and(|value| value.is_null() || value.is_string())
+        && object.contains_key("payload")
+}
+
+async fn inspect_hook_best_effort(paths: &AppPaths, provider: &str, raw: &[u8]) {
+    let record = inspection_record(provider, raw);
+    let future = async {
+        let socket = UnixDatagram::unbound()?;
+        socket.connect(paths.hook_inspection_socket())?;
+        socket.send(&record).await?;
+        std::io::Result::Ok(())
+    };
+    let _ = tokio::time::timeout(Duration::from_millis(20), future).await;
 }
 
 async fn ensure_daemon(paths: &AppPaths) -> Result<()> {
@@ -467,6 +625,172 @@ mod tests {
     }
 
     #[test]
+    fn inspect_hooks_parses() {
+        assert_eq!(
+            parse(vec!["inspect-hooks".into()].into_iter()).unwrap(),
+            Cli::InspectHooks
+        );
+    }
+
+    #[test]
+    fn inspection_record_preserves_known_and_unknown_json() {
+        let raw = br#"{"hook_event_name":"FutureEvent","nested":{"unknown":[1,true]}}"#;
+        let record: serde_json::Value =
+            serde_json::from_slice(&inspection_record("claude", raw)).unwrap();
+        assert_eq!(record["provider"], "claude");
+        assert_eq!(record["hook_type"], "FutureEvent");
+        assert_eq!(record["payload"]["nested"]["unknown"][1], true);
+    }
+
+    #[test]
+    fn inspection_record_supports_public_discriminators_and_missing_type() {
+        for (raw, expected) in [
+            (
+                serde_json::json!({"event_name":"turn.started"}),
+                Some("turn.started"),
+            ),
+            (
+                serde_json::json!({"type":"notification"}),
+                Some("notification"),
+            ),
+            (serde_json::json!({"future":true}), None),
+        ] {
+            let encoded = serde_json::to_vec(&raw).unwrap();
+            let record: serde_json::Value =
+                serde_json::from_slice(&inspection_record("codex", &encoded)).unwrap();
+            assert_eq!(record["hook_type"].as_str(), expected);
+            assert_eq!(record["payload"], raw);
+        }
+    }
+
+    #[test]
+    fn inspection_record_represents_invalid_bytes_losslessly() {
+        let raw = b"{not-json:\xff}";
+        let record: serde_json::Value =
+            serde_json::from_slice(&inspection_record("qwen", raw)).unwrap();
+        assert_eq!(record["hook_type"], serde_json::Value::Null);
+        assert_eq!(record["payload"]["inspection_error"], "invalid_json");
+        assert_eq!(record["payload"]["encoding"], "hex");
+        assert_eq!(record["payload"]["bytes"], hex::encode(raw));
+    }
+
+    #[test]
+    fn inspection_record_reports_oversize_without_truncation() {
+        let raw = vec![b'x'; INSPECTION_MAX_INPUT_BYTES + 1];
+        let record: serde_json::Value =
+            serde_json::from_slice(&inspection_record("claude", &raw)).unwrap();
+        assert_eq!(record["payload"]["inspection_error"], "oversized_input");
+        assert_eq!(
+            record["payload"]["at_least_bytes"],
+            INSPECTION_MAX_INPUT_BYTES + 1
+        );
+        assert!(record["payload"].get("bytes").is_none());
+    }
+
+    #[test]
+    fn inspection_envelope_rejects_malformed_or_extended_records() {
+        assert!(!valid_inspection_record(b"not json"));
+        assert!(!valid_inspection_record(br#"{"provider":"codex"}"#));
+        assert!(!valid_inspection_record(
+            br#"{"provider":"codex","hook_type":7,"payload":{}}"#
+        ));
+        assert!(!valid_inspection_record(
+            br#"{"provider":"codex","hook_type":null,"payload":{},"raw":"leak"}"#
+        ));
+        assert!(valid_inspection_record(&inspection_record(
+            "codex",
+            br#"{"type":"Stop"}"#
+        )));
+    }
+
+    #[test]
+    fn inspection_lock_allows_only_one_inspector() {
+        let temp = tempfile::tempdir().unwrap();
+        let lock_path = temp.path().join("inspect.lock");
+        let first = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        let second = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        first.try_lock_exclusive().unwrap();
+        assert!(second.try_lock_exclusive().is_err());
+    }
+
+    #[test]
+    fn inspection_output_queue_is_bounded() {
+        let (sender, _receiver) = mpsc::channel::<Vec<u8>>(1);
+        sender.try_send(vec![1]).unwrap();
+        assert!(matches!(
+            sender.try_send(vec![2]),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+    }
+
+    #[test]
+    fn raw_inspection_envelope_is_not_a_broker_request() {
+        let marker = "raw-secret-that-must-not-enter-storage-or-sinks";
+        let record = inspection_record(
+            "claude",
+            serde_json::json!({"hook_event_name":"Unknown", "private": marker})
+                .to_string()
+                .as_bytes(),
+        );
+        assert!(serde_json::from_slice::<Request>(&record).is_err());
+        assert!(String::from_utf8(record).unwrap().contains(marker));
+    }
+
+    #[tokio::test]
+    async fn inspection_delivery_is_ephemeral_and_provider_independent() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = AppPaths {
+            config_dir: temp.path().join("config"),
+            state_dir: temp.path().join("state"),
+            data_dir: temp.path().join("data"),
+            runtime_dir: temp.path().join("runtime"),
+        };
+        AppPaths::prepare_private(&paths.runtime_dir).unwrap();
+        let listener = match UnixDatagram::bind(paths.hook_inspection_socket()) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("skipping: Unix datagrams are blocked by the test sandbox");
+                return;
+            }
+            Err(error) => panic!("bind inspection endpoint: {error}"),
+        };
+        for (provider, raw) in [
+            ("claude", br#"{"hook_event_name":"Stop"}"#.as_slice()),
+            (
+                "codex",
+                br#"{"type":"unknown-event","extra":{"x":1}}"#.as_slice(),
+            ),
+        ] {
+            inspect_hook_best_effort(&paths, provider, raw).await;
+            let mut buffer = vec![0_u8; INSPECTION_MAX_DATAGRAM_BYTES];
+            let size = tokio::time::timeout(Duration::from_millis(100), listener.recv(&mut buffer))
+                .await
+                .unwrap()
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&buffer[..size]).unwrap();
+            assert_eq!(value["provider"], provider);
+        }
+        drop(listener);
+        fs::remove_file(paths.hook_inspection_socket()).unwrap();
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            inspect_hook_best_effort(&paths, "qwen", br#"{"type":"Stop"}"#),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[test]
     fn completions_missing_shell_parses_none() {
         assert_eq!(
             parse(vec!["completions".into()].into_iter()).unwrap(),
@@ -484,6 +808,7 @@ mod tests {
             "hooks",
             "status",
             "listen",
+            "inspect-hooks",
             "completions",
             "claude",
             "codex",

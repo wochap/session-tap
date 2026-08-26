@@ -10,6 +10,8 @@ sessiontap-adapters = { path = "../sessiontap-adapters" }
 sessiontap-core = { path = "../sessiontap-core" }
 anyhow.workspace = true
 chrono.workspace = true
+fs2.workspace = true
+hex.workspace = true
 nix.workspace = true
 rand.workspace = true
 serde_json.workspace = true

@@ -63,6 +63,7 @@ sessiontap qwen [args...]
 # 3. Inspect state from another terminal
 sessiontap status            # JSON array of all invocations
 sessiontap listen            # JSONL stream: snapshot, then updates
+sessiontap inspect-hooks     # ephemeral raw managed-hook JSONL
 ```
 
 `sessiontap setup` is idempotent: it replaces previously installed SessionTap
