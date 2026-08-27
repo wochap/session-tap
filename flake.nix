@@ -16,6 +16,7 @@
         cargoLock.lockFile = ./Cargo.lock;
         doCheck = false;
         nativeBuildInputs = [ pkgs.pkg-config ];
+        nativeCheckInputs = [ pkgs.util-linux ];
         buildInputs = [ pkgs.openssl pkgs.sqlite ];
         postInstall = ''
           install -d $out/share/zsh/site-functions
