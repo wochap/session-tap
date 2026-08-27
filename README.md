@@ -51,20 +51,31 @@ block or alter the provider.
 ## Usage
 
 Build with `nix build` or `nix develop -c cargo build --workspace`. Keep
-`sessiontap` and `sessiontapd` together on `PATH`.
+`sessiontap` and `sessiontapd` together on `PATH`. SessionTap never starts the
+daemon itself: run `sessiontapd` directly or under your service manager before
+launching tracked providers or using `status`/`listen`.
 
 ```sh
 # 1. Install managed hooks (writes into each provider's config file)
 sessiontap setup qwen        # or: setup claude / setup codex
 
-# 2. Launch a tracked session (spawns the real provider binary)
+# 2. Start the broker in a dedicated terminal or service
+sessiontapd
+
+# 3. Launch a tracked session (spawns the real provider binary)
 sessiontap qwen [args...]
 
-# 3. Inspect state from another terminal
+# 4. Inspect state from another terminal
 sessiontap status            # JSON array of all invocations
 sessiontap listen            # JSONL stream: snapshot, then updates
 sessiontap inspect-hooks     # ephemeral raw managed-hook JSONL
 ```
+
+If `sessiontapd` is unavailable, provider launches continue untracked with
+their normal arguments, terminal behavior, signals, and exit status. The
+wrapper prints an explicit-start diagnostic and removes inherited SessionTap
+tracking context. `status` and `listen` instead fail because they have no
+untracked fallback.
 
 `sessiontap setup` is idempotent: it replaces previously installed SessionTap
 hook entries and leaves your other hooks untouched. `sessiontap doctor

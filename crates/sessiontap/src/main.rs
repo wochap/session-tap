@@ -136,7 +136,7 @@ async fn setup(paths: &AppPaths, provider: Option<String>, action: SetupAction) 
     Ok(())
 }
 async fn status(paths: &AppPaths) -> Result<()> {
-    ensure_daemon(paths).await?;
+    require_daemon(paths).await?;
     match request(paths, Request::Status).await? {
         Response::Status { invocations, .. } => {
             println!("{}", serde_json::to_string(&invocations)?);
@@ -147,7 +147,7 @@ async fn status(paths: &AppPaths) -> Result<()> {
     }
 }
 async fn listen(paths: &AppPaths) -> Result<()> {
-    ensure_daemon(paths).await?;
+    require_daemon(paths).await?;
     let mut stream = UnixStream::connect(paths.socket()).await?;
     write_request(&mut stream, &Request::Listen).await?;
     let mut lines = BufReader::new(stream).lines();
@@ -233,7 +233,13 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     let (adapter, executable) = registry
         .resolve(provider)
         .context("unknown provider; configure a custom inherited adapter")?;
-    let hook_ready = if let Some(home) = env::var_os("HOME") {
+    let daemon_ready = daemon_is_healthy(paths).await;
+    if !daemon_ready {
+        eprintln!(
+            "sessiontap: sessiontapd is not running; start it with `sessiontapd`; launching untracked"
+        );
+    }
+    let hook_ready = if daemon_ready && let Some(home) = env::var_os("HOME") {
         match adapter
             .setup(
                 &PathBuf::from(home),
@@ -251,17 +257,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     } else {
         false
     };
-    let tracked = if hook_ready {
-        match ensure_daemon(paths).await {
-            Ok(()) => true,
-            Err(error) => {
-                eprintln!("sessiontap: broker unavailable; launching untracked: {error}");
-                false
-            }
-        }
-    } else {
-        false
-    };
+    let mut tracked = daemon_ready && hook_ready;
     let id = InvocationId::new();
     let credential = random_credential();
     let now = Utc::now();
@@ -296,7 +292,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
             turn_generation: 0,
             completed_generation: None,
         };
-        if let Err(e) = request(
+        match request(
             paths,
             Request::Register {
                 snapshot: Box::new(snapshot),
@@ -305,7 +301,27 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         )
         .await
         {
-            eprintln!("sessiontap: tracking unavailable: {e}");
+            Ok(Response::Ok) => {}
+            Ok(Response::Error(error)) => {
+                eprintln!(
+                    "sessiontap: tracking unavailable; launching untracked: {}",
+                    error.message
+                );
+                tracked = false;
+                prep = sessiontap_adapters::LaunchPreparation::default();
+            }
+            Ok(_) => {
+                eprintln!(
+                    "sessiontap: tracking unavailable; launching untracked: unexpected broker response"
+                );
+                tracked = false;
+                prep = sessiontap_adapters::LaunchPreparation::default();
+            }
+            Err(error) => {
+                eprintln!("sessiontap: tracking unavailable; launching untracked: {error}");
+                tracked = false;
+                prep = sessiontap_adapters::LaunchPreparation::default();
+            }
         }
     }
     let mut command = Command::new(&executable);
@@ -314,10 +330,15 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         .args(&prep.extra_args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .env("SESSIONTAP_INVOCATION_ID", id.to_string())
-        .env("SESSIONTAP_CREDENTIAL", &credential)
-        .env("SESSIONTAP_PROVIDER", provider);
+        .stderr(Stdio::inherit());
+    if tracked {
+        command
+            .env("SESSIONTAP_INVOCATION_ID", id.to_string())
+            .env("SESSIONTAP_CREDENTIAL", &credential)
+            .env("SESSIONTAP_PROVIDER", provider);
+    } else {
+        remove_tracking_environment(&mut command);
+    }
     for (k, v) in prep.environment {
         command.env(k, v);
     }
@@ -507,30 +528,29 @@ async fn inspect_hook_best_effort(paths: &AppPaths, provider: &str, raw: &[u8]) 
     let _ = tokio::time::timeout(Duration::from_millis(20), future).await;
 }
 
-async fn ensure_daemon(paths: &AppPaths) -> Result<()> {
-    if request(paths, Request::Health).await.is_ok() {
-        return Ok(());
+async fn daemon_is_healthy(paths: &AppPaths) -> bool {
+    matches!(
+        request(paths, Request::Health).await,
+        Ok(Response::Health { .. })
+    )
+}
+
+async fn require_daemon(paths: &AppPaths) -> Result<()> {
+    if daemon_is_healthy(paths).await {
+        Ok(())
+    } else {
+        bail!("sessiontapd is not running; start it with `sessiontapd`")
     }
-    AppPaths::prepare_private(&paths.runtime_dir)?;
-    let daemon = env::var_os("SESSIONTAPD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            env::current_exe()
-                .unwrap_or_else(|_| PathBuf::from("sessiontap"))
-                .with_file_name("sessiontapd")
-        });
-    Command::new(daemon)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    for _ in 0..40 {
-        if request(paths, Request::Health).await.is_ok() {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+}
+
+fn remove_tracking_environment(command: &mut Command) {
+    for key in [
+        "SESSIONTAP_INVOCATION_ID",
+        "SESSIONTAP_CREDENTIAL",
+        "SESSIONTAP_PROVIDER",
+    ] {
+        command.env_remove(key);
     }
-    bail!("broker did not become ready")
 }
 async fn request(paths: &AppPaths, request: Request) -> Result<Response> {
     let mut stream = UnixStream::connect(paths.socket()).await?;

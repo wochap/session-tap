@@ -9,9 +9,12 @@ Automated Linux/Wayland checks on 2026-08-25:
 - `nix build path:.# --print-build-logs`: pass (all three binaries installed)
 - `cargo deny check licenses`: pass
 - `cargo audit`: pass, no known RustSec vulnerability reported
-- Isolated Linux daemon/CLI smoke: pass (`status` empty snapshot, exact fake
-  provider exit code 7, stopped snapshot, listen snapshot, graceful shutdown,
-  and restart restoration)
+- Isolated Linux daemon/CLI smoke: pass (daemon started explicitly; `status`
+  empty snapshot, exact fake provider exit code 7, stopped snapshot, listen
+  snapshot, graceful shutdown, and restart restoration). Daemon-absent
+  coverage also verifies no client spawn, actionable observation-command
+  failures, untracked provider argv/stdin/exit behavior, tracking-environment
+  removal, and hook no-op behavior.
 - Broker/sink hardening integration: pass (restart and activation locking,
   subscription races and reconnects, disconnect cleanup, transient HTTP retry
   with event-ID deduplication and acknowledgement, permissions/symlink matrix,

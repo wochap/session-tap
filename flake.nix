@@ -22,6 +22,11 @@
         '';
         meta = {
           description = "Local observability for explicitly wrapped coding agents";
+          longDescription = ''
+            SessionTap packages the sessiontap client and sessiontapd daemon.
+            Consumers must start sessiontapd explicitly; the client does not
+            spawn or supervise it.
+          '';
           license = nixpkgs.lib.licenses.mit;
           mainProgram = "sessiontap";
           platforms = [ system ];
@@ -38,4 +43,3 @@
       };
     };
 }
-

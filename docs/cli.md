@@ -1,7 +1,9 @@
 # CLI guide
 
 Build with `nix build` or enter the development environment with `nix develop`.
-Keep `sessiontap` and `sessiontapd` together on `PATH`. The optional
+Keep `sessiontap` and `sessiontapd` together on `PATH`. Start `sessiontapd`
+explicitly in a dedicated terminal or service before provider launches,
+`status`, or `listen`; the client never starts it. The optional
 `sessiontap-hub` service merges streams from multiple daemons; see
 `docs/hub.md`.
 
@@ -9,6 +11,7 @@ Keep `sessiontap` and `sessiontapd` together on `PATH`. The optional
 sessiontap setup                 # merge all managed hooks
 sessiontap doctor codex          # diagnose a provider integration
 sessiontap hooks remove claude   # remove only SessionTap-owned entries
+sessiontapd                      # required for tracking, status, and listen
 sessiontap claude [args...]
 sessiontap codex [args...]
 sessiontap qwen [args...]
@@ -33,8 +36,11 @@ inherits = "claude"
 ```
 
 The daemon uses a private Unix socket under `$XDG_RUNTIME_DIR/sessiontap` and a
-SQLite database under `$XDG_STATE_HOME/sessiontap`. If tracking initialization
-fails, the provider launches untracked. Status fields are sanitized: no raw
+SQLite database under `$XDG_STATE_HOME/sessiontap`. If it is unavailable or
+tracking initialization fails, the provider launches untracked and inherited
+`SESSIONTAP_INVOCATION_ID`, `SESSIONTAP_CREDENTIAL`, and
+`SESSIONTAP_PROVIDER` values are removed. `status` and `listen` fail with an
+instruction to start `sessiontapd`. Status fields are sanitized: no raw
 prompt, transcript, terminal output, hook body, or tool input is stored.
 
 ## Inspecting raw hooks
@@ -131,7 +137,9 @@ payloads.
 Nix package users get completions automatically: `_sessiontap`,
 `_sessiontapd`, and `_sessiontap-hub` are installed under
 `$out/share/zsh/site-functions/`, which NixOS adds to the completion search
-path.
+path. The package installs both binaries but deliberately does not activate or
+supervise a daemon; NixOS modules and other consumers must arrange
+`sessiontapd` startup before invoking daemon-dependent commands.
 
 Manual installation — copy the script into your `fpath`:
 
