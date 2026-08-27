@@ -7,18 +7,18 @@ Session-gated Claude Code, Codex, and Qwen event ingestion — mapping provider 
 ## Requirements
 
 ### Requirement: Built-in providers are normalized
-SessionTap SHALL provide independently implemented adapters for Claude Code, Codex, and Qwen that map documented session, prompt, tool, permission, notification, stop, failure-stop, and session-end signals into the common event model when those signals are available.
+SessionTap SHALL provide independently implemented adapters for Claude Code, Codex, and Qwen that map documented session, prompt, tool, permission, notification, stop, failure-stop, and session-end signals into the common event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
 
 #### Scenario: New user turn begins
 - **WHEN** a built-in adapter receives its provider's user-prompt or turn-start signal
-- **THEN** it emits working activity and identifies the event as a new turn
+- **THEN** it emits working activity, identifies the event as a new turn, and includes the provider's verified turn identifier when available
 
 #### Scenario: Provider asks a question
-- **WHEN** an adapter can distinguish a user question or elicitation from a permission approval
-- **THEN** it emits waiting_input rather than waiting_approval
+- **WHEN** an adapter can distinguish a user question or elicitation from a permission approval, including a recognized Claude `AskUserQuestion` permission request
+- **THEN** it emits waiting_input rather than waiting_approval without retaining the raw question or options
 
 #### Scenario: Provider requests approval
-- **WHEN** a built-in adapter receives a provider permission request
+- **WHEN** a built-in adapter receives a provider permission request that is not a recognized ordinary-input tool
 - **THEN** it emits waiting_approval with optional bounded provider-neutral attention context
 
 #### Scenario: Provider ends a turn normally
@@ -32,6 +32,41 @@ SessionTap SHALL provide independently implemented adapters for Claude Code, Cod
 #### Scenario: Provider emits an idle reminder
 - **WHEN** a provider emits an idle-prompt notification without a turn-stop cause
 - **THEN** the adapter emits enrichment rather than completed or failed
+
+#### Scenario: Provider session ends while wrapper remains alive
+- **WHEN** a provider emits `SessionEnd` without a supervised process-exit observation
+- **THEN** the adapter emits a provider-session end cause that does not mark the invocation lifecycle exited
+
+#### Scenario: Verified provider metadata is present
+- **WHEN** a supported hook includes verified model, effort, permission mode, turn, token, or context-utilization fields
+- **THEN** the adapter emits only their sanitized provider-neutral representations and omits unavailable fields
+
+#### Scenario: Usage is unavailable
+- **WHEN** a Codex or Claude hook contains no verified token or context-utilization fields
+- **THEN** the adapter does not estimate or synthesize usage
+
+### Requirement: Provider metadata extraction is bounded and evidence-based
+Built-in adapters SHALL normalize only provider metadata established by public contracts or sanitized independent captures, SHALL validate categorical and numeric values, and SHALL discard arbitrary unknown metadata and conversational content.
+
+#### Scenario: Claude turn metadata repeats across hooks
+- **WHEN** Claude supplies one `prompt_id` on prompt, tool, permission, notification, and stop hooks
+- **THEN** SessionTap maps it to one provider-neutral turn ID for correlation
+
+#### Scenario: Permission mode changes during a turn
+- **WHEN** a verified provider hook changes permission mode from `default` to `acceptEdits` or `auto`
+- **THEN** SessionTap updates the normalized current permission mode without copying tool input
+
+#### Scenario: Model contains terminal formatting
+- **WHEN** a provider model value contains control or terminal-formatting sequences
+- **THEN** SessionTap removes those sequences, bounds the result, and omits the field if no safe value remains
+
+#### Scenario: Qwen reports fractional context utilization
+- **WHEN** a verified Qwen hook supplies `context_usage` equal to `0.5`
+- **THEN** SessionTap normalizes context-window utilization to 50 percent
+
+#### Scenario: Unrecognized usage shape arrives
+- **WHEN** a hook supplies token-like fields at an unverified path or with invalid units
+- **THEN** SessionTap ignores those fields rather than guessing their meaning
 
 ### Requirement: Attention context is bounded and provider-neutral
 Built-in adapters SHALL derive optional attention context while the raw hook payload is available, SHALL use deterministic safe fallback rules, and SHALL NOT include the complete hook payload or arbitrary unknown tool input.

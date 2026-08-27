@@ -25,18 +25,30 @@ The broker SHALL derive exactly one public status using the precedence stopped f
 - **THEN** its public status becomes stopped even if its last activity was waiting_approval
 
 ### Requirement: Provider events reduce deterministically
-The broker SHALL assign a monotonically increasing broker revision transactionally and SHALL apply adapter-specific ordering, transition guards, and effective-cause deduplication so delayed hook events cannot resurrect a completed turn or produce duplicate terminal notification causes incorrectly.
+The broker SHALL assign a monotonically increasing broker revision transactionally and SHALL apply adapter-specific session and turn ordering, transition guards, and effective-cause deduplication so delayed hook events cannot regress current metadata, change current attention, resurrect a completed turn, or produce duplicate terminal notification causes incorrectly.
 
 #### Scenario: Late tool event follows turn completion
-- **WHEN** a delayed tool activity event arrives after the same turn's completion event
+- **WHEN** a delayed tool activity event arrives after completion for the same identified turn
 - **THEN** the reducer retains idle unless the event proves a new turn began
+
+#### Scenario: Event from an older provider session arrives
+- **WHEN** a hook carries a provider session ID different from the latest explicitly started provider session
+- **THEN** the reducer does not change current activity, attention, turn, usage, or provider metadata and exposes no actionable effective cause
+
+#### Scenario: Older provider session ends after a newer session starts
+- **WHEN** provider session B starts and provider session A later emits `SessionEnd`
+- **THEN** session B remains current and the invocation lifecycle remains alive
+
+#### Scenario: Current provider session ends before process exit
+- **WHEN** the current provider session ends while the supervised child remains alive
+- **THEN** provider-session state closes without setting process lifecycle to exited
 
 #### Scenario: Duplicate event delivery
 - **WHEN** the broker receives an event with an event ID it already committed
 - **THEN** it does not apply or publish the event twice
 
 #### Scenario: Duplicate stop signal has a distinct event ID
-- **WHEN** another completed or failed signal arrives for the turn generation already marked terminal
+- **WHEN** another completed or failed signal arrives for the identified turn already marked terminal
 - **THEN** the update does not expose a second completed or failed cause
 
 ### Requirement: State is durably persisted in SQLite
@@ -134,8 +146,20 @@ The broker SHALL persist at most one bounded active-attention object per invocat
 - **THEN** the invocation snapshot reports blocked activity/status without embedding its attention object
 
 ### Requirement: Status payload uses typed structured fields
-Each snapshot SHALL contain the invocation ID, provider, executable, sanitized argument array, cwd, process metadata, timestamps, lifecycle, activity, derived status, optional provider session, optional usage, optional repository metadata, optional multiplexer metadata, and advertised capabilities.
+Each snapshot SHALL contain the invocation ID, provider, executable, sanitized argument array, cwd, process metadata, timestamps, lifecycle, activity, derived status, optional ordered provider session, optional provider metadata containing model, effort, permission mode and current turn ID, optional usage containing token counts and context-window utilization, optional repository metadata, optional multiplexer metadata, and advertised capabilities.
 
 #### Scenario: Enrichment is unavailable
-- **WHEN** token usage, repository information, session name, or multiplexer information cannot be determined
+- **WHEN** token usage, context utilization, provider metadata, repository information, session name, or multiplexer information cannot be determined
 - **THEN** the snapshot remains valid with the corresponding optional field absent or null
+
+#### Scenario: Provider session changes within one invocation
+- **WHEN** an explicit session-start hook introduces a new provider session ID
+- **THEN** the snapshot records the new current session with a higher generation and its normalized start reason when available
+
+#### Scenario: Current turn changes
+- **WHEN** a new prompt supplies a verified provider turn identifier
+- **THEN** the snapshot exposes that identifier as current only within the authoritative provider session
+
+#### Scenario: Repeated metadata is unchanged
+- **WHEN** consecutive hooks repeat identical normalized model, effort, permission, turn, session, and usage values without another public transition
+- **THEN** the broker does not create a sink-visible metadata-only change

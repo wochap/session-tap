@@ -29,7 +29,7 @@ SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sess
 - **THEN** SessionTap permits unauthenticated delivery subject to the configured network safety policy
 
 ### Requirement: Forwarded data is normalized, complete, and selectable
-The broker SHALL send hub sinks canonical versioned source snapshot and update envelopes. Updates SHALL contain stable source identity, event identity and revision, normalized event kind and timestamps, optional categorical failure, the complete resulting normalized invocation snapshot, and the current normalized attention object or explicit null. SessionTap SHALL exclude raw hook bodies, transcripts, prompt text, assistant messages, tool inputs, credentials, and other non-normalized provider payloads from every sink.
+The broker SHALL send hub sinks canonical versioned source snapshot and update envelopes. Updates SHALL contain stable source identity, event identity and revision, normalized event kind and timestamps, optional turn identity, optional categorical failure, the complete resulting normalized invocation snapshot including safe provider metadata and available usage, and the current normalized attention object or explicit null. SessionTap SHALL exclude raw hook bodies, transcripts, prompt text, assistant messages, tool inputs and responses, credentials, and other non-normalized provider payloads from every sink.
 
 #### Scenario: Default HTTP archival sink event
 - **WHEN** a normalized state change is queued for a non-hub HTTP sink
@@ -37,7 +37,7 @@ The broker SHALL send hub sinks canonical versioned source snapshot and update e
 
 #### Scenario: Waiting attention is queued for a hub sink
 - **WHEN** a waiting-approval or waiting-input event updates local active attention
-- **THEN** the hub update contains the normalized event kind, resulting blocked state, and normalized attention kind, summary, and source
+- **THEN** the hub update contains the normalized event kind, available turn identity, resulting blocked state, and normalized attention kind, summary, and source
 
 #### Scenario: Attention is cleared
 - **WHEN** a later normalized transition clears active attention
@@ -46,6 +46,14 @@ The broker SHALL send hub sinks canonical versioned source snapshot and update e
 #### Scenario: Failure event is queued for a hub sink
 - **WHEN** a failed event contains normalized categorical failure context
 - **THEN** the hub update contains that category but no raw failure message, tool input, prompt, or transcript
+
+#### Scenario: Provider metadata changes
+- **WHEN** model, effort, permission mode, current turn, provider session, or verified usage changes meaningfully
+- **THEN** the hub update contains the resulting canonical snapshot and no raw provider field outside the versioned schema
+
+#### Scenario: Usage is unavailable
+- **WHEN** a provider exposes no verified token or context-utilization fields
+- **THEN** the hub snapshot leaves usage absent or partially populated rather than reporting estimated values
 
 ### Requirement: HTTP delivery is durable and deduplicable
 The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public state transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped event ID that permits receiver idempotency. Registration, child binding, normalized hook changes, lifecycle exit, and reconciliation SHALL be sink-visible when they change public state.
