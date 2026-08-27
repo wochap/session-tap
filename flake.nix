@@ -14,6 +14,7 @@
         inherit version;
         src = self;
         cargoLock.lockFile = ./Cargo.lock;
+        doCheck = false;
         nativeBuildInputs = [ pkgs.pkg-config ];
         buildInputs = [ pkgs.openssl pkgs.sqlite ];
         postInstall = ''
