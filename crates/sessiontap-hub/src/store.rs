@@ -42,6 +42,7 @@ pub const CANONICAL_FIELDS: &[&str] = &[
     "activity",
     "usage",
     "provider_session",
+    "provider_metadata",
     "repository",
     "multiplexer",
     "process",
@@ -492,6 +493,7 @@ mod tests {
             activity: Activity::Working,
             status: PublicStatus::Running,
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: None,
             multiplexer: None,
@@ -537,6 +539,7 @@ mod tests {
                 observed_at: now,
                 received_at: now,
                 failure: None,
+                turn_id: None,
             },
             snapshot: Box::new(snapshot),
             attention,
@@ -845,6 +848,7 @@ mod tests {
             input_tokens: Some(10),
             output_tokens: None,
             context_tokens: None,
+            context_window_percent: None,
         });
         // usage enrichment with no status change
         let changed = changed_fields(Some(&prior), &next, None);

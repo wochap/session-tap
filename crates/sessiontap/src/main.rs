@@ -285,6 +285,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
             activity: Activity::Unknown,
             status: derive_status(Lifecycle::Starting, Activity::Unknown),
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: repository_metadata(&cwd),
             multiplexer: TmuxAdapter.inspect().unwrap_or(None),

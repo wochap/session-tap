@@ -118,8 +118,9 @@ Each invocation object:
 | `lifecycle` | enum | `starting` / `alive` / `exited` / `lost` |
 | `activity` | enum | `unknown` / `idle` / `working` / `waiting_input` / `waiting_approval` |
 | `status` | enum | derived public status (below) |
-| `provider_session` | object? | `{id, name}` — the provider's own session id |
-| `usage` | object? | `{input_tokens, output_tokens, context_tokens}` |
+| `provider_session` | object? | `{id, name, generation, start_reason}` — ordered provider session |
+| `provider_metadata` | object? | optional sanitized `{model, effort, permission_mode, current_turn_id}` |
+| `usage` | object? | optional verified `{input_tokens, output_tokens, context_tokens, context_window_percent}` |
 | `repository` | object? | `{root, branch, head, dirty}` |
 | `multiplexer` | object? | tmux: `{backend, socket, server_pid, session_id, session_name, window_id, window_index, pane_id, pane_tty, pane_pid}` |
 | `capabilities` | object | `{capture, send_input, usage}` |
@@ -139,11 +140,8 @@ HTTPS except loopback development receivers. See `docs/cli.md` for sink and
 custom-adapter configuration, and `docs/smoke-tests.md` for live provider
 testing.
 
-Snapshot envelopes are non-notifying baselines and include the current local
-`active_attention` map. Notify only from later update envelopes. Every update
-from a current daemon includes an effective `event` cause; older daemons may
-omit it. These additions retain schema version 1, and consumers that only read
-the existing `snapshot` field remain compatible.
+Snapshot envelopes are non-notifying baselines and include the local
+`active_attention` map. Update envelopes include an effective `event` cause.
 
 ## Provenance
 

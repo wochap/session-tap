@@ -7,7 +7,8 @@ use sessiontap_core::{
     config::Config,
     domain::{
         ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, AttentionContext, AttentionSource, EventKind,
-        FailureContext, InvocationId, NormalizedAdapterEvent, NormalizedEvent, Usage,
+        FailureContext, InvocationId, NormalizedAdapterEvent, NormalizedEvent, ProviderMetadata,
+        Usage,
     },
 };
 use std::{
@@ -211,11 +212,20 @@ fn normalize_provider(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let kind = if lower.contains("userprompt")
+    let ask_user_question = provider == "claude"
+        && lower.contains("permission")
+        && raw.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion");
+    let kind = if lower.contains("sessionstart") {
+        EventKind::ProviderSessionStarted
+    } else if lower.contains("sessionend") {
+        EventKind::ProviderSessionEnded
+    } else if lower.contains("userprompt")
         || lower.contains("promptsubmit")
         || lower.contains("turnstart")
     {
         EventKind::NewTurn
+    } else if ask_user_question {
+        EventKind::WaitingInput
     } else if lower.contains("permission") || notification.contains("permission_prompt") {
         EventKind::WaitingApproval
     } else if lower.contains("question")
@@ -235,16 +245,30 @@ fn normalize_provider(
         EventKind::Failed
     } else if lower == "stop" || lower.contains("turnend") {
         EventKind::Completed
-    } else if lower.contains("sessionend") {
-        EventKind::SessionEnded
     } else {
         EventKind::Enrichment
     };
-    let usage = raw.get("usage").map(|u| Usage {
-        input_tokens: u.get("input_tokens").and_then(Value::as_u64),
-        output_tokens: u.get("output_tokens").and_then(Value::as_u64),
-        context_tokens: u.get("context_tokens").and_then(Value::as_u64),
-    });
+    let usage_source = (provider == "qwen").then_some(raw);
+    let usage = usage_source
+        .map(|u| Usage {
+            input_tokens: u.get("input_tokens").and_then(Value::as_u64),
+            output_tokens: u.get("output_tokens").and_then(Value::as_u64),
+            context_tokens: u.get("context_tokens").and_then(Value::as_u64),
+            context_window_percent: (provider == "qwen")
+                .then(|| {
+                    u.get("context_usage")?
+                        .as_f64()
+                        .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0)
+                        .map(|v| (v * 100.0).round() as u8)
+                })
+                .flatten(),
+        })
+        .filter(|u| {
+            u.input_tokens.is_some()
+                || u.output_tokens.is_some()
+                || u.context_tokens.is_some()
+                || u.context_window_percent.is_some()
+        });
     let attention = match kind {
         EventKind::WaitingApproval => attention_context(raw, false),
         EventKind::WaitingInput => attention_context(raw, true),
@@ -256,7 +280,7 @@ fn normalize_provider(
         .flatten();
     Ok(NormalizedAdapterEvent {
         event: NormalizedEvent {
-            schema_version: 1,
+            schema_version: sessiontap_core::SCHEMA_VERSION,
             event_id: raw
                 .get("event_id")
                 .and_then(Value::as_str)
@@ -270,21 +294,96 @@ fn normalize_provider(
             observed_at: Utc::now(),
             received_at: Utc::now(),
             source: "hook".into(),
-            kind,
+            kind: kind.clone(),
             provider_session_id: raw
                 .get("session_id")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             provider_session_name,
+            provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
+                .then(|| bounded_field(raw, &["source", "reason", "start_reason"], 32))
+                .flatten()
+                .filter(|value| {
+                    matches!(value.as_str(), "startup" | "clear" | "resume" | "compact")
+                }),
+            provider_metadata: provider_metadata(provider, raw),
             usage,
             turn_id: raw
                 .get("turn_id")
+                .or_else(|| {
+                    (provider == "claude")
+                        .then(|| raw.get("prompt_id"))
+                        .flatten()
+                })
                 .and_then(Value::as_str)
-                .map(str::to_owned),
+                .and_then(|value| sanitize_bounded(value, 128)),
         },
         attention,
         failure,
     })
+}
+
+fn sanitize_bounded(value: &str, max_chars: usize) -> Option<String> {
+    let mut escaped = false;
+    let clean = value
+        .chars()
+        .filter_map(|c| {
+            if c == '\u{1b}' {
+                escaped = true;
+                return None;
+            }
+            if escaped {
+                if c.is_ascii_alphabetic() {
+                    escaped = false;
+                }
+                return None;
+            }
+            Some(if c.is_control() { ' ' } else { c })
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!clean.is_empty() && clean.chars().count() <= max_chars).then_some(clean)
+}
+
+fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Option<String> {
+    names
+        .iter()
+        .find_map(|name| raw.get(name).and_then(Value::as_str))
+        .and_then(|value| sanitize_bounded(value, max_chars))
+}
+
+fn provider_metadata(provider: &str, raw: &Value) -> Option<ProviderMetadata> {
+    let model = bounded_field(raw, &["model"], 160);
+    let effort = raw
+        .get("effort")
+        .and_then(|v| v.get("level").or(Some(v)))
+        .and_then(Value::as_str)
+        .filter(|v| matches!(*v, "low" | "medium" | "high" | "max" | "xhigh"))
+        .map(str::to_owned);
+    let permission_mode = bounded_field(raw, &["permission_mode"], 32).filter(|v| {
+        matches!(
+            v.as_str(),
+            "default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions"
+        )
+    });
+    let current_turn_id = raw
+        .get("turn_id")
+        .or_else(|| {
+            (provider == "claude")
+                .then(|| raw.get("prompt_id"))
+                .flatten()
+        })
+        .and_then(Value::as_str)
+        .and_then(|v| sanitize_bounded(v, 128));
+    let metadata = ProviderMetadata {
+        model,
+        effort,
+        permission_mode,
+        current_turn_id,
+    };
+    (metadata != ProviderMetadata::default()).then_some(metadata)
 }
 
 fn claude_session_name(raw: &Value) -> Option<String> {
@@ -943,6 +1042,50 @@ mod tests {
     }
 
     #[test]
+    fn enriched_fixtures_are_bounded_correlated_and_evidence_backed() {
+        let id = InvocationId::new();
+        let codex: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/codex-clear.json")).unwrap();
+        let codex = normalize_provider("codex", &id, &codex).unwrap();
+        assert_eq!(codex.event.kind, EventKind::ProviderSessionStarted);
+        assert_eq!(
+            codex.event.provider_session_start_reason.as_deref(),
+            Some("clear")
+        );
+        assert_eq!(codex.event.turn_id.as_deref(), Some("turn-b"));
+        assert_eq!(
+            codex
+                .event
+                .provider_metadata
+                .as_ref()
+                .and_then(|m| m.model.as_deref()),
+            Some("gpt-5.6")
+        );
+        assert!(codex.event.usage.is_none());
+
+        let claude: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/claude-question.json")).unwrap();
+        let claude = normalize_provider("claude", &id, &claude).unwrap();
+        assert_eq!(claude.event.kind, EventKind::WaitingInput);
+        assert_eq!(claude.event.turn_id.as_deref(), Some("prompt-2"));
+        let metadata = claude.event.provider_metadata.unwrap();
+        assert_eq!(metadata.effort.as_deref(), Some("high"));
+        assert_eq!(metadata.permission_mode.as_deref(), Some("acceptEdits"));
+        assert!(claude.attention.is_some());
+        assert!(claude.event.usage.is_none());
+
+        let qwen: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/qwen-stop.json")).unwrap();
+        let usage = normalize_provider("qwen", &id, &qwen)
+            .unwrap()
+            .event
+            .usage
+            .unwrap();
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.context_window_percent, Some(50));
+    }
+
+    #[test]
     fn attention_fallbacks_are_bounded_and_safe() {
         let id = InvocationId::new();
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"echo\nsecret token=abc"}});
@@ -993,6 +1136,30 @@ mod tests {
         .unwrap();
         assert_eq!(failed.failure, Some(FailureContext::Timeout));
         assert!(!serde_json::to_string(&failed).unwrap().contains("PRIVATE"));
+
+        let private = normalize_provider(
+            "codex",
+            &id,
+            &json!({
+                "hook_event_name": "PostToolUse",
+                "prompt": "PRIVATE_PROMPT",
+                "last_assistant_message": "PRIVATE_ASSISTANT",
+                "transcript_path": "/PRIVATE_TRANSCRIPT",
+                "tool_input": {"command": "PRIVATE_INPUT"},
+                "tool_response": {"output": "PRIVATE_RESPONSE"}
+            }),
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&private).unwrap();
+        for marker in [
+            "PRIVATE_PROMPT",
+            "PRIVATE_ASSISTANT",
+            "PRIVATE_TRANSCRIPT",
+            "PRIVATE_INPUT",
+            "PRIVATE_RESPONSE",
+        ] {
+            assert!(!serialized.contains(marker));
+        }
     }
 
     #[test]

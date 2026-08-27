@@ -17,6 +17,10 @@ wait, delayed `permission_prompt` is broker-deduplicated, and `idle_prompt` is
 enrichment rather than completion. Post-tool signals resume work. `Stop` means
 completion; `StopFailure` carries only an allowlisted failure category.
 
+An independently sanitized capture maps `prompt_id` to current turn and
+allowlisted `permission_mode` and `effort.level` to provider metadata, but
+establishes no usage fields. Question/options content is discarded.
+
 Minimum locally tested version: Claude Code 2.1.241. New event fields and
 unknown events are ignored. Live smoke testing is opt-in; see
 `docs/smoke-tests.md`.

@@ -37,6 +37,7 @@ fn fixture_snapshot() -> InvocationSnapshot {
         activity: Activity::Idle,
         status: PublicStatus::Idle,
         provider_session: None,
+        provider_metadata: None,
         usage: None,
         repository: None,
         multiplexer: None,
@@ -71,6 +72,7 @@ fn accepted_update(hub_revision: u64, snapshot: InvocationSnapshot) -> AcceptedU
             observed_at: now,
             received_at: now,
             failure: None,
+            turn_id: None,
         },
         snapshot,
         attention: Some(ActiveAttention {

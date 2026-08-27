@@ -76,14 +76,36 @@ pub const fn derive_status(lifecycle: Lifecycle, activity: Activity) -> PublicSt
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProviderSession {
     pub id: String,
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ProviderMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Usage {
+    #[serde(default)]
     pub input_tokens: Option<u64>,
+    #[serde(default)]
     pub output_tokens: Option<u64>,
+    #[serde(default)]
     pub context_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_percent: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -140,6 +162,8 @@ pub struct InvocationSnapshot {
     pub activity: Activity,
     pub status: PublicStatus,
     pub provider_session: Option<ProviderSession>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_metadata: Option<ProviderMetadata>,
     pub usage: Option<Usage>,
     pub repository: Option<Repository>,
     pub multiplexer: Option<MultiplexerMetadata>,
@@ -159,6 +183,8 @@ pub enum EventKind {
     WaitingApproval,
     Completed,
     Failed,
+    ProviderSessionStarted,
+    ProviderSessionEnded,
     SessionEnded,
     Enrichment,
 }
@@ -207,6 +233,8 @@ pub struct LiveEventMetadata {
     pub attention: Option<AttentionContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<FailureContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -232,6 +260,10 @@ pub struct NormalizedEvent {
     pub provider_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_session_start_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_metadata: Option<ProviderMetadata>,
     pub usage: Option<Usage>,
     pub turn_id: Option<String>,
 }
@@ -298,6 +330,7 @@ mod tests {
             activity: Activity::Idle,
             status: PublicStatus::Idle,
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: None,
             multiplexer: None,
@@ -326,6 +359,7 @@ mod tests {
                 source: AttentionSource::ToolSummary,
             }),
             failure: Some(FailureContext::PermissionDenied),
+            turn_id: None,
         })
         .unwrap();
         assert_eq!(value["kind"], "waiting_approval");

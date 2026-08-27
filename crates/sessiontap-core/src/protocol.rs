@@ -36,6 +36,8 @@ pub struct HubEventMetadata {
     pub received_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<FailureContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
 }
 
 /// Canonical versioned envelope delivered by SessionTap hub sinks.
@@ -179,6 +181,7 @@ mod tests {
             activity: Activity::WaitingInput,
             status: PublicStatus::Blocked,
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: None,
             multiplexer: None,
@@ -200,6 +203,7 @@ mod tests {
                 observed_at: now,
                 received_at: now,
                 failure: None,
+                turn_id: None,
             },
             snapshot: Box::new(fixture_snapshot()),
             attention,
@@ -327,6 +331,7 @@ mod tests {
             activity: crate::domain::Activity::Idle,
             status: crate::domain::PublicStatus::Idle,
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: None,
             multiplexer: None,

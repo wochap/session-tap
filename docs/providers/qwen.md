@@ -19,3 +19,6 @@ input waits. Delayed permission reminders are broker-deduplicated,
 `idle_prompt` is enrichment, and post-tool signals resume work. `Stop` means
 completion; `StopFailure` carries only an allowlisted category. Raw failure
 details and assistant messages are excluded.
+
+An independently sanitized stop capture establishes top-level `input_tokens`
+and fractional `context_usage`; `0.5` becomes 50 percent. Other usage remains unknown.

@@ -200,6 +200,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
                     kind: sessiontap_core::domain::EventKind::Enrichment,
                     attention: None,
                     failure: None,
+                    turn_id: None,
                 },
             });
             Ok(Response::Ok)
@@ -224,6 +225,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
                     kind: sessiontap_core::domain::EventKind::Enrichment,
                     attention: None,
                     failure: None,
+                    turn_id: None,
                 },
             });
             Ok(Response::Ok)
@@ -248,6 +250,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
                     kind: sessiontap_core::domain::EventKind::SessionEnded,
                     attention: None,
                     failure: None,
+                    turn_id: None,
                 },
             });
             Ok(Response::Ok)
@@ -627,6 +630,7 @@ mod tests {
             activity: Activity::Idle,
             status: derive_status(Lifecycle::Starting, Activity::Idle),
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: None,
             multiplexer: None,
@@ -736,6 +740,7 @@ mod tests {
                 kind: EventKind::Enrichment,
                 attention: None,
                 failure: None,
+                turn_id: None,
             },
         });
         let mut reader = BufReader::new(stream);
@@ -795,6 +800,8 @@ mod tests {
             kind: EventKind::WaitingApproval,
             provider_session_id: None,
             provider_session_name: None,
+            provider_session_start_reason: None,
+            provider_metadata: None,
             usage: None,
             turn_id: None,
         };
@@ -909,6 +916,8 @@ mod tests {
             kind: EventKind::NewTurn,
             provider_session_id: None,
             provider_session_name: None,
+            provider_session_start_reason: None,
+            provider_metadata: None,
             usage: None,
             turn_id: None,
         };

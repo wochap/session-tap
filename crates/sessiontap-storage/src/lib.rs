@@ -120,6 +120,7 @@ impl Storage {
                 observed_at: value.updated_at,
                 received_at: value.updated_at,
                 failure: None,
+                turn_id: None,
             },
             None,
         )?;
@@ -236,6 +237,7 @@ impl Storage {
                 observed_at: snapshot.updated_at,
                 received_at: snapshot.updated_at,
                 failure: None,
+                turn_id: None,
             },
             attention,
         )?;
@@ -288,7 +290,28 @@ impl Storage {
         let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
-        let mut effective_kind = event.kind.clone();
+        let prior_public = snapshot.clone();
+        let stale_session = event.provider_session_id.as_ref().is_some_and(|id| {
+            snapshot
+                .provider_session
+                .as_ref()
+                .is_some_and(|current| current.id != *id)
+                && event.kind != EventKind::ProviderSessionStarted
+        });
+        let stale_turn = event.turn_id.as_ref().is_some_and(|id| {
+            snapshot
+                .provider_metadata
+                .as_ref()
+                .and_then(|m| m.current_turn_id.as_ref())
+                .is_some_and(|current| current != id)
+                && event.kind != EventKind::NewTurn
+        });
+        let stale = stale_session || stale_turn;
+        let mut effective_kind = if stale {
+            EventKind::Enrichment
+        } else {
+            event.kind.clone()
+        };
         if matches!(event.kind, EventKind::Completed | EventKind::Failed)
             && snapshot.completed_generation == Some(snapshot.turn_generation)
         {
@@ -303,13 +326,19 @@ impl Storage {
         ) {
             effective_kind = EventKind::Enrichment;
         }
-        reduce(&mut snapshot, event);
+        if !stale {
+            reduce(&mut snapshot, event);
+        }
         let revision = next_revision(&tx)?;
         snapshot.revision = revision;
         snapshot.updated_at = Utc::now();
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
         persist_snapshot(&tx, &snapshot, &credential)?;
-        match event.kind {
+        match if stale {
+            &EventKind::Enrichment
+        } else {
+            &event.kind
+        } {
             EventKind::WaitingApproval | EventKind::WaitingInput => {
                 if let Some(context) = attention {
                     let active = ActiveAttention {
@@ -323,6 +352,8 @@ impl Storage {
             | EventKind::Working
             | EventKind::Completed
             | EventKind::Failed
+            | EventKind::ProviderSessionStarted
+            | EventKind::ProviderSessionEnded
             | EventKind::SessionEnded => clear_attention_row(&tx, &event.invocation_id)?,
             EventKind::Enrichment => {}
         }
@@ -332,19 +363,29 @@ impl Storage {
         )?;
         tx.execute("INSERT INTO normalized_events(event_id,invocation_id,revision,received_at,event_json) VALUES (?1,?2,?3,?4,?5)", params![event.event_id, event.invocation_id.to_string(), revision, event.received_at.to_rfc3339(), serde_json::to_string(event)?])?;
         let current = current_attention(&tx, &event.invocation_id)?;
-        enqueue_transition(
-            &tx,
-            publish,
-            &snapshot,
-            &event.event_id,
-            HubEventMetadata {
-                kind: effective_kind.clone(),
-                observed_at: event.observed_at,
-                received_at: event.received_at,
-                failure,
-            },
-            current,
-        )?;
+        let materially_changed = prior_public.lifecycle != snapshot.lifecycle
+            || prior_public.activity != snapshot.activity
+            || prior_public.provider_session != snapshot.provider_session
+            || prior_public.provider_metadata != snapshot.provider_metadata
+            || prior_public.usage != snapshot.usage
+            || effective_kind != EventKind::Enrichment
+            || attention.is_some();
+        if materially_changed {
+            enqueue_transition(
+                &tx,
+                publish,
+                &snapshot,
+                &event.event_id,
+                HubEventMetadata {
+                    kind: effective_kind.clone(),
+                    observed_at: event.observed_at,
+                    received_at: event.received_at,
+                    failure,
+                    turn_id: event.turn_id.clone(),
+                },
+                current,
+            )?;
+        }
         tx.commit()?;
         Ok(Some(AppliedUpdate {
             snapshot,
@@ -352,6 +393,7 @@ impl Storage {
                 kind: effective_kind,
                 attention: attention.cloned(),
                 failure,
+                turn_id: event.turn_id.clone(),
             },
         }))
     }
@@ -549,6 +591,7 @@ impl Storage {
                         observed_at: lost.updated_at,
                         received_at: lost.updated_at,
                         failure: None,
+                        turn_id: None,
                     },
                     None,
                 )?;
@@ -741,10 +784,15 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
             snapshot.activity = Activity::Idle;
             snapshot.completed_generation = Some(snapshot.turn_generation);
         }
+        EventKind::ProviderSessionStarted | EventKind::ProviderSessionEnded => {
+            snapshot.activity = Activity::Idle;
+        }
         EventKind::SessionEnded => snapshot.lifecycle = Lifecycle::Exited,
         EventKind::Enrichment | EventKind::Working => {}
     }
     if let Some(id) = &event.provider_session_id {
+        let prior = snapshot.provider_session.as_ref();
+        let is_new = prior.is_none_or(|session| session.id != *id);
         snapshot.provider_session = Some(sessiontap_core::domain::ProviderSession {
             id: id.clone(),
             name: event.provider_session_name.clone().or_else(|| {
@@ -754,7 +802,42 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
                     .filter(|session| session.id == *id)
                     .and_then(|session| session.name.clone())
             }),
+            generation: if is_new {
+                prior.map_or(1, |session| session.generation.saturating_add(1))
+            } else {
+                prior.map_or(1, |session| session.generation)
+            },
+            start_reason: event.provider_session_start_reason.clone().or_else(|| {
+                prior
+                    .filter(|session| session.id == *id)
+                    .and_then(|session| session.start_reason.clone())
+            }),
         });
+    }
+    if let Some(metadata) = &event.provider_metadata {
+        let current = snapshot.provider_metadata.get_or_insert_default();
+        if metadata.model.is_some() {
+            current.model.clone_from(&metadata.model);
+        }
+        if metadata.effort.is_some() {
+            current.effort.clone_from(&metadata.effort);
+        }
+        if metadata.permission_mode.is_some() {
+            current
+                .permission_mode
+                .clone_from(&metadata.permission_mode);
+        }
+        if metadata.current_turn_id.is_some() {
+            current
+                .current_turn_id
+                .clone_from(&metadata.current_turn_id);
+        }
+    }
+    if let Some(turn_id) = &event.turn_id {
+        snapshot
+            .provider_metadata
+            .get_or_insert_default()
+            .current_turn_id = Some(turn_id.clone());
     }
     if event.usage.is_some() {
         snapshot.usage.clone_from(&event.usage);
@@ -790,6 +873,7 @@ mod tests {
             activity: Activity::Idle,
             status: derive_status(Lifecycle::Alive, Activity::Idle),
             provider_session: None,
+            provider_metadata: None,
             usage: None,
             repository: None,
             multiplexer: None,
@@ -811,9 +895,61 @@ mod tests {
             kind,
             provider_session_id: None,
             provider_session_name: None,
+            provider_session_start_reason: None,
+            provider_metadata: None,
             usage: None,
             turn_id: None,
         }
+    }
+    #[test]
+    fn provider_sessions_are_ordered_and_do_not_end_the_wrapper() {
+        let mut state = snapshot();
+        let mut first = event(&state, EventKind::ProviderSessionStarted, "start-a");
+        first.provider_session_id = Some("a".into());
+        first.provider_session_start_reason = Some("startup".into());
+        reduce(&mut state, &first);
+        assert_eq!(state.provider_session.as_ref().unwrap().generation, 1);
+
+        let mut second = event(&state, EventKind::ProviderSessionStarted, "start-b");
+        second.provider_session_id = Some("b".into());
+        second.provider_session_start_reason = Some("clear".into());
+        reduce(&mut state, &second);
+        assert_eq!(state.provider_session.as_ref().unwrap().generation, 2);
+
+        let mut ended = event(&state, EventKind::ProviderSessionEnded, "end-b");
+        ended.provider_session_id = Some("b".into());
+        reduce(&mut state, &ended);
+        assert_eq!(state.lifecycle, Lifecycle::Alive);
+        assert_eq!(state.activity, Activity::Idle);
+    }
+
+    #[test]
+    fn stale_session_and_turn_events_cannot_regress_state() {
+        let db = Storage::memory().unwrap();
+        let state = snapshot();
+        db.register(&state, "secret", None).unwrap();
+        let mut start = event(&state, EventKind::ProviderSessionStarted, "start-b");
+        start.provider_session_id = Some("b".into());
+        start.turn_id = Some("turn-2".into());
+        db.apply_event(&start, None).unwrap();
+
+        let mut stale = event(&state, EventKind::WaitingApproval, "late-a");
+        stale.provider_session_id = Some("a".into());
+        stale.turn_id = Some("turn-1".into());
+        stale.provider_metadata = Some(sessiontap_core::domain::ProviderMetadata {
+            permission_mode: Some("auto".into()),
+            ..Default::default()
+        });
+        let update = db.apply_event(&stale, None).unwrap().unwrap();
+        assert_eq!(update.activity, Activity::Idle);
+        assert_eq!(update.provider_session.as_ref().unwrap().id, "b");
+        assert_ne!(
+            update
+                .provider_metadata
+                .as_ref()
+                .and_then(|m| m.permission_mode.as_deref()),
+            Some("auto")
+        );
     }
     fn hub_sinks() -> BTreeMap<String, SinkConfig> {
         let mut sinks = BTreeMap::new();

@@ -98,7 +98,7 @@ anywhere without a trusted list.
   reconciliation are all sink-visible when they change public state.
 
 Hub updates carry the complete resulting invocation snapshot, normalized event
-metadata with an optional categorical failure, and the current attention object
+metadata with optional turn identity and categorical failure, and the current attention object
 — an explicit `null` when attention was cleared. Raw hook bodies, transcripts,
 prompts, tool inputs, and credentials never enter hub envelopes. Attention
 summaries are bounded derived text (160 chars / 512 bytes); enabling a hub
@@ -138,7 +138,7 @@ subscriptions:
 
 `changes` compares the previously persisted state with the accepted resulting
 state. Canonical field names are: `status`, `lifecycle`, `activity`, `usage`,
-`provider_session`, `repository`, `multiplexer`, `process`, `attention`. A
+`provider_session`, `provider_metadata`, `repository`, `multiplexer`, `process`, `attention`. A
 subscription with `changes: [status, attention]` runs when either field
 materially changed; it does not run for unrelated enrichment such as a usage
 update. A previously unknown invocation reports every canonical field as

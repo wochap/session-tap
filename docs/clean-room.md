@@ -25,3 +25,7 @@ Final review on 2026-08-25 found no copied or transformed external
 implementation material. Provider mappings cite public contracts, and all
 committed provider fixtures are minimal synthetic records without prompts,
 paths, credentials, transcripts, tool inputs, or account data.
+
+Metadata mappings use sanitized independent captures for Codex session/turn
+ordering, Claude prompt/permission/effort, and Qwen top-level usage. Captures
+contain no conversational or raw tool content.

@@ -37,6 +37,7 @@ fn fixture(provider: &str) -> InvocationSnapshot {
         activity: Activity::Working,
         status: PublicStatus::Running,
         provider_session: None,
+        provider_metadata: None,
         usage: None,
         repository: None,
         multiplexer: None,
@@ -82,6 +83,7 @@ fn waiting_update(
             observed_at: now,
             received_at: now,
             failure: None,
+            turn_id: None,
         },
         snapshot: Box::new(snapshot),
         attention: Some(sessiontap_core::domain::ActiveAttention {

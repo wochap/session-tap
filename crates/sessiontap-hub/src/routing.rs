@@ -113,6 +113,9 @@ pub fn environment(update: &AcceptedUpdate) -> Vec<(String, String)> {
             vars.push(("SESSIONTAP_SESSION_NAME".into(), name.clone()));
         }
     }
+    if let Some(turn_id) = &update.event.turn_id {
+        vars.push(("SESSIONTAP_TURN_ID".into(), turn_id.clone()));
+    }
     if let Some(repository) = &snapshot.repository {
         vars.push(("SESSIONTAP_REPOSITORY_ROOT".into(), repository.root.clone()));
         if let Some(branch) = &repository.branch {
@@ -214,6 +217,7 @@ mod tests {
                 observed_at: now,
                 received_at: now,
                 failure: None,
+                turn_id: None,
             },
             snapshot: sessiontap_core::domain::InvocationSnapshot {
                 schema_version: 1,
@@ -232,7 +236,10 @@ mod tests {
                 provider_session: Some(sessiontap_core::domain::ProviderSession {
                     id: "session-9".into(),
                     name: Some("demo".into()),
+                    generation: 1,
+                    start_reason: None,
                 }),
+                provider_metadata: None,
                 usage: None,
                 repository: Some(Repository {
                     root: "/work/project".into(),
