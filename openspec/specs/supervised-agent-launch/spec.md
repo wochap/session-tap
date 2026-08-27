@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Interactive provider launch with exact argument forwarding, invocation identity assignment, process supervision, automatic broker startup, and clean shutdown semantics on Linux/Wayland.
+Interactive provider launch with exact argument forwarding, optional invocation tracking through an explicitly started broker, process supervision, and clean shutdown semantics on Linux/Wayland.
 
 ## Requirements
 
@@ -36,19 +36,23 @@ SessionTap SHALL launch the provider with the caller's terminal streams and envi
 - **THEN** the provider's native interactive TUI can read input, render output, observe terminal resize, and use terminal control sequences normally
 
 ### Requirement: The wrapper supervises provider lifecycle
-The wrapper SHALL register an invocation before launch, report the child process identity after spawn, forward termination-related signals, record the child's termination, and exit with the provider's exit status or corresponding signal status.
+When the broker is available, the wrapper SHALL register an invocation before launch, report the child process identity after spawn, forward termination-related signals, record the child's termination, and exit with the provider's exit status or corresponding signal status. When the broker is unavailable, the wrapper SHALL skip tracking registration and lifecycle reporting while preserving signal forwarding and provider exit behavior.
 
 #### Scenario: Provider exits normally
-- **WHEN** the provider exits with a nonzero exit code
+- **WHEN** a tracked provider exits with a nonzero exit code
 - **THEN** the invocation becomes stopped with that exit code and `sessiontap` exits with the same code
 
 #### Scenario: Provider is interrupted
 - **WHEN** the wrapper receives an interactive termination signal
-- **THEN** it forwards the signal to the provider process group, records the resulting termination, and does not leave a live orphaned provider
+- **THEN** it forwards the signal to the provider process group, records the resulting termination when tracking is active, and does not leave a live orphaned provider
 
 #### Scenario: Wrapper disappears unexpectedly
 - **WHEN** the wrapper can no longer report lifecycle but the broker detects that the registered process no longer exists
 - **THEN** the broker marks the lifecycle lost and derives stopped status
+
+#### Scenario: Untracked provider exits
+- **WHEN** a provider is launched while the broker is unavailable
+- **THEN** the wrapper does not register or report lifecycle and exits with the provider's exit code or corresponding signal status
 
 ### Requirement: Every launch has distinct identities
 SessionTap SHALL assign an opaque invocation ID before launch and SHALL store a provider session ID separately when the provider reports one.
@@ -57,16 +61,31 @@ SessionTap SHALL assign an opaque invocation ID before launch and SHALL store a 
 - **WHEN** a hook reports a provider session ID for a registered invocation
 - **THEN** SessionTap associates it with that invocation without replacing the invocation ID
 
-### Requirement: Broker startup is automatic and fail-open
-The CLI SHALL attempt to start the per-user broker when it is unavailable, serialize concurrent startup attempts, and warn but preserve provider launch when observability initialization fails.
+### Requirement: Broker startup is explicit and provider launch is fail-open
+The `sessiontap` CLI SHALL only connect to an already-running `sessiontapd` and SHALL NOT spawn or supervise the daemon. A wrapped provider launch SHALL warn and continue without tracking when the daemon is unavailable.
 
-#### Scenario: Concurrent first launches
-- **WHEN** two SessionTap wrappers start while no broker is running
-- **THEN** at most one broker becomes the active owner of the runtime socket and both provider launches proceed
+#### Scenario: First wrapped launch without a daemon
+- **WHEN** the user runs `sessiontap <provider>` while `sessiontapd` is not reachable
+- **THEN** SessionTap prints a diagnostic instructing the user to start `sessiontapd`, does not start a daemon, and launches the provider untracked
 
-#### Scenario: Broker cannot start
-- **WHEN** the broker fails to become ready within the startup deadline
-- **THEN** SessionTap prints a diagnostic, launches the requested provider without tracking, and preserves its interactive and exit behavior
+#### Scenario: Wrapped launch with a running daemon
+- **WHEN** the user runs `sessiontap <provider>` while `sessiontapd` is healthy
+- **THEN** SessionTap registers and tracks the invocation before launching the provider
+
+#### Scenario: Observation command without a daemon
+- **WHEN** the user runs `sessiontap status` or `sessiontap listen` while `sessiontapd` is not reachable
+- **THEN** SessionTap reports that `sessiontapd` is not running, does not start it, and exits unsuccessfully
+
+### Requirement: Untracked fallback does not activate managed hooks
+When a wrapped provider is launched without tracking, SessionTap SHALL NOT supply valid SessionTap invocation context to that provider, and managed hooks SHALL complete successfully without contacting the broker or emitting tracking events.
+
+#### Scenario: Hook runs during daemon-absent fallback
+- **WHEN** a managed provider hook runs for a provider that SessionTap launched untracked because `sessiontapd` was unavailable
+- **THEN** the hook exits successfully without a broker request, raw inspection delivery, or normalized tracking event
+
+#### Scenario: Stale tracking context is inherited
+- **WHEN** an untracked fallback launch inherits SessionTap tracking environment variables from its caller
+- **THEN** the wrapper removes that tracking context before starting the provider
 
 ### Requirement: Persisted arguments are sanitized
 SessionTap SHALL persist and forward an argument array with known credential values redacted and SHALL NOT persist an unsanitized command-line string.
