@@ -64,6 +64,14 @@ Built-in adapters SHALL normalize only provider metadata established by public c
 - **WHEN** a verified Qwen hook supplies `context_usage` equal to `0.5`
 - **THEN** SessionTap normalizes context-window utilization to 50 percent
 
+#### Scenario: Qwen reports hook metadata
+- **WHEN** a verified Qwen hook supplies a valid timestamp or an observed permission mode such as `auto`, `plan`, or `yolo`
+- **THEN** SessionTap retains the provider-observed time and sanitized permission mode in provider-neutral fields
+
+#### Scenario: Qwen emits an empty prompt callback
+- **WHEN** Qwen emits `UserPromptSubmit` with an empty prompt around tool activity
+- **THEN** SessionTap treats it as enrichment rather than starting a new turn
+
 #### Scenario: Unrecognized usage shape arrives
 - **WHEN** a hook supplies token-like fields at an unverified path or with invalid units
 - **THEN** SessionTap ignores those fields rather than guessing their meaning

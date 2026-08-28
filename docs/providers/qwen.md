@@ -15,7 +15,10 @@ restart at offset zero after truncation.
 
 Direct permission requests carry bounded approval context;
 `ask_user_question` and documented input-needed notifications are ordinary
-input waits. Delayed permission reminders are broker-deduplicated,
+input waits. Observed `auto`, `plan`, and `yolo` permission modes are retained,
+and valid hook timestamps become the event's provider-observed time. Empty
+`UserPromptSubmit` callbacks emitted around tool activity are enrichment rather
+than new turns. Delayed permission reminders are broker-deduplicated,
 `idle_prompt` is enrichment, and post-tool signals resume work. `Stop` means
 completion; `StopFailure` carries only an allowlisted category. Raw failure
 details and assistant messages are excluded.

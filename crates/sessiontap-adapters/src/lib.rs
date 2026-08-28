@@ -212,13 +212,27 @@ fn normalize_provider(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let ask_user_question = provider == "claude"
+    let ask_user_question = matches!(provider, "claude" | "qwen")
         && lower.contains("permission")
-        && raw.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion");
+        && raw
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| {
+                name.eq_ignore_ascii_case("AskUserQuestion")
+                    || name.eq_ignore_ascii_case("ask_user_question")
+            });
+    let empty_qwen_prompt = provider == "qwen"
+        && (lower.contains("userprompt") || lower.contains("promptsubmit"))
+        && raw
+            .get("prompt")
+            .and_then(Value::as_str)
+            .is_some_and(|prompt| prompt.trim().is_empty());
     let kind = if lower.contains("sessionstart") {
         EventKind::ProviderSessionStarted
     } else if lower.contains("sessionend") {
         EventKind::ProviderSessionEnded
+    } else if empty_qwen_prompt {
+        EventKind::Enrichment
     } else if lower.contains("userprompt")
         || lower.contains("promptsubmit")
         || lower.contains("turnstart")
@@ -278,6 +292,16 @@ fn normalize_provider(
     let provider_session_name = (provider == "claude")
         .then(|| claude_session_name(raw))
         .flatten();
+    let received_at = Utc::now();
+    let observed_at = (provider == "qwen")
+        .then(|| {
+            raw.get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc))
+        })
+        .flatten()
+        .unwrap_or(received_at);
     Ok(NormalizedAdapterEvent {
         event: NormalizedEvent {
             schema_version: sessiontap_core::SCHEMA_VERSION,
@@ -291,8 +315,8 @@ fn normalize_provider(
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             provider: provider.into(),
-            observed_at: Utc::now(),
-            received_at: Utc::now(),
+            observed_at,
+            received_at,
             source: "hook".into(),
             kind: kind.clone(),
             provider_session_id: raw
@@ -365,7 +389,7 @@ fn provider_metadata(provider: &str, raw: &Value) -> Option<ProviderMetadata> {
     let permission_mode = bounded_field(raw, &["permission_mode"], 32).filter(|v| {
         matches!(
             v.as_str(),
-            "default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions"
+            "default" | "acceptEdits" | "auto" | "plan" | "yolo" | "bypassPermissions"
         )
     });
     let current_turn_id = raw
@@ -1092,6 +1116,44 @@ mod tests {
             .unwrap();
         assert_eq!(usage.input_tokens, Some(100));
         assert_eq!(usage.context_window_percent, Some(50));
+
+        let qwen_question: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/qwen-question.json")).unwrap();
+        let qwen_question = normalize_provider("qwen", &id, &qwen_question).unwrap();
+        assert_eq!(qwen_question.event.kind, EventKind::WaitingInput);
+        assert_eq!(
+            qwen_question
+                .event
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.permission_mode.as_deref()),
+            Some("yolo")
+        );
+        assert_eq!(
+            qwen_question.event.observed_at.to_rfc3339(),
+            "2026-08-28T15:08:40.299+00:00"
+        );
+        assert!(qwen_question.event.received_at > qwen_question.event.observed_at);
+    }
+
+    #[test]
+    fn qwen_empty_prompt_notifications_do_not_start_turns() {
+        let id = InvocationId::new();
+        let empty = normalize_provider(
+            "qwen",
+            &id,
+            &json!({"hook_event_name": "UserPromptSubmit", "prompt": ""}),
+        )
+        .unwrap();
+        assert_eq!(empty.event.kind, EventKind::Enrichment);
+
+        let real = normalize_provider(
+            "qwen",
+            &id,
+            &json!({"hook_event_name": "UserPromptSubmit", "prompt": "do work"}),
+        )
+        .unwrap();
+        assert_eq!(real.event.kind, EventKind::NewTurn);
     }
 
     #[test]
