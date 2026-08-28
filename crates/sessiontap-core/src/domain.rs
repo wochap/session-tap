@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -60,6 +61,70 @@ pub enum PublicStatus {
     Stopped,
 }
 
+/// Observer-facing reason category. Internal event kinds and attention source
+/// details deliberately do not cross the public projection boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicReasonKind {
+    Input,
+    Approval,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicStatusReason {
+    pub kind: PublicReasonKind,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicProviderSession {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_reason: Option<String>,
+}
+
+/// The complete, deliberately selected observer-facing state for one agent.
+/// This is constructed field-by-field and is never a serialized internal
+/// invocation snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicAgentView {
+    pub invocation_id: InvocationId,
+    pub provider: String,
+    pub status: PublicStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<PublicStatusReason>,
+    pub cwd: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<PublicProviderSession>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ProviderMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<Repository>,
+}
+
+/// Typed public field paths, ordered by declaration for deterministic JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicField {
+    InvocationId,
+    Provider,
+    Status,
+    Reason,
+    Cwd,
+    CreatedAt,
+    UpdatedAt,
+    Session,
+    Metadata,
+    Usage,
+    Repository,
+}
+
 #[must_use]
 pub const fn derive_status(lifecycle: Lifecycle, activity: Activity) -> PublicStatus {
     match lifecycle {
@@ -71,6 +136,91 @@ pub const fn derive_status(lifecycle: Lifecycle, activity: Activity) -> PublicSt
             Activity::Unknown | Activity::Idle => PublicStatus::Idle,
         },
     }
+}
+
+#[must_use]
+pub fn project_public(
+    snapshot: &InvocationSnapshot,
+    attention: Option<&ActiveAttention>,
+) -> PublicAgentView {
+    let status = derive_status(snapshot.lifecycle, snapshot.activity);
+    let reason = if status == PublicStatus::Blocked {
+        attention.and_then(|attention| {
+            let kind = match attention.kind {
+                EventKind::WaitingInput => PublicReasonKind::Input,
+                EventKind::WaitingApproval => PublicReasonKind::Approval,
+                _ => return None,
+            };
+            Some(PublicStatusReason {
+                kind,
+                summary: attention.context.summary.clone(),
+            })
+        })
+    } else {
+        None
+    };
+    PublicAgentView {
+        invocation_id: snapshot.invocation_id.clone(),
+        provider: snapshot.provider.clone(),
+        status,
+        reason,
+        cwd: snapshot.cwd.clone(),
+        created_at: snapshot.created_at,
+        updated_at: snapshot.updated_at,
+        session: snapshot
+            .provider_session
+            .as_ref()
+            .map(|session| PublicProviderSession {
+                id: session.id.clone(),
+                name: session.name.clone(),
+                start_reason: session.start_reason.clone(),
+            }),
+        metadata: snapshot.provider_metadata.clone(),
+        usage: snapshot.usage.clone(),
+        repository: snapshot.repository.clone(),
+    }
+}
+
+#[must_use]
+pub fn changed_public_fields(
+    previous: Option<&PublicAgentView>,
+    current: &PublicAgentView,
+) -> BTreeSet<PublicField> {
+    let Some(previous) = previous else {
+        return BTreeSet::from([
+            PublicField::InvocationId,
+            PublicField::Provider,
+            PublicField::Status,
+            PublicField::Reason,
+            PublicField::Cwd,
+            PublicField::CreatedAt,
+            PublicField::UpdatedAt,
+            PublicField::Session,
+            PublicField::Metadata,
+            PublicField::Usage,
+            PublicField::Repository,
+        ]);
+    };
+    let mut changed = BTreeSet::new();
+    macro_rules! field {
+        ($name:ident, $variant:ident) => {
+            if previous.$name != current.$name {
+                changed.insert(PublicField::$variant);
+            }
+        };
+    }
+    field!(invocation_id, InvocationId);
+    field!(provider, Provider);
+    field!(status, Status);
+    field!(reason, Reason);
+    field!(cwd, Cwd);
+    field!(created_at, CreatedAt);
+    field!(updated_at, UpdatedAt);
+    field!(session, Session);
+    field!(metadata, Metadata);
+    field!(usage, Usage);
+    field!(repository, Repository);
+    changed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -313,15 +463,15 @@ mod tests {
     }
 
     #[test]
-    fn public_snapshot_matches_golden_schema() {
+    fn public_projection_is_field_selected_and_private_values_are_absent() {
         let now = Utc::now();
         let snapshot = InvocationSnapshot {
             schema_version: 1,
             revision: 1,
             invocation_id: InvocationId::new(),
             provider: "fixture".into(),
-            executable: "fixture".into(),
-            args: vec![],
+            executable: "PRIVATE_EXECUTABLE".into(),
+            args: vec!["PRIVATE_ARGUMENT".into()],
             cwd: "/fixture".into(),
             process: ProcessMetadata::default(),
             created_at: now,
@@ -338,17 +488,22 @@ mod tests {
             turn_generation: 0,
             completed_generation: None,
         };
-        let value = serde_json::to_value(snapshot).unwrap();
-        let mut keys = value
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        keys.sort();
-        let expected: Vec<String> =
-            serde_json::from_str(include_str!("../tests/golden/snapshot-keys.json")).unwrap();
-        assert_eq!(keys, expected);
+        let public = project_public(&snapshot, None);
+        let value = serde_json::to_string(&public).unwrap();
+        for private in [
+            "PRIVATE_EXECUTABLE",
+            "PRIVATE_ARGUMENT",
+            "process",
+            "multiplexer",
+            "capabilities",
+            "lifecycle",
+            "activity",
+            "turn_generation",
+        ] {
+            assert!(!value.contains(private));
+        }
+        assert_eq!(public.provider, "fixture");
+        assert_eq!(public.status, PublicStatus::Idle);
     }
     #[test]
     fn live_metadata_uses_stable_snake_case() {

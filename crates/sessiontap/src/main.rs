@@ -138,8 +138,8 @@ async fn setup(paths: &AppPaths, provider: Option<String>, action: SetupAction) 
 async fn status(paths: &AppPaths) -> Result<()> {
     require_daemon(paths).await?;
     match request(paths, Request::Status).await? {
-        Response::Status { invocations, .. } => {
-            println!("{}", serde_json::to_string(&invocations)?);
+        Response::Status { views, .. } => {
+            println!("{}", serde_json::to_string(&views)?);
             Ok(())
         }
         Response::Error(e) => bail!(e.message),
@@ -340,7 +340,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     } else {
         remove_tracking_environment(&mut command);
     }
-    for (k, v) in prep.environment {
+    for (k, v) in &prep.environment {
         command.env(k, v);
     }
     command.process_group(0);
@@ -369,7 +369,24 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         )
         .await;
     }
+    let side_channel_task = if tracked {
+        prep.side_channel.map(|side_channel| {
+            tokio::spawn(tail_provider_side_channel(
+                paths.clone(),
+                provider.to_owned(),
+                id.clone(),
+                credential.clone(),
+                side_channel,
+            ))
+        })
+    } else {
+        None
+    };
     let wait_result = wait_with_signal_forwarding(&mut child, pid).await;
+    if let Some(task) = side_channel_task {
+        task.abort();
+        let _ = task.await;
+    }
     if let Some(tty) = &terminal {
         let _ = nix::unistd::tcsetpgrp(tty, nix::unistd::getpgrp());
     }
@@ -392,6 +409,49 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         std::process::exit(code)
     } else {
         std::process::exit(128 + signal.unwrap_or(1))
+    }
+}
+
+async fn tail_provider_side_channel(
+    paths: AppPaths,
+    provider: String,
+    invocation_id: InvocationId,
+    credential: String,
+    path: PathBuf,
+) {
+    let config = Config::load(&paths.config_file()).unwrap_or_default();
+    let registry = AdapterRegistry::new(&config);
+    let Some((adapter, _)) = registry.resolve(&provider) else {
+        return;
+    };
+    let mut tail = sessiontap_adapters::qwen::QwenJsonlTail::new(path, 64 * 1024);
+    loop {
+        match tail.poll() {
+            Ok(values) => {
+                for value in values {
+                    if let Ok(mut normalized) = adapter.normalize(&invocation_id, &value) {
+                        normalized.event.provider = provider.clone();
+                        let _ = request(
+                            &paths,
+                            Request::HookIngest {
+                                provider: provider.clone(),
+                                invocation_id: invocation_id.clone(),
+                                credential: credential.clone(),
+                                event: Box::new(normalized.event),
+                                attention: normalized.attention,
+                                failure: normalized.failure,
+                            },
+                        )
+                        .await;
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!("sessiontap: provider side channel disabled: {error}");
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -435,7 +495,7 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let Ok(uuid) = uuid_parse(&id) else {
         return Ok(());
     };
-    let config = Config::default();
+    let config = Config::load(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let Some((adapter, _)) = registry.resolve(provider) else {
         return Ok(());
@@ -444,9 +504,12 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let Ok(value) = serde_json::from_slice(&raw) else {
         return Ok(());
     };
-    let Ok(normalized) = adapter.normalize(&uuid, &value) else {
+    let Ok(mut normalized) = adapter.normalize(&uuid, &value) else {
         return Ok(());
     };
+    // The adapter selects a dialect; the authenticated invocation selects the
+    // configured provider identity exposed by internal and public state.
+    normalized.event.provider = provider.to_owned();
     let future = request(
         paths,
         Request::HookIngest {

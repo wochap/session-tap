@@ -98,50 +98,38 @@ The stream is JSONL. The first line is a full snapshot; each later line is a
 single-invocation update:
 
 ```json
-{"type":"snapshot","schema_version":1,"revision":41,"invocations":[ ... ],"active_attention":{}}
-{"type":"update","schema_version":1,"revision":42,"snapshot":{ ... },"event":{"kind":"completed"}}
+{"type":"snapshot","schema_version":1,"revision":41,"views":[ ... ]}
+{"type":"update","schema_version":1,"revision":42,"delivery_id":"...","changed":["status","reason"],"view":{ ... }}
 ```
 
-Each invocation object:
+Each `PublicAgentView` contains only observer-facing normalized fields:
 
 | key | type | meaning |
 | --- | --- | --- |
-| `schema_version` | u32 | snapshot schema version |
-| `revision` | u64 | broker-global monotonic revision |
 | `invocation_id` | string (uuid) | unique wrapper invocation |
-| `provider` | string | `claude` / `codex` / `qwen` |
-| `executable` | string | resolved provider binary path |
-| `args` | string[] | redacted argv (secrets removed) |
+| `provider` | string | configured identity, including aliases |
+| `status` | enum | `running` / `blocked` / `idle` / `stopped` |
+| `reason` | object? | bounded blocked reason: `input` or `approval` |
 | `cwd` | string | launch working directory |
-| `process` | object | `{wrapper_pid, child_pid, start_identity, exit_code, signal}` |
 | `created_at`, `updated_at` | RFC 3339 | timestamps |
-| `lifecycle` | enum | `starting` / `alive` / `exited` / `lost` |
-| `activity` | enum | `unknown` / `idle` / `working` / `waiting_input` / `waiting_approval` |
-| `status` | enum | derived public status (below) |
-| `provider_session` | object? | `{id, name, generation, start_reason}` — ordered provider session |
-| `provider_metadata` | object? | optional sanitized `{model, effort, permission_mode, current_turn_id}` |
+| `session` | object? | sanitized `{id, name, start_reason}` |
+| `metadata` | object? | sanitized `{model, effort, permission_mode, current_turn_id}` |
 | `usage` | object? | optional verified `{input_tokens, output_tokens, context_tokens, context_window_percent}` |
 | `repository` | object? | `{root, branch, head, dirty}` |
-| `multiplexer` | object? | tmux: `{backend, socket, server_pid, session_id, session_name, window_id, window_index, pane_id, pane_tty, pane_pid}` |
-| `capabilities` | object | `{capture, send_input, usage}` |
-
-`status` is derived from `lifecycle` + `activity`:
-
-- `exited` / `lost` → `stopped`
-- `waiting_input` / `waiting_approval` → `blocked`
-- `working` → `running`
-- otherwise → `idle`
 
 ## Data handling
 
-Status fields are sanitized: no raw prompt, transcript, terminal output, hook
-body, or tool input is stored. Sinks are disabled by default; HTTP sinks require
+Public fields are sanitized: no credentials, executable arguments, process or
+multiplexer identities, reducer state, raw prompt, transcript, hook body, or
+tool input is serialized. Sinks are disabled by default; HTTP sinks require
 HTTPS except loopback development receivers. See `docs/cli.md` for sink and
 custom-adapter configuration, and `docs/smoke-tests.md` for live provider
 testing.
 
-Snapshot envelopes are non-notifying baselines and include the local
-`active_attention` map. Update envelopes include an effective `event` cause.
+Snapshot envelopes are non-notifying baselines. Updates contain the complete
+resulting view and a deterministic non-empty set of changed public field paths.
+Observer-facing fields such as cwd, repository paths, session names, and
+bounded reasons can still be sensitive and require appropriate access control.
 
 ## Provenance
 

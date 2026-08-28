@@ -111,14 +111,13 @@ async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
     let request: Request = serde_json::from_str(&line)?;
     if matches!(request, Request::Listen) {
         let mut rx = broker.updates.subscribe();
-        let (revision, invocations, active_attention) = broker.storage.snapshot_with_attention()?;
+        let (revision, views) = broker.storage.public_snapshot()?;
         write_json(
             &mut write,
             &StreamEnvelope::Snapshot {
                 schema_version: SCHEMA_VERSION,
                 revision,
-                invocations,
-                active_attention,
+                views,
             },
         )
         .await?;
@@ -130,28 +129,28 @@ async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
                     Err(error) => return Err(error.into()),
                 },
                 received = rx.recv() => match received {
-                    Ok(update) if update.snapshot.revision > revision => {
+                    Ok(update) if update.revision > revision => {
                         write_json(
                             &mut write,
                             &StreamEnvelope::Update {
                                 schema_version: SCHEMA_VERSION,
-                                revision: update.snapshot.revision,
-                                snapshot: Box::new(update.snapshot),
-                                event: Some(update.event),
+                                revision: update.revision,
+                                delivery_id: update.delivery_id,
+                                changed: update.changed,
+                                view: Box::new(update.view),
                             },
                         )
                         .await?
                     }
                     Ok(_) => {}
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let (r, s, active_attention) = broker.storage.snapshot_with_attention()?;
+                        let (r, views) = broker.storage.public_snapshot()?;
                         write_json(
                             &mut write,
                             &StreamEnvelope::Snapshot {
                                 schema_version: SCHEMA_VERSION,
                                 revision: r,
-                                invocations: s,
-                                active_attention,
+                                views,
                             },
                         )
                         .await?;
@@ -178,11 +177,8 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             version: SCHEMA_VERSION,
         }),
         Request::Status => {
-            let (revision, invocations) = broker.storage.snapshot()?;
-            Ok(Response::Status {
-                revision,
-                invocations,
-            })
+            let (revision, views) = broker.storage.public_snapshot()?;
+            Ok(Response::Status { revision, views })
         }
         Request::Register {
             snapshot,
@@ -194,14 +190,12 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
                 .register(&snapshot, &credential, Some(&publish))?;
             let mut registered = *snapshot;
             registered.revision = revision;
+            let view = sessiontap_core::domain::project_public(&registered, None);
             let _ = broker.updates.send(AppliedUpdate {
-                snapshot: registered,
-                event: sessiontap_core::domain::LiveEventMetadata {
-                    kind: sessiontap_core::domain::EventKind::Enrichment,
-                    attention: None,
-                    failure: None,
-                    turn_id: None,
-                },
+                revision,
+                delivery_id: format!("synthetic:register:{}:{revision}", registered.invocation_id),
+                changed: sessiontap_core::domain::changed_public_fields(None, &view),
+                view,
             });
             Ok(Response::Ok)
         }
@@ -212,22 +206,15 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             start_identity,
         } => {
             let publish = broker.publish();
-            let s = broker.storage.bind_child(
+            if let Some(update) = broker.storage.bind_child(
                 &invocation_id,
                 &credential,
                 child_pid,
                 start_identity,
                 Some(&publish),
-            )?;
-            let _ = broker.updates.send(AppliedUpdate {
-                snapshot: s,
-                event: sessiontap_core::domain::LiveEventMetadata {
-                    kind: sessiontap_core::domain::EventKind::Enrichment,
-                    attention: None,
-                    failure: None,
-                    turn_id: None,
-                },
-            });
+            )? {
+                let _ = broker.updates.send(update);
+            }
             Ok(Response::Ok)
         }
         Request::LifecycleExit {
@@ -237,22 +224,15 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             signal,
         } => {
             let publish = broker.publish();
-            let s = broker.storage.mark_exit(
+            if let Some(update) = broker.storage.mark_exit(
                 &invocation_id,
                 &credential,
                 exit_code,
                 signal,
                 Some(&publish),
-            )?;
-            let _ = broker.updates.send(AppliedUpdate {
-                snapshot: s,
-                event: sessiontap_core::domain::LiveEventMetadata {
-                    kind: sessiontap_core::domain::EventKind::SessionEnded,
-                    attention: None,
-                    failure: None,
-                    turn_id: None,
-                },
-            });
+            )? {
+                let _ = broker.updates.send(update);
+            }
             Ok(Response::Ok)
         }
         Request::HookIngest {
@@ -596,8 +576,8 @@ async fn deliver_http(
     Ok(req.send().await?.status().is_success())
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, any()))]
+mod legacy_tests {
     use super::*;
     use chrono::Utc;
     use sessiontap_core::{

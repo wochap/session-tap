@@ -73,12 +73,12 @@ payload. Input larger than 32 KiB is identified by a lower-bound size and is
 not truncated and presented as complete. Warnings and drop notices use stderr;
 JSONL records alone use stdout.
 
-`listen` snapshots contain a non-notifying `active_attention` baseline keyed by
-invocation ID. Updates retain `snapshot` and add optional `event` metadata with
-a snake-case `kind`, bounded attention, and an allowlisted failure category.
-Current daemons always populate it; clients accept omission by older daemons.
-The additive protocol remains schema version 1. Notify only on post-baseline
-updates, never on initial or lag-recovery snapshots.
+`status` returns retained `PublicAgentView` values. `listen` begins with a
+non-notifying `views` baseline and then emits complete `view` updates with a
+stable `delivery_id` and deterministic non-empty `changed` public field set.
+Internal lifecycle, activity, event kinds, and reducer bookkeeping are not
+part of either observation protocol. Notify only on post-baseline updates,
+never on initial or lag-recovery snapshots.
 
 Attention prefers a provider description, safe tool summary, bounded command
 or first question, tool name, then generic input text. It is flattened to one
@@ -86,10 +86,10 @@ line and capped at 160 characters and 512 UTF-8 bytes. Only the current object
 is stored locally and it is cleared when work resumes or terminates. Arbitrary
 command redaction is best effort and cannot cover every credential syntax.
 
-When launched inside tmux, snapshots contain descriptive socket/session/window/
-pane metadata. Capture and input are local-only capabilities; the broker must
-resolve an invocation and revalidate the server and pane before control. Input
-is delivered through a tmux buffer without shell evaluation.
+When launched inside tmux, the daemon retains socket/session/window/pane data
+only for local control. Public status, listen, sink, and hub payloads never
+contain it. Capture and input revalidate the server and pane locally; input is
+delivered through a tmux buffer without shell evaluation.
 
 Sinks are disabled by default. A debug stdout sink writes on the daemon's
 stdout, never the provider terminal stream. HTTP sinks require HTTPS except for
@@ -126,9 +126,11 @@ Failures are retried from the durable outbox. Each sink backlog is capped at
 without bound; local normalized state continues to commit after the cap is
 reached. Credential files must not be symlinks and must have no group/other
 permissions. Provider hooks fail open and produce no provider-visible output.
-Live metadata, active attention, commands, questions, raw failure details,
-prompts, transcripts, and assistant messages never enter stdout or HTTP sink
-payloads.
+Credentials, process-control data, multiplexer fields, internal reducer state,
+raw failures, prompts, transcripts, assistant messages, and arbitrary provider
+fields never enter stdout or HTTP sink payloads. Public cwd, repository paths,
+session names, metadata, usage, and bounded blocked reasons remain potentially
+sensitive observer data.
 
 ## Shell completions
 

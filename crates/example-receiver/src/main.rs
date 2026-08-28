@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use sessiontap_core::protocol::SinkEvent;
+use sessiontap_core::protocol::{HUB_SCHEMA_VERSION, SourceEnvelope};
 use std::{collections::HashSet, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -55,16 +55,33 @@ async fn handle(mut stream: TcpStream, seen: Arc<Mutex<HashSet<String>>>) -> Res
         }
         bytes.extend_from_slice(&chunk[..count]);
     }
-    let event: SinkEvent = serde_json::from_slice(&bytes[split..split + content_length])?;
-    if event.schema_version != 1 {
+    let envelope: SourceEnvelope = serde_json::from_slice(&bytes[split..split + content_length])?;
+    let (schema_version, delivery_key) = match &envelope {
+        SourceEnvelope::Snapshot {
+            schema_version,
+            source,
+            revision,
+            ..
+        } => (
+            *schema_version,
+            format!("snapshot:{}:{revision}", source.id),
+        ),
+        SourceEnvelope::Update {
+            schema_version,
+            source_id,
+            delivery_id,
+            ..
+        } => (*schema_version, format!("update:{source_id}:{delivery_id}")),
+    };
+    if schema_version != HUB_SCHEMA_VERSION {
         stream
             .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
             .await?;
         return Ok(());
     }
     let mut seen = seen.lock().await;
-    if accept_once(&mut seen, &event.event_id) {
-        println!("{}", serde_json::to_string(&event)?);
+    if accept_once(&mut seen, &delivery_key) {
+        println!("{}", serde_json::to_string(&envelope)?);
     }
     stream
         .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")

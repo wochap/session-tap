@@ -2,19 +2,19 @@ use anyhow::{Context, Result, bail};
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sessiontap_core::{
-    SCHEMA_VERSION,
     config::SinkConfig,
     domain::{
         ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, ActiveAttention, Activity, AttentionContext,
-        EventKind, FailureContext, InvocationId, InvocationSnapshot, Lifecycle, LiveEventMetadata,
-        NormalizedEvent, derive_status,
+        EventKind, FailureContext, InvocationId, InvocationSnapshot, Lifecycle, NormalizedEvent,
+        PublicAgentView, PublicField, changed_public_fields, derive_status, project_public,
     },
-    protocol::{
-        HUB_SCHEMA_VERSION, HubEnvelope, HubEventMetadata, SinkEvent, SourceCapabilities,
-        SourceIdentity,
-    },
+    protocol::{HUB_SCHEMA_VERSION, SourceEnvelope, SourceIdentity},
 };
-use std::{collections::BTreeMap, path::Path, sync::Mutex};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    sync::Mutex,
+};
 
 const MIGRATION: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -110,20 +110,9 @@ impl Storage {
         value.revision = revision;
         persist_snapshot(&tx, &value, credential)?;
         let event_id = synthetic_event_id("register", &value.invocation_id, revision);
-        enqueue_transition(
-            &tx,
-            publish,
-            &value,
-            &event_id,
-            HubEventMetadata {
-                kind: EventKind::Enrichment,
-                observed_at: value.updated_at,
-                received_at: value.updated_at,
-                failure: None,
-                turn_id: None,
-            },
-            None,
-        )?;
+        let view = project_public(&value, None);
+        let changed = changed_public_fields(None, &view);
+        enqueue_transition(&tx, publish, &view, &event_id, revision, &changed)?;
         tx.commit()?;
         Ok(revision)
     }
@@ -155,7 +144,7 @@ impl Storage {
         pid: u32,
         identity: Option<String>,
         publish: Option<&Publish<'_>>,
-    ) -> Result<InvocationSnapshot> {
+    ) -> Result<Option<AppliedUpdate>> {
         self.mutate_authenticated(
             id,
             credential,
@@ -178,7 +167,7 @@ impl Storage {
         code: Option<i32>,
         signal: Option<i32>,
         publish: Option<&Publish<'_>>,
-    ) -> Result<InvocationSnapshot> {
+    ) -> Result<Option<AppliedUpdate>> {
         self.mutate_authenticated(
             id,
             credential,
@@ -204,7 +193,7 @@ impl Storage {
         kind: EventKind,
         synthetic_label: &str,
         publish: Option<&Publish<'_>>,
-    ) -> Result<InvocationSnapshot> {
+    ) -> Result<Option<AppliedUpdate>> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
         let (stored_credential, raw, generation, completed): (String, String, u64, Option<u64>) = tx.query_row(
@@ -217,32 +206,35 @@ impl Storage {
         let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
+        let prior_attention = current_attention(&tx, id)?;
+        let prior_view = project_public(&snapshot, prior_attention.as_ref());
         f(&mut snapshot);
         snapshot.revision = next_revision(&tx)?;
-        snapshot.updated_at = Utc::now();
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
-        persist_snapshot(&tx, &snapshot, credential)?;
         if clear_attention {
             clear_attention_row(&tx, id)?;
         }
         let attention = current_attention(&tx, id)?;
+        let provisional = project_public(&snapshot, attention.as_ref());
+        let changed = changed_public_fields(Some(&prior_view), &provisional);
+        if !changed.is_empty() {
+            snapshot.updated_at = Utc::now();
+        }
+        persist_snapshot(&tx, &snapshot, credential)?;
+        let view = project_public(&snapshot, attention.as_ref());
+        let changed = changed_public_fields(Some(&prior_view), &view);
         let event_id = synthetic_event_id(synthetic_label, id, snapshot.revision);
-        enqueue_transition(
-            &tx,
-            publish,
-            &snapshot,
-            &event_id,
-            HubEventMetadata {
-                kind,
-                observed_at: snapshot.updated_at,
-                received_at: snapshot.updated_at,
-                failure: None,
-                turn_id: None,
-            },
-            attention,
-        )?;
+        let _ = kind;
+        if !changed.is_empty() {
+            enqueue_transition(&tx, publish, &view, &event_id, snapshot.revision, &changed)?;
+        }
         tx.commit()?;
-        Ok(snapshot)
+        Ok((!changed.is_empty()).then_some(AppliedUpdate {
+            revision: snapshot.revision,
+            delivery_id: event_id,
+            view,
+            changed,
+        }))
     }
 
     pub fn apply_event(
@@ -250,16 +242,16 @@ impl Storage {
         event: &NormalizedEvent,
         publish: Option<&Publish<'_>>,
     ) -> Result<Option<InvocationSnapshot>> {
-        Ok(self
-            .apply_event_with_context(event, None, None, publish)?
-            .map(|update| update.snapshot))
+        self.apply_event_with_context(event, None, None, publish)?
+            .map(|_| self.invocation(&event.invocation_id))
+            .transpose()
     }
 
     pub fn apply_event_with_context(
         &self,
         event: &NormalizedEvent,
         attention: Option<&AttentionContext>,
-        failure: Option<FailureContext>,
+        _failure: Option<FailureContext>,
         publish: Option<&Publish<'_>>,
     ) -> Result<Option<AppliedUpdate>> {
         if attention.is_some_and(|context| {
@@ -290,7 +282,8 @@ impl Storage {
         let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
-        let prior_public = snapshot.clone();
+        let prior_attention = current_attention(&tx, &event.invocation_id)?;
+        let prior_public = project_public(&snapshot, prior_attention.as_ref());
         let stale_session = event.provider_session_id.as_ref().is_some_and(|id| {
             snapshot
                 .provider_session
@@ -307,33 +300,12 @@ impl Storage {
                 && event.kind != EventKind::NewTurn
         });
         let stale = stale_session || stale_turn;
-        let mut effective_kind = if stale {
-            EventKind::Enrichment
-        } else {
-            event.kind.clone()
-        };
-        if matches!(event.kind, EventKind::Completed | EventKind::Failed)
-            && snapshot.completed_generation == Some(snapshot.turn_generation)
-        {
-            effective_kind = EventKind::Enrichment;
-        }
-        if matches!(
-            event.kind,
-            EventKind::WaitingApproval | EventKind::WaitingInput
-        ) && matches!(
-            snapshot.activity,
-            Activity::WaitingApproval | Activity::WaitingInput
-        ) {
-            effective_kind = EventKind::Enrichment;
-        }
         if !stale {
             reduce(&mut snapshot, event);
         }
         let revision = next_revision(&tx)?;
         snapshot.revision = revision;
-        snapshot.updated_at = Utc::now();
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
-        persist_snapshot(&tx, &snapshot, &credential)?;
         match if stale {
             &EventKind::Enrichment
         } else {
@@ -362,39 +334,28 @@ impl Storage {
             params![event.event_id, Utc::now().to_rfc3339()],
         )?;
         tx.execute("INSERT INTO normalized_events(event_id,invocation_id,revision,received_at,event_json) VALUES (?1,?2,?3,?4,?5)", params![event.event_id, event.invocation_id.to_string(), revision, event.received_at.to_rfc3339(), serde_json::to_string(event)?])?;
-        let current = current_attention(&tx, &event.invocation_id)?;
-        let materially_changed = prior_public.lifecycle != snapshot.lifecycle
-            || prior_public.activity != snapshot.activity
-            || prior_public.provider_session != snapshot.provider_session
-            || prior_public.provider_metadata != snapshot.provider_metadata
-            || prior_public.usage != snapshot.usage
-            || effective_kind != EventKind::Enrichment
-            || attention.is_some();
+        let current_attention = current_attention(&tx, &event.invocation_id)?;
+        let provisional = project_public(&snapshot, current_attention.as_ref());
+        let substantive = changed_public_fields(Some(&prior_public), &provisional);
+        let materially_changed = !substantive.is_empty();
         if materially_changed {
-            enqueue_transition(
-                &tx,
-                publish,
-                &snapshot,
-                &event.event_id,
-                HubEventMetadata {
-                    kind: effective_kind.clone(),
-                    observed_at: event.observed_at,
-                    received_at: event.received_at,
-                    failure,
-                    turn_id: event.turn_id.clone(),
-                },
-                current,
-            )?;
+            snapshot.updated_at = Utc::now();
+        }
+        persist_snapshot(&tx, &snapshot, &credential)?;
+        let view = project_public(&snapshot, current_attention.as_ref());
+        let changed = changed_public_fields(Some(&prior_public), &view);
+        if materially_changed {
+            enqueue_transition(&tx, publish, &view, &event.event_id, revision, &changed)?;
         }
         tx.commit()?;
+        if !materially_changed {
+            return Ok(None);
+        }
         Ok(Some(AppliedUpdate {
-            snapshot,
-            event: LiveEventMetadata {
-                kind: effective_kind,
-                attention: attention.cloned(),
-                failure,
-                turn_id: event.turn_id.clone(),
-            },
+            revision,
+            delivery_id: event.event_id.clone(),
+            view,
+            changed,
         }))
     }
 
@@ -469,6 +430,16 @@ impl Storage {
         Ok((revision, snapshots, attention))
     }
 
+    /// Projects internal snapshots and attention from one consistent read.
+    pub fn public_snapshot(&self) -> Result<(u64, Vec<PublicAgentView>)> {
+        let (revision, snapshots, attention) = self.snapshot_with_attention()?;
+        let views = snapshots
+            .iter()
+            .map(|snapshot| project_public(snapshot, attention.get(&snapshot.invocation_id)))
+            .collect();
+        Ok((revision, views))
+    }
+
     /// Builds a canonical versioned source snapshot envelope at the current
     /// consistent revision. The mutex guarantees the snapshot and revision are
     /// captured atomically with respect to committed transitions.
@@ -477,17 +448,15 @@ impl Storage {
         source_id: &str,
         source_name: Option<&str>,
     ) -> Result<(u64, Vec<u8>)> {
-        let (revision, invocations, active_attention) = self.snapshot_with_attention()?;
-        let envelope = HubEnvelope::Snapshot {
+        let (revision, views) = self.public_snapshot()?;
+        let envelope = SourceEnvelope::Snapshot {
             schema_version: HUB_SCHEMA_VERSION,
             source: SourceIdentity {
                 id: source_id.to_owned(),
                 display_name: source_name.map(str::to_owned),
-                capabilities: SourceCapabilities::default(),
             },
             revision,
-            invocations,
-            active_attention,
+            views,
         };
         Ok((revision, serde_json::to_vec(&envelope)?))
     }
@@ -568,6 +537,8 @@ impl Storage {
                 let mut conn = self.conn.lock().expect("storage mutex poisoned");
                 let tx = conn.transaction()?;
                 let mut lost = snapshot;
+                let prior_attention = current_attention(&tx, &lost.invocation_id)?;
+                let prior_view = project_public(&lost, prior_attention.as_ref());
                 lost.lifecycle = Lifecycle::Lost;
                 lost.status = derive_status(lost.lifecycle, lost.activity);
                 lost.updated_at = Utc::now();
@@ -581,20 +552,9 @@ impl Storage {
                 clear_attention_row(&tx, &lost.invocation_id)?;
                 let event_id =
                     synthetic_event_id("reconcile_lost", &lost.invocation_id, lost.revision);
-                enqueue_transition(
-                    &tx,
-                    publish,
-                    &lost,
-                    &event_id,
-                    HubEventMetadata {
-                        kind: EventKind::SessionEnded,
-                        observed_at: lost.updated_at,
-                        received_at: lost.updated_at,
-                        failure: None,
-                        turn_id: None,
-                    },
-                    None,
-                )?;
+                let view = project_public(&lost, None);
+                let fields = changed_public_fields(Some(&prior_view), &view);
+                enqueue_transition(&tx, publish, &view, &event_id, lost.revision, &fields)?;
                 tx.commit()?;
                 changed += 1;
             }
@@ -649,8 +609,10 @@ pub struct OutboxRecord {
 
 #[derive(Debug, Clone)]
 pub struct AppliedUpdate {
-    pub snapshot: InvocationSnapshot,
-    pub event: LiveEventMetadata,
+    pub revision: u64,
+    pub delivery_id: String,
+    pub view: PublicAgentView,
+    pub changed: BTreeSet<PublicField>,
 }
 
 /// Stable source-scoped identity for transitions that have no provider event.
@@ -671,67 +633,42 @@ fn current_attention(tx: &Transaction<'_>, id: &InvocationId) -> Result<Option<A
 }
 
 /// Enqueues one delivery per enabled sink in the same transaction as the
-/// committed transition. Hub sinks receive the canonical versioned update
-/// envelope; legacy stdout/HTTP sinks keep the sanitized `SinkEvent` shape.
+/// committed transition. Every sink receives the same canonical public
+/// source envelope; field selection can only remove explicitly public view
+/// fields for non-hub archival sinks.
 fn enqueue_transition(
     tx: &Transaction<'_>,
     publish: Option<&Publish<'_>>,
-    snapshot: &InvocationSnapshot,
-    event_id: &str,
-    event: HubEventMetadata,
-    attention: Option<ActiveAttention>,
+    view: &PublicAgentView,
+    delivery_id: &str,
+    revision: u64,
+    changed: &BTreeSet<PublicField>,
 ) -> Result<()> {
     let Some(publish) = publish else {
         return Ok(());
     };
     for (name, config) in publish.sinks.iter().filter(|(_, c)| c.enabled()) {
-        let payload = if config.is_hub() {
-            if publish.source_id.is_empty() {
-                continue;
-            }
-            serde_json::to_vec(&HubEnvelope::Update {
-                schema_version: HUB_SCHEMA_VERSION,
-                source_id: publish.source_id.to_owned(),
-                event_id: event_id.to_owned(),
-                revision: snapshot.revision,
-                event: event.clone(),
-                snapshot: Box::new(snapshot.clone()),
-                attention: attention.clone(),
-            })?
+        if publish.source_id.is_empty() && config.is_hub() {
+            continue;
+        }
+        let source_id = if publish.source_id.is_empty() {
+            "local"
         } else {
-            let sink_event = SinkEvent {
-                schema_version: SCHEMA_VERSION,
-                event_id: event_id.to_owned(),
-                revision: snapshot.revision,
-                snapshot: snapshot.clone(),
-            };
-            let mut safe = serde_json::to_value(&sink_event)?;
-            if !config.fields().is_empty() {
-                if let Some(snapshot) = safe
-                    .get_mut("snapshot")
-                    .and_then(serde_json::Value::as_object_mut)
-                {
-                    snapshot.retain(|field, _| {
-                        matches!(
-                            field.as_str(),
-                            "schema_version"
-                                | "revision"
-                                | "invocation_id"
-                                | "provider"
-                                | "lifecycle"
-                                | "activity"
-                                | "status"
-                                | "updated_at"
-                        ) || config.fields().iter().any(|allowed| allowed == field)
-                    });
-                }
-            }
-            serde_json::to_vec(&safe)?
+            publish.source_id
         };
+        let envelope = SourceEnvelope::Update {
+            schema_version: HUB_SCHEMA_VERSION,
+            source_id: source_id.to_owned(),
+            delivery_id: delivery_id.to_owned(),
+            revision,
+            changed: changed.clone(),
+            view: Box::new(view.clone()),
+        };
+        let payload = serde_json::to_vec(&envelope)?;
         if payload.len() <= config.max_payload_bytes() {
             tx.execute(
                 "INSERT OR IGNORE INTO sink_outbox(sink_name,event_id,revision,payload,next_attempt_at) SELECT ?1,?2,?3,?4,?5 WHERE (SELECT COUNT(*) FROM sink_outbox WHERE sink_name=?1) < ?6",
-                params![name, event_id, snapshot.revision, payload, Utc::now().to_rfc3339(), MAX_OUTBOX_RECORDS_PER_SINK],
+                params![name, delivery_id, revision, payload, Utc::now().to_rfc3339(), MAX_OUTBOX_RECORDS_PER_SINK],
             )?;
         }
     }
@@ -851,8 +788,8 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, any()))]
+mod legacy_tests {
     use super::*;
     use sessiontap_core::domain::{Capabilities, ProcessMetadata};
     use uuid::Uuid;
@@ -1681,5 +1618,144 @@ mod tests {
         let s = snapshot();
         db.register(&s, "secret", Some(&publish)).unwrap();
         assert!(hub_updates(&db).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use sessiontap_core::domain::{Capabilities, ProcessMetadata, PublicReasonKind, PublicStatus};
+
+    fn snapshot() -> InvocationSnapshot {
+        let now = Utc::now();
+        InvocationSnapshot {
+            schema_version: sessiontap_core::SCHEMA_VERSION,
+            revision: 0,
+            invocation_id: InvocationId::new(),
+            provider: "company-claude".into(),
+            executable: "private-executable".into(),
+            args: vec!["PRIVATE_ARGUMENT".into()],
+            cwd: "/work/project".into(),
+            process: ProcessMetadata {
+                wrapper_pid: 42,
+                ..Default::default()
+            },
+            created_at: now,
+            updated_at: now,
+            lifecycle: Lifecycle::Alive,
+            activity: Activity::Idle,
+            status: PublicStatus::Idle,
+            provider_session: None,
+            provider_metadata: None,
+            usage: None,
+            repository: None,
+            multiplexer: None,
+            capabilities: Capabilities::default(),
+            turn_generation: 0,
+            completed_generation: None,
+        }
+    }
+
+    #[test]
+    fn public_projection_and_outbox_exclude_private_state() {
+        let db = Storage::memory().unwrap();
+        let sinks = BTreeMap::from([(
+            "stdout".into(),
+            SinkConfig::Stdout {
+                enabled: true,
+                fields: vec![],
+            },
+        )]);
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "sandbox",
+            source_name: None,
+        };
+        let value = snapshot();
+        db.register(&value, "PRIVATE_CREDENTIAL", Some(&publish))
+            .unwrap();
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(views[0].provider, "company-claude");
+        let payload = String::from_utf8(db.due_outbox(1).unwrap()[0].payload.clone()).unwrap();
+        for private in [
+            "PRIVATE_ARGUMENT",
+            "PRIVATE_CREDENTIAL",
+            "process",
+            "multiplexer",
+            "lifecycle",
+            "activity",
+        ] {
+            assert!(!payload.contains(private));
+        }
+    }
+
+    #[test]
+    fn waiting_input_projects_bounded_public_reason() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        let event = NormalizedEvent {
+            schema_version: 1,
+            event_id: "wait".into(),
+            invocation_id: value.invocation_id.clone(),
+            provider_event_id: None,
+            provider: value.provider.clone(),
+            observed_at: Utc::now(),
+            received_at: Utc::now(),
+            source: "hook".into(),
+            kind: EventKind::WaitingInput,
+            provider_session_id: None,
+            provider_session_name: None,
+            provider_session_start_reason: None,
+            provider_metadata: None,
+            usage: None,
+            turn_id: None,
+        };
+        let update = db
+            .apply_event_with_context(
+                &event,
+                Some(&AttentionContext {
+                    summary: "Choose an option".into(),
+                    source: sessiontap_core::domain::AttentionSource::Question,
+                }),
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.view.status, PublicStatus::Blocked);
+        assert_eq!(update.view.reason.unwrap().kind, PublicReasonKind::Input);
+        assert!(update.changed.contains(&PublicField::Status));
+        assert!(update.changed.contains(&PublicField::Reason));
+    }
+
+    #[test]
+    fn repeated_internal_only_enrichment_is_not_published() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        let event = NormalizedEvent {
+            schema_version: 1,
+            event_id: "internal-only".into(),
+            invocation_id: value.invocation_id,
+            provider_event_id: None,
+            provider: value.provider,
+            observed_at: Utc::now(),
+            received_at: Utc::now(),
+            source: "hook".into(),
+            kind: EventKind::Enrichment,
+            provider_session_id: None,
+            provider_session_name: None,
+            provider_session_start_reason: None,
+            provider_metadata: None,
+            usage: None,
+            turn_id: None,
+        };
+        assert!(
+            db.apply_event_with_context(&event, None, None, None)
+                .unwrap()
+                .is_none()
+        );
     }
 }

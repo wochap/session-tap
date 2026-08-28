@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use sessiontap_core::domain::{ActiveAttention, InvocationSnapshot};
-use sessiontap_core::protocol::HubEventMetadata;
+use sessiontap_core::domain::{PublicAgentView, PublicField};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use crate::ingest::HubPublication;
-use crate::store::{HubStore, MergedInvocation, SourceView};
+use crate::store::{HubStore, MergedAgent, SourceView};
 
 /// One merged live envelope per accepted update, after the initial baseline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,16 +19,15 @@ pub enum HubStreamEnvelope {
     Snapshot {
         hub_revision: u64,
         sources: Vec<SourceView>,
-        invocations: Vec<MergedInvocation>,
+        agents: Vec<MergedAgent>,
     },
     Update {
         hub_revision: u64,
         source_id: String,
-        event_id: String,
-        event: HubEventMetadata,
-        snapshot: Box<InvocationSnapshot>,
-        attention: Option<ActiveAttention>,
-        changed: Vec<String>,
+        delivery_id: String,
+        source_revision: u64,
+        changed: BTreeSet<PublicField>,
+        view: Box<PublicAgentView>,
     },
 }
 
@@ -56,13 +55,13 @@ pub async fn serve_listener(
     if !matches!(request, HubRequest::Listen) {
         bail!("hub listener accepts only listen requests");
     }
-    let (mut since, sources, invocations) = store.merged()?;
+    let (mut since, sources, agents) = store.merged()?;
     write_json(
         &mut write,
         &HubStreamEnvelope::Snapshot {
             hub_revision: since,
             sources,
-            invocations,
+            agents,
         },
     )
     .await?;
@@ -81,38 +80,37 @@ pub async fn serve_listener(
                         &HubStreamEnvelope::Update {
                             hub_revision: update.hub_revision,
                             source_id: update.source_id,
-                            event_id: update.event_id,
-                            event: update.event,
-                            snapshot: Box::new(update.snapshot),
-                            attention: update.attention,
+                            delivery_id: update.delivery_id,
+                            source_revision: update.source_revision,
                             changed: update.changed,
+                            view: Box::new(update.view),
                         },
                     )
                     .await?;
                 }
                 Ok(HubPublication::SnapshotApplied { hub_revision }) if hub_revision > since => {
-                    let (hub_revision, sources, invocations) = store.merged()?;
+                    let (hub_revision, sources, agents) = store.merged()?;
                     since = hub_revision;
                     write_json(
                         &mut write,
                         &HubStreamEnvelope::Snapshot {
                             hub_revision,
                             sources,
-                            invocations,
+                            agents,
                         },
                     )
                     .await?;
                 }
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    let (hub_revision, sources, invocations) = store.merged()?;
+                    let (hub_revision, sources, agents) = store.merged()?;
                     since = hub_revision;
                     write_json(
                         &mut write,
                         &HubStreamEnvelope::Snapshot {
                             hub_revision,
                             sources,
-                            invocations,
+                            agents,
                         },
                     )
                     .await?;

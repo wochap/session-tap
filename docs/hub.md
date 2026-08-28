@@ -91,18 +91,17 @@ anywhere without a trusted list.
 - If the hub has no baseline for a source (fresh hub, wiped storage, newly
   enabled sink), it answers updates with `409 snapshot_required` and the
   daemon re-establishes the snapshot automatically.
-- Delivery is at-least-once. The hub deduplicates by `(source_id, event_id)`
+- Delivery is at-least-once. The hub deduplicates by `(source_id, delivery_id)`
   and acknowledges duplicates and stale revisions without changing state, so
   lost acknowledgements never double-apply or double-trigger scripts.
 - Registration, child binding, normalized hook changes, lifecycle exit, and
   reconciliation are all sink-visible when they change public state.
 
-Hub updates carry the complete resulting invocation snapshot, normalized event
-metadata with optional turn identity and categorical failure, and the current attention object
-— an explicit `null` when attention was cleared. Raw hook bodies, transcripts,
-prompts, tool inputs, and credentials never enter hub envelopes. Attention
-summaries are bounded derived text (160 chars / 512 bytes); enabling a hub
-sink is explicit disclosure of that summary to the receiver.
+Hub updates carry only the complete resulting `PublicAgentView` and typed
+changed public fields. The hub never receives or interprets provider hooks,
+internal events, lifecycle/activity state, credentials, process-control data,
+or multiplexer metadata. Bounded blocked reasons and fields such as cwd,
+repository paths, and session names remain potentially sensitive.
 
 ## Token authentication
 
@@ -126,20 +125,19 @@ subscriptions:
     match:
       sources: [sandbox]
       providers: [codex, claude]
-      events: [waiting_input, waiting_approval]
       statuses: [blocked]
-      lifecycles: [alive]
+      reasons: [input, approval]
       repositories: [/home/me/projects/agents]
-    changes: [status, attention]
+    changes: [status, reason]
     commands:
       - [notify-send, "Agent is waiting"]
       - [/home/me/bin/agent-page.sh]
 ```
 
 `changes` compares the previously persisted state with the accepted resulting
-state. Canonical field names are: `status`, `lifecycle`, `activity`, `usage`,
-`provider_session`, `provider_metadata`, `repository`, `multiplexer`, `process`, `attention`. A
-subscription with `changes: [status, attention]` runs when either field
+state. Canonical field names are: `invocation_id`, `provider`, `status`,
+`reason`, `cwd`, `created_at`, `updated_at`, `session`, `metadata`, `usage`, and
+`repository`. A subscription with `changes: [status, reason]` runs when either field
 materially changed; it does not run for unrelated enrichment such as a usage
 update. A previously unknown invocation reports every canonical field as
 changed.
@@ -148,7 +146,7 @@ Commands are argument arrays executed directly, without shell evaluation. An
 argument containing spaces or metacharacters is passed as one literal process
 argument. Subscriptions are evaluated only after an update is durably
 accepted; rejected, stale, and transport-duplicate deliveries never invoke
-commands, and each `(source_id, event_id)` runs matching subscriptions at most
+commands, and each `(source_id, delivery_id)` runs matching subscriptions at most
 once.
 
 ### Script input contract
@@ -161,11 +159,10 @@ versioned update shape delivered by the source):
   "type": "update",
   "schema_version": 1,
   "source_id": "sandbox",
-  "event_id": "...",
+  "delivery_id": "...",
   "revision": 42,
-  "event": {"kind": "waiting_input", "observed_at": "...", "received_at": "..."},
-  "snapshot": { "invocation_id": "...", "provider": "codex", "status": "blocked", "...": "..." },
-  "attention": {"kind": "waiting_input", "context": {"summary": "...", "source": "question"}}
+  "changed": ["status", "reason"],
+  "view": { "invocation_id": "...", "provider": "codex", "status": "blocked", "reason": {"kind":"input","summary":"..."} }
 }
 ```
 
@@ -175,22 +172,21 @@ conveniences, not an alternative schema — read stdin for anything richer:
 | Variable | Meaning |
 | --- | --- |
 | `SESSIONTAP_SOURCE` | Source ID (`host`, `sandbox`, ...) |
-| `SESSIONTAP_EVENT_ID` | Stable delivery identity |
+| `SESSIONTAP_DELIVERY_ID` | Stable delivery identity |
 | `SESSIONTAP_HUB_REVISION` | Hub revision of this accepted update |
-| `SESSIONTAP_EVENT` | Normalized event kind (`waiting_input`, ...) |
+| `SESSIONTAP_SOURCE_REVISION` | Source revision of this accepted update |
 | `SESSIONTAP_PROVIDER` | Provider (`claude`, `codex`, `qwen`, ...) |
 | `SESSIONTAP_STATUS` | Public status (`running`, `idle`, `blocked`, `stopped`) |
-| `SESSIONTAP_LIFECYCLE` | `starting`, `alive`, `exited`, `lost` |
 | `SESSIONTAP_INVOCATION_ID` | Invocation UUID |
 | `SESSIONTAP_CHANGED` | Comma-separated changed canonical fields |
 | `SESSIONTAP_SESSION_ID` / `SESSIONTAP_SESSION_NAME` | Provider session when known |
 | `SESSIONTAP_REPOSITORY_ROOT` / `SESSIONTAP_REPOSITORY_BRANCH` | Repository when known |
-| `SESSIONTAP_ATTENTION_KIND` / `SESSIONTAP_ATTENTION_SUMMARY` / `SESSIONTAP_ATTENTION_SOURCE` | Attention when present |
+| `SESSIONTAP_REASON_KIND` / `SESSIONTAP_REASON_SUMMARY` | Bounded blocked reason when present |
 
 Command failures are logged to the hub's stderr and never reject or redeliver
 an already accepted ingestion. Scripts that need stronger than best-effort
 guarantees should persist their own idempotency keys keyed by
-`SESSIONTAP_EVENT_ID` and `SESSIONTAP_SOURCE`.
+`SESSIONTAP_DELIVERY_ID` and `SESSIONTAP_SOURCE`.
 
 ## Consuming the merged stream
 
@@ -201,15 +197,14 @@ sessiontap-hub listen
 The first line is the persisted merged baseline:
 
 ```json
-{"type":"snapshot","hub_revision":57,"sources":[{"source_id":"host","display_name":"Host machine","revision":120},{"source_id":"sandbox","revision":88}],"invocations":[{"source_id":"host","snapshot":{"...":"..."},"attention":null}]}
+{"type":"snapshot","hub_revision":57,"sources":[{"source_id":"host","display_name":"Host machine","revision":120}],"agents":[{"source_id":"host","view":{"invocation_id":"...","provider":"codex","status":"idle"}}]}
 ```
 
 Each later line is one accepted update with the hub revision, source identity,
-canonical event, resulting agent state, explicit attention, and changed field
-names:
+complete resulting public view, and changed public field names:
 
 ```json
-{"type":"update","hub_revision":58,"source_id":"sandbox","event_id":"...","event":{"kind":"waiting_input","observed_at":"...","received_at":"..."},"snapshot":{"...":"..."},"attention":{"kind":"waiting_input","context":{"summary":"...","source":"question"}},"changed":["status","activity","attention"]}
+{"type":"update","hub_revision":58,"source_id":"sandbox","delivery_id":"...","source_revision":42,"changed":["status","reason"],"view":{"invocation_id":"...","provider":"codex","status":"blocked","reason":{"kind":"input","summary":"..."}}}
 ```
 
 Consumers receive updates strictly after their baseline revision; a reconnect
@@ -218,8 +213,8 @@ Notify on post-baseline updates only.
 
 ### Migrating Quickshell from broker listen
 
-The per-broker `sessiontap listen` remains available and unchanged for
-single-daemon views. To migrate a Quickshell surface (for example
+The per-broker `sessiontap listen` provides the same public view model for a
+single daemon. To migrate a Quickshell surface (for example
 `SAgents.qml`) to the merged hub:
 
 1. Run the hub on the host and configure both daemons with hub sinks.
@@ -227,8 +222,8 @@ single-daemon views. To migrate a Quickshell surface (for example
    `sessiontap listen` on each daemon.
 3. Replace the listener command (`sessiontap listen` → `sessiontap-hub
    listen`).
-4. Interpret `attention: null` as clearing any prior attention banner, and
-   use `changed` plus `status`/`activity` for notification decisions.
+4. Replace the complete prior view with each update's `view`; use `changed`,
+   `status`, and optional `reason` for notification decisions.
 5. Rollback if needed: switch the command back to `sessiontap listen`; broker
    state and behavior are unaffected.
 

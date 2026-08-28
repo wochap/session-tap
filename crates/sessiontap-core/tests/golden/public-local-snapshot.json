@@ -1,0 +1,14 @@
+{
+  "type": "snapshot",
+  "schema_version": 1,
+  "revision": 9,
+  "views": [{
+    "invocation_id": "00000000-0000-4000-8000-000000000001",
+    "provider": "company-claude",
+    "status": "running",
+    "cwd": "/work/project",
+    "created_at": "2026-08-28T12:00:00Z",
+    "updated_at": "2026-08-28T12:00:00Z",
+    "repository": { "root": "/work/project", "branch": "main", "head": null, "dirty": false }
+  }]
+}

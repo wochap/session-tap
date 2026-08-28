@@ -71,9 +71,8 @@ pub struct Subscription {
 pub struct MatchCriteria {
     pub sources: Vec<String>,
     pub providers: Vec<String>,
-    pub events: Vec<String>,
     pub statuses: Vec<String>,
-    pub lifecycles: Vec<String>,
+    pub reasons: Vec<String>,
     pub repositories: Vec<String>,
 }
 
@@ -127,6 +126,20 @@ impl HubConfig {
                     ));
                 }
             }
+            for status in &subscription.match_criteria.statuses {
+                if !["running", "blocked", "idle", "stopped"].contains(&status.as_str()) {
+                    return Err(format!(
+                        "subscription #{index} names unknown public status '{status}'"
+                    ));
+                }
+            }
+            for reason in &subscription.match_criteria.reasons {
+                if !["input", "approval"].contains(&reason.as_str()) {
+                    return Err(format!(
+                        "subscription #{index} names unknown public reason '{reason}'"
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -158,9 +171,9 @@ subscriptions:
     match:
       sources: [sandbox]
       providers: [codex, claude]
-      events: [waiting_input, waiting_approval]
       statuses: [blocked]
-    changes: [status, attention]
+      reasons: [input, approval]
+    changes: [status, reason]
     commands:
       - ["notify-send", "agent waiting"]
 "#,
@@ -188,6 +201,21 @@ subscriptions:
             )
             .is_err()
         );
+        for private in [
+            "events",
+            "lifecycles",
+            "activities",
+            "processes",
+            "multiplexers",
+        ] {
+            let yaml = format!(
+                "version: 1\nsubscriptions:\n  - commands: [[\"x\"]]\n    match:\n      {private}: [value]\n"
+            );
+            assert!(
+                serde_yaml::from_str::<HubConfig>(&yaml).is_err(),
+                "accepted private routing field {private}"
+            );
+        }
     }
 
     #[test]

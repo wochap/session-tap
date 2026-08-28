@@ -1,14 +1,12 @@
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use chrono::Utc;
 use fs2::FileExt;
 use serde_json::{Value, json};
 use sessiontap_core::{
     config::Config,
     domain::{
-        ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, AttentionContext, AttentionSource, EventKind,
-        FailureContext, InvocationId, NormalizedAdapterEvent, NormalizedEvent, ProviderMetadata,
-        Usage,
+        ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, AttentionContext, AttentionSource,
+        FailureContext, InvocationId, NormalizedAdapterEvent, ProviderMetadata,
     },
 };
 use std::{
@@ -19,7 +17,10 @@ use std::{
     process::Command,
     sync::{Mutex, OnceLock},
 };
-use uuid::Uuid;
+
+pub mod claude;
+pub mod codex;
+pub mod qwen;
 
 pub const ADAPTER_API_VERSION: u32 = 1;
 
@@ -80,9 +81,9 @@ impl AdapterRegistry {
     #[must_use]
     pub fn new(config: &Config) -> Self {
         let mut adapters: HashMap<String, Box<dyn AgentAdapter>> = HashMap::new();
-        adapters.insert("claude".into(), Box::new(BuiltinAdapter::new("claude")));
-        adapters.insert("codex".into(), Box::new(BuiltinAdapter::new("codex")));
-        adapters.insert("qwen".into(), Box::new(BuiltinAdapter::new("qwen")));
+        adapters.insert("claude".into(), Box::new(claude::ClaudeAdapter));
+        adapters.insert("codex".into(), Box::new(codex::CodexAdapter));
+        adapters.insert("qwen".into(), Box::new(qwen::QwenAdapter));
         let aliases = config
             .adapters
             .iter()
@@ -96,65 +97,6 @@ impl AdapterRegistry {
         }
         let (dialect, executable) = self.aliases.get(provider)?;
         Some((self.adapters.get(dialect)?.as_ref(), executable.clone()))
-    }
-}
-
-pub struct BuiltinAdapter {
-    dialect: &'static str,
-}
-impl BuiltinAdapter {
-    #[must_use]
-    pub const fn new(dialect: &'static str) -> Self {
-        Self { dialect }
-    }
-}
-
-#[async_trait]
-impl AgentAdapter for BuiltinAdapter {
-    fn dialect(&self) -> &'static str {
-        self.dialect
-    }
-    fn prepare_launch(&self, args: &[String], private_dir: &Path) -> Result<LaunchPreparation> {
-        if self.dialect != "qwen" || qwen_has_user_side_channel(args) {
-            return Ok(LaunchPreparation::default());
-        }
-        if probe_qwen_dual_output("qwen") {
-            let path = private_dir.join("qwen-events.jsonl");
-            Ok(LaunchPreparation {
-                extra_args: vec!["--json-file".into(), path.to_string_lossy().into_owned()],
-                environment: vec![],
-                side_channel: Some(path),
-            })
-        } else {
-            Ok(LaunchPreparation::default())
-        }
-    }
-    fn normalize(
-        &self,
-        invocation_id: &InvocationId,
-        raw: &Value,
-    ) -> Result<NormalizedAdapterEvent> {
-        normalize_provider(self.dialect, invocation_id, raw)
-    }
-    async fn setup(
-        &self,
-        home: &Path,
-        executable: &Path,
-        action: SetupAction,
-    ) -> Result<SetupReport> {
-        let path = match self.dialect {
-            "claude" => home.join(".claude/settings.json"),
-            "codex" => home.join(".codex/hooks.json"),
-            "qwen" => home.join(".qwen/settings.json"),
-            _ => bail!("unknown dialect"),
-        };
-        let mut report = merge_hook_config(&path, self.dialect, executable, action)?;
-        if self.dialect == "codex" && action != SetupAction::Remove {
-            report
-                .message
-                .push_str("; review or refresh trust with Codex /hooks");
-        }
-        Ok(report)
     }
 }
 
@@ -195,6 +137,7 @@ pub fn redact_args(args: &[String]) -> Vec<String> {
     out
 }
 
+#[cfg(any())]
 fn normalize_provider(
     provider: &str,
     id: &InvocationId,
@@ -330,7 +273,10 @@ fn normalize_provider(
                 .filter(|value| {
                     matches!(value.as_str(), "startup" | "clear" | "resume" | "compact")
                 }),
-            provider_metadata: provider_metadata(provider, raw),
+            provider_metadata: provider_metadata(
+                raw,
+                (provider == "claude").then_some("prompt_id"),
+            ),
             usage,
             turn_id: raw
                 .get("turn_id")
@@ -347,7 +293,7 @@ fn normalize_provider(
     })
 }
 
-fn sanitize_bounded(value: &str, max_chars: usize) -> Option<String> {
+pub(crate) fn sanitize_bounded(value: &str, max_chars: usize) -> Option<String> {
     let mut escaped = false;
     let clean = value
         .chars()
@@ -371,14 +317,17 @@ fn sanitize_bounded(value: &str, max_chars: usize) -> Option<String> {
     (!clean.is_empty() && clean.chars().count() <= max_chars).then_some(clean)
 }
 
-fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Option<String> {
+pub(crate) fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Option<String> {
     names
         .iter()
         .find_map(|name| raw.get(name).and_then(Value::as_str))
         .and_then(|value| sanitize_bounded(value, max_chars))
 }
 
-fn provider_metadata(provider: &str, raw: &Value) -> Option<ProviderMetadata> {
+pub(crate) fn provider_metadata(
+    raw: &Value,
+    alternate_turn_field: Option<&str>,
+) -> Option<ProviderMetadata> {
     let model = bounded_field(raw, &["model"], 160);
     let effort = raw
         .get("effort")
@@ -394,11 +343,7 @@ fn provider_metadata(provider: &str, raw: &Value) -> Option<ProviderMetadata> {
     });
     let current_turn_id = raw
         .get("turn_id")
-        .or_else(|| {
-            (provider == "claude")
-                .then(|| raw.get("prompt_id"))
-                .flatten()
-        })
+        .or_else(|| alternate_turn_field.and_then(|field| raw.get(field)))
         .and_then(Value::as_str)
         .and_then(|v| sanitize_bounded(v, 128));
     let metadata = ProviderMetadata {
@@ -410,7 +355,7 @@ fn provider_metadata(provider: &str, raw: &Value) -> Option<ProviderMetadata> {
     (metadata != ProviderMetadata::default()).then_some(metadata)
 }
 
-fn claude_session_name(raw: &Value) -> Option<String> {
+pub(crate) fn claude_session_name(raw: &Value) -> Option<String> {
     let path = raw.get("transcript_path")?.as_str()?;
     latest_transcript_title(Path::new(path)).ok().flatten()
 }
@@ -504,7 +449,7 @@ fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
         .find_map(|name| raw.get(*name).and_then(Value::as_str))
 }
 
-fn attention_context(raw: &Value, input: bool) -> Option<AttentionContext> {
+pub(crate) fn attention_context(raw: &Value, input: bool) -> Option<AttentionContext> {
     if let Some(summary) = field(raw, &["description", "message"]).and_then(bounded_one_line) {
         return Some(AttentionContext {
             summary,
@@ -599,7 +544,7 @@ fn attention_context(raw: &Value, input: bool) -> Option<AttentionContext> {
     })
 }
 
-fn failure_context(raw: &Value) -> FailureContext {
+pub(crate) fn failure_context(raw: &Value) -> FailureContext {
     let category = field(raw, &["error_category", "failure_category", "reason"])
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -718,45 +663,6 @@ fn owned_handler(provider: &str, executable: &Path) -> Result<Value> {
         "statusMessage": "SessionTap observability"
     }))
 }
-fn events(provider: &str) -> &'static [&'static str] {
-    match provider {
-        "claude" => &[
-            "SessionStart",
-            "UserPromptSubmit",
-            "PreToolUse",
-            "PermissionRequest",
-            "Elicitation",
-            "Notification",
-            "Stop",
-            "StopFailure",
-            "SessionEnd",
-        ],
-        "codex" => &[
-            "SessionStart",
-            "UserPromptSubmit",
-            "PreToolUse",
-            "PermissionRequest",
-            "UserInputRequest",
-            "PostToolUse",
-            "Stop",
-            "SessionEnd",
-        ],
-        "qwen" => &[
-            "SessionStart",
-            "UserPromptSubmit",
-            "PreToolUse",
-            "PermissionRequest",
-            "AskUserQuestion",
-            "Notification",
-            "Stop",
-            "StopFailure",
-            "SubagentStop",
-            "SessionEnd",
-        ],
-        _ => &[],
-    }
-}
-
 /// Follows a symlinked configuration file to its target so managed merges
 /// preserve the link instead of replacing it.
 fn resolve_config_link(label: &str, path: &Path) -> Result<PathBuf> {
@@ -777,6 +683,7 @@ fn resolve_config_link(label: &str, path: &Path) -> Result<PathBuf> {
 pub fn merge_hook_config(
     path: &Path,
     provider: &str,
+    events: &[&str],
     executable: &Path,
     action: SetupAction,
 ) -> Result<SetupReport> {
@@ -807,7 +714,7 @@ pub fn merge_hook_config(
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .context("hooks must be an object")?;
-    for event in events(provider) {
+    for event in events {
         let groups = hooks
             .entry((*event).to_owned())
             .or_insert_with(|| json!([]))
@@ -898,6 +805,8 @@ pub fn merge_owned_toml(path: &Path, table: &str, value: Option<toml::Value>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sessiontap_core::config::CustomAdapter;
+    use sessiontap_core::domain::EventKind;
 
     #[test]
     fn managed_hook_command_quotes_shell_metacharacters() {
@@ -907,6 +816,21 @@ mod tests {
             handler["command"],
             "'/tmp/session tap'\"'\"'bin' hook emit 'claude; echo injected'"
         );
+    }
+    #[test]
+    fn alias_resolves_concrete_dialect_and_distinct_executable() {
+        let mut config = Config::default();
+        config.adapters.insert(
+            "company-claude".into(),
+            CustomAdapter {
+                executable: "company-claude".into(),
+                inherits: "claude".into(),
+            },
+        );
+        let registry = AdapterRegistry::new(&config);
+        let (adapter, executable) = registry.resolve("company-claude").unwrap();
+        assert_eq!(adapter.dialect(), "claude");
+        assert_eq!(executable, "company-claude");
     }
     #[test]
     fn redaction_preserves_boundaries() {
@@ -939,6 +863,7 @@ mod tests {
         merge_hook_config(
             &p,
             "claude",
+            claude::HOOK_EVENTS,
             Path::new("/bin/sessiontap"),
             SetupAction::Ensure,
         )
@@ -949,6 +874,7 @@ mod tests {
         let report = merge_hook_config(
             &p,
             "claude",
+            claude::HOOK_EVENTS,
             Path::new("/bin/sessiontap"),
             SetupAction::Ensure,
         )
@@ -958,6 +884,7 @@ mod tests {
         merge_hook_config(
             &p,
             "claude",
+            claude::HOOK_EVENTS,
             Path::new("/bin/sessiontap"),
             SetupAction::Remove,
         )
@@ -972,7 +899,14 @@ mod tests {
         let p = t.path().join("settings.json");
         fs::write(&p, "{").unwrap();
         assert!(
-            merge_hook_config(&p, "qwen", Path::new("sessiontap"), SetupAction::Ensure).is_err()
+            merge_hook_config(
+                &p,
+                "qwen",
+                qwen::HOOK_EVENTS,
+                Path::new("sessiontap"),
+                SetupAction::Ensure
+            )
+            .is_err()
         );
         assert_eq!(fs::read_to_string(p).unwrap(), "{");
     }
@@ -988,6 +922,7 @@ mod tests {
                     merge_hook_config(
                         &p,
                         "codex",
+                        codex::HOOK_EVENTS,
                         Path::new("/bin/sessiontap"),
                         SetupAction::Ensure,
                     )
@@ -1053,22 +988,27 @@ mod tests {
         let qwen: Value =
             serde_json::from_str(include_str!("../tests/fixtures/qwen-stop.json")).unwrap();
         assert_eq!(
-            normalize_provider("claude", &id, &claude)
+            claude::ClaudeAdapter
+                .normalize(&id, &claude)
                 .unwrap()
                 .event
                 .kind,
             EventKind::WaitingApproval
         );
         assert_eq!(
-            normalize_provider("codex", &id, &codex).unwrap().event.kind,
+            codex::CodexAdapter
+                .normalize(&id, &codex)
+                .unwrap()
+                .event
+                .kind,
             EventKind::WaitingInput
         );
         assert_eq!(
-            normalize_provider("qwen", &id, &qwen).unwrap().event.kind,
+            qwen::QwenAdapter.normalize(&id, &qwen).unwrap().event.kind,
             EventKind::Completed
         );
         assert!(
-            !serde_json::to_string(&normalize_provider("qwen", &id, &qwen).unwrap())
+            !serde_json::to_string(&qwen::QwenAdapter.normalize(&id, &qwen).unwrap())
                 .unwrap()
                 .contains("context_usage")
         );
@@ -1079,7 +1019,7 @@ mod tests {
         let id = InvocationId::new();
         let codex: Value =
             serde_json::from_str(include_str!("../tests/fixtures/codex-clear.json")).unwrap();
-        let codex = normalize_provider("codex", &id, &codex).unwrap();
+        let codex = codex::CodexAdapter.normalize(&id, &codex).unwrap();
         assert_eq!(codex.event.kind, EventKind::ProviderSessionStarted);
         assert_eq!(
             codex.event.provider_session_start_reason.as_deref(),
@@ -1098,7 +1038,7 @@ mod tests {
 
         let claude: Value =
             serde_json::from_str(include_str!("../tests/fixtures/claude-question.json")).unwrap();
-        let claude = normalize_provider("claude", &id, &claude).unwrap();
+        let claude = claude::ClaudeAdapter.normalize(&id, &claude).unwrap();
         assert_eq!(claude.event.kind, EventKind::WaitingInput);
         assert_eq!(claude.event.turn_id.as_deref(), Some("prompt-2"));
         let metadata = claude.event.provider_metadata.unwrap();
@@ -1109,7 +1049,8 @@ mod tests {
 
         let qwen: Value =
             serde_json::from_str(include_str!("../tests/fixtures/qwen-stop.json")).unwrap();
-        let usage = normalize_provider("qwen", &id, &qwen)
+        let usage = qwen::QwenAdapter
+            .normalize(&id, &qwen)
             .unwrap()
             .event
             .usage
@@ -1119,7 +1060,7 @@ mod tests {
 
         let qwen_question: Value =
             serde_json::from_str(include_str!("../tests/fixtures/qwen-question.json")).unwrap();
-        let qwen_question = normalize_provider("qwen", &id, &qwen_question).unwrap();
+        let qwen_question = qwen::QwenAdapter.normalize(&id, &qwen_question).unwrap();
         assert_eq!(qwen_question.event.kind, EventKind::WaitingInput);
         assert_eq!(
             qwen_question
@@ -1139,20 +1080,20 @@ mod tests {
     #[test]
     fn qwen_empty_prompt_notifications_do_not_start_turns() {
         let id = InvocationId::new();
-        let empty = normalize_provider(
-            "qwen",
-            &id,
-            &json!({"hook_event_name": "UserPromptSubmit", "prompt": ""}),
-        )
-        .unwrap();
+        let empty = qwen::QwenAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name": "UserPromptSubmit", "prompt": ""}),
+            )
+            .unwrap();
         assert_eq!(empty.event.kind, EventKind::Enrichment);
 
-        let real = normalize_provider(
-            "qwen",
-            &id,
-            &json!({"hook_event_name": "UserPromptSubmit", "prompt": "do work"}),
-        )
-        .unwrap();
+        let real = qwen::QwenAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name": "UserPromptSubmit", "prompt": "do work"}),
+            )
+            .unwrap();
         assert_eq!(real.event.kind, EventKind::NewTurn);
     }
 
@@ -1161,7 +1102,8 @@ mod tests {
         let id = InvocationId::new();
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"echo\nsecret token=abc"}});
         assert_eq!(
-            normalize_provider("claude", &id, &raw)
+            claude::ClaudeAdapter
+                .normalize(&id, &raw)
                 .unwrap()
                 .attention
                 .unwrap()
@@ -1170,7 +1112,8 @@ mod tests {
         );
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"apply_patch","tool_input":{"patch":"PRIVATE"}});
         assert_eq!(
-            normalize_provider("claude", &id, &raw)
+            claude::ClaudeAdapter
+                .normalize(&id, &raw)
                 .unwrap()
                 .attention
                 .unwrap()
@@ -1179,7 +1122,8 @@ mod tests {
         );
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Unknown","tool_input":{"private":"PRIVATE"}});
         assert_eq!(
-            normalize_provider("claude", &id, &raw)
+            claude::ClaudeAdapter
+                .normalize(&id, &raw)
                 .unwrap()
                 .attention
                 .unwrap()
@@ -1191,36 +1135,36 @@ mod tests {
     #[test]
     fn messages_and_raw_failures_are_excluded() {
         let id = InvocationId::new();
-        let done = normalize_provider(
-            "claude",
-            &id,
-            &json!({"hook_event_name":"Stop","last_assistant_message":"PRIVATE"}),
-        )
-        .unwrap();
+        let done = claude::ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name":"Stop","last_assistant_message":"PRIVATE"}),
+            )
+            .unwrap();
         assert_eq!(done.event.kind, EventKind::Completed);
         assert!(done.attention.is_none());
-        let failed = normalize_provider(
-            "qwen",
-            &id,
-            &json!({"hook_event_name":"StopFailure","reason":"timeout","error":"PRIVATE"}),
-        )
-        .unwrap();
+        let failed = qwen::QwenAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name":"StopFailure","reason":"timeout","error":"PRIVATE"}),
+            )
+            .unwrap();
         assert_eq!(failed.failure, Some(FailureContext::Timeout));
         assert!(!serde_json::to_string(&failed).unwrap().contains("PRIVATE"));
 
-        let private = normalize_provider(
-            "codex",
-            &id,
-            &json!({
-                "hook_event_name": "PostToolUse",
-                "prompt": "PRIVATE_PROMPT",
-                "last_assistant_message": "PRIVATE_ASSISTANT",
-                "transcript_path": "/PRIVATE_TRANSCRIPT",
-                "tool_input": {"command": "PRIVATE_INPUT"},
-                "tool_response": {"output": "PRIVATE_RESPONSE"}
-            }),
-        )
-        .unwrap();
+        let private = codex::CodexAdapter
+            .normalize(
+                &id,
+                &json!({
+                    "hook_event_name": "PostToolUse",
+                    "prompt": "PRIVATE_PROMPT",
+                    "last_assistant_message": "PRIVATE_ASSISTANT",
+                    "transcript_path": "/PRIVATE_TRANSCRIPT",
+                    "tool_input": {"command": "PRIVATE_INPUT"},
+                    "tool_response": {"output": "PRIVATE_RESPONSE"}
+                }),
+            )
+            .unwrap();
         let serialized = serde_json::to_string(&private).unwrap();
         for marker in [
             "PRIVATE_PROMPT",
@@ -1247,16 +1191,16 @@ mod tests {
         )
         .unwrap();
         let id = InvocationId::new();
-        let normalized = normalize_provider(
-            "claude",
-            &id,
-            &json!({
-                "hook_event_name": "Stop",
-                "session_id": "provider-session",
-                "transcript_path": transcript,
-            }),
-        )
-        .unwrap();
+        let normalized = claude::ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({
+                    "hook_event_name": "Stop",
+                    "session_id": "provider-session",
+                    "transcript_path": transcript,
+                }),
+            )
+            .unwrap();
 
         assert_eq!(
             normalized.event.provider_session_name.as_deref(),
@@ -1278,6 +1222,7 @@ mod tests {
         merge_hook_config(
             &hook_link,
             "claude",
+            claude::HOOK_EVENTS,
             Path::new("sessiontap"),
             SetupAction::Ensure,
         )
@@ -1325,6 +1270,7 @@ mod tests {
             merge_hook_config(
                 &hook_link,
                 "claude",
+                claude::HOOK_EVENTS,
                 Path::new("sessiontap"),
                 SetupAction::Ensure
             )
@@ -1351,6 +1297,7 @@ mod tests {
         merge_hook_config(
             &path,
             "claude",
+            claude::HOOK_EVENTS,
             Path::new("sessiontap"),
             SetupAction::Ensure,
         )
