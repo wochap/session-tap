@@ -180,14 +180,16 @@ pub fn validate_sink_url(raw: &str, trusted_addresses: &[String]) -> Result<(), 
 
 impl Config {
     pub fn load(path: &Path) -> io::Result<Self> {
+        let symlink =
+            fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink());
         if !path.exists() {
+            if symlink {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "configuration symlink target not found",
+                ));
+            }
             return Ok(Self::default());
-        }
-        if fs::symlink_metadata(path)?.file_type().is_symlink() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "configuration file must not be a symlink",
-            ));
         }
         let raw = fs::read_to_string(path)?;
         let config: Self =
@@ -245,21 +247,26 @@ mod tests {
     }
 
     #[test]
-    fn config_load_rejects_symlink_without_reading_target() {
+    fn config_load_follows_symlink() {
         use std::os::unix::fs::symlink;
         let temp = tempfile::tempdir().unwrap();
         let target = temp.path().join("target.toml");
         fs::write(&target, "version=1\nretention_days=99\n").unwrap();
         let link = temp.path().join("config.toml");
         symlink(&target, &link).unwrap();
-        assert_eq!(
-            Config::load(&link).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
-        assert_eq!(
-            fs::read_to_string(target).unwrap(),
-            "version=1\nretention_days=99\n"
-        );
+        let config = Config::load(&link).unwrap();
+        assert_eq!(config.retention_days, 99);
+    }
+
+    #[test]
+    fn config_load_rejects_dangling_symlink() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let link = temp.path().join("config.toml");
+        symlink(temp.path().join("missing.toml"), &link).unwrap();
+        let error = Config::load(&link).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("symlink target not found"));
     }
 
     #[test]

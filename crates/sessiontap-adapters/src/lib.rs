@@ -733,18 +733,31 @@ fn events(provider: &str) -> &'static [&'static str] {
     }
 }
 
+/// Follows a symlinked configuration file to its target so managed merges
+/// preserve the link instead of replacing it.
+fn resolve_config_link(label: &str, path: &Path) -> Result<PathBuf> {
+    if path
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return fs::canonicalize(path).map_err(|error| {
+            anyhow::anyhow!(
+                "{label} configuration symlink {} points to a missing target: {error}",
+                path.display()
+            )
+        });
+    }
+    Ok(path.to_path_buf())
+}
+
 pub fn merge_hook_config(
     path: &Path,
     provider: &str,
     executable: &Path,
     action: SetupAction,
 ) -> Result<SetupReport> {
-    if path
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
-        bail!("provider configuration must not be a symlink");
-    }
+    let resolved = resolve_config_link("provider", path)?;
+    let path = resolved.as_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -826,12 +839,8 @@ pub fn merge_hook_config(
 }
 
 pub fn merge_owned_toml(path: &Path, table: &str, value: Option<toml::Value>) -> Result<()> {
-    if path
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
-        bail!("TOML configuration must not be a symlink");
-    }
+    let resolved = resolve_config_link("TOML", path)?;
+    let path = resolved.as_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1197,13 +1206,59 @@ mod tests {
     }
 
     #[test]
-    fn hook_and_toml_merges_reject_symlink_targets() {
+    fn hook_and_toml_merges_follow_symlink_targets() {
         use std::os::unix::fs::symlink;
         let temp = tempfile::tempdir().unwrap();
-        let victim_json = temp.path().join("victim.json");
-        fs::write(&victim_json, "{}").unwrap();
+        let target_json = temp.path().join("target.json");
+        fs::write(&target_json, "{}").unwrap();
         let hook_link = temp.path().join("settings.json");
-        symlink(&victim_json, &hook_link).unwrap();
+        symlink(&target_json, &hook_link).unwrap();
+        merge_hook_config(
+            &hook_link,
+            "claude",
+            Path::new("sessiontap"),
+            SetupAction::Ensure,
+        )
+        .unwrap();
+        assert!(
+            hook_link
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let merged: Value =
+            serde_json::from_str(&fs::read_to_string(&target_json).unwrap()).unwrap();
+        assert!(merged["hooks"].is_object());
+
+        let target_toml = temp.path().join("target.toml");
+        fs::write(&target_toml, "[user]\nvalue=1\n").unwrap();
+        let toml_link = temp.path().join("config.toml");
+        symlink(&target_toml, &toml_link).unwrap();
+        merge_owned_toml(
+            &toml_link,
+            "sessiontap",
+            Some(toml::toml! { managed = true }.into()),
+        )
+        .unwrap();
+        assert!(
+            toml_link
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let merged = fs::read_to_string(target_toml).unwrap();
+        assert!(merged.contains("[user]"));
+        assert!(merged.contains("[sessiontap]"));
+    }
+
+    #[test]
+    fn hook_and_toml_merges_reject_dangling_symlinks() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let hook_link = temp.path().join("settings.json");
+        symlink(temp.path().join("missing.json"), &hook_link).unwrap();
         assert!(
             merge_hook_config(
                 &hook_link,
@@ -1211,18 +1266,18 @@ mod tests {
                 Path::new("sessiontap"),
                 SetupAction::Ensure
             )
-            .is_err()
+            .unwrap_err()
+            .to_string()
+            .contains("missing target")
         );
-        assert_eq!(fs::read_to_string(&victim_json).unwrap(), "{}");
 
-        let victim_toml = temp.path().join("victim.toml");
-        fs::write(&victim_toml, "[user]\nvalue=1\n").unwrap();
         let toml_link = temp.path().join("config.toml");
-        symlink(&victim_toml, &toml_link).unwrap();
-        assert!(merge_owned_toml(&toml_link, "sessiontap", None).is_err());
-        assert_eq!(
-            fs::read_to_string(victim_toml).unwrap(),
-            "[user]\nvalue=1\n"
+        symlink(temp.path().join("missing.toml"), &toml_link).unwrap();
+        assert!(
+            merge_owned_toml(&toml_link, "sessiontap", None)
+                .unwrap_err()
+                .to_string()
+                .contains("missing target")
         );
     }
 

@@ -5,7 +5,9 @@ Reviewed 2026-08-25 against the MVP threat model and the applicable OWASP Top
 components, integrity, logging/privacy, and server-side requests.
 
 - Unix runtime directories are mode 0700; the socket is mode 0600; symlinked
-  runtime/config/database/hook/token targets are rejected where opened.
+  runtime/database/hook/token targets are rejected where opened, while
+  symlinked configuration files are resolved to their targets (dangling links
+  are rejected with an explicit error).
 - The daemon is the sole SQLite writer and WAL/outbox changes are transactional.
 - Hook attribution requires invocation ID, exact provider, and a random
   per-invocation credential. Credentials are environment-only and compared
