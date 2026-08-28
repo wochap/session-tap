@@ -7,15 +7,23 @@ Define canonical multi-source ingestion, persistence, repair, and live observati
 ## Requirements
 
 ### Requirement: Hub ingests only canonical SessionTap envelopes
-The hub SHALL accept versioned source snapshot and update envelopes produced by SessionTap sinks, SHALL validate their canonical schema, and SHALL NOT perform provider-specific normalization or reinterpret provider hook payloads.
+The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks.
 
 #### Scenario: Canonical update arrives
-- **WHEN** a source sends a valid normalized update containing source identity, event metadata, resulting agent state, and attention state
-- **THEN** the hub stores that canonical state without applying provider-specific transformations
+- **WHEN** a source sends a valid public update containing source identity, delivery identity, changed public field paths, and complete resulting public agent view
+- **THEN** the hub stores that public state without applying provider-specific transformations
+
+#### Scenario: Private source state arrives
+- **WHEN** an otherwise valid ingestion request contains multiplexer details, credentials, raw hooks, or another unrecognized field outside the public schema
+- **THEN** the hub discards the unrecognized field and persists and forwards only its recognized canonical public projection
 
 #### Scenario: Unknown or malformed envelope arrives
-- **WHEN** an ingestion request has an unsupported schema version or violates the canonical envelope schema
+- **WHEN** an ingestion request omits or invalidates a required canonical public-envelope field
 - **THEN** the hub rejects it without changing persisted state or invoking subscriptions
+
+#### Scenario: Future source adds optional public metadata
+- **WHEN** a newer source includes an unrecognized optional public field while all required canonical fields remain valid
+- **THEN** the hub accepts the envelope, ignores the unknown field, and does not echo it to listeners or commands
 
 ### Requirement: Hub merges stable source identities
 Each source SHALL have a configured stable ID and optional display name, and the hub SHALL identify an agent by the pair of source ID and invocation ID.
@@ -25,11 +33,11 @@ Each source SHALL have a configured stable ID and optional display name, and the
 - **THEN** the hub retains two distinct agents keyed by their respective source IDs
 
 ### Requirement: Hub persists the merged current state
-The hub SHALL persist source metadata, current source revision, canonical invocation snapshots, accepted update identities, and a monotonically increasing hub revision in SQLite.
+The hub SHALL persist source metadata, current source revision, canonical `PublicAgentView` values, accepted delivery identities, and a monotonically increasing hub revision in SQLite. It SHALL NOT persist source-internal invocation snapshots or provider hook payloads.
 
 #### Scenario: Hub restarts
 - **WHEN** the hub restarts after accepting source state
-- **THEN** it restores the merged agent view before accepting consumers or subsequent updates
+- **THEN** it restores the merged public agent view before accepting consumers or subsequent updates
 
 ### Requirement: Hub applies delivery idempotently
 The hub SHALL accept sink delivery with at-least-once semantics and SHALL apply each `(source_id, event_id)` update at most once to state, live output, and subscription matching.
@@ -54,22 +62,30 @@ The hub SHALL transactionally replace the materialized invocation set for one so
 - **THEN** the hub removes or marks that stale materialized invocation according to the snapshot replacement semantics
 
 ### Requirement: Hub provides gap-free merged live observation
-The hub SHALL provide a local command that emits one persisted merged snapshot followed by one JSON object per accepted update after the snapshot revision without a subscription gap.
+The hub SHALL provide a local command that emits one persisted merged public snapshot followed by one JSON object per accepted public update after the snapshot revision without a subscription gap. Agents SHALL be identified by source ID and invocation ID.
 
-#### Scenario: Quickshell listener starts
+#### Scenario: Status-bar listener starts
 - **WHEN** a consumer runs `sessiontap-hub listen`
-- **THEN** it receives the current agents from all sources and then receives live normalized updates without periodic polling
+- **THEN** it receives complete public views for current agents from all sources and then receives live normalized public updates without polling
 
 #### Scenario: Listener reconnects
 - **WHEN** a live consumer reconnects after the hub or consumer restarts
-- **THEN** it receives a new complete persisted baseline before subsequent updates
+- **THEN** it receives a new complete persisted public baseline before subsequent updates
+
+#### Scenario: Multiple fields change in one source update
+- **WHEN** one accepted update changes multiple projected fields
+- **THEN** the hub listener receives the complete view and the full deterministic changed-field set from that update
 
 ### Requirement: Hub retains explicit current attention state
-The hub SHALL persist the complete normalized attention object supplied by SessionTap, including its kind, summary, and source, and SHALL clear it when an accepted agent state contains `attention: null`.
+The hub SHALL retain only the optional bounded public status reason carried inside each complete `PublicAgentView`. It SHALL replace or clear the prior reason whenever an accepted complete view replaces the materialized agent state.
 
 #### Scenario: Agent stops waiting for input
-- **WHEN** an update changes an agent from blocked to running and contains `attention: null`
-- **THEN** the merged state and live update no longer expose the prior attention information
+- **WHEN** an update changes an agent from blocked to running and its complete public view has no reason
+- **THEN** the merged state and live update no longer expose the prior blocked reason
+
+#### Scenario: Approval changes to ordinary input
+- **WHEN** a blocked public view with an approval reason is replaced by a blocked view with an input reason
+- **THEN** the hub retains only the input reason from the latest complete view
 
 ### Requirement: Hub control remains unavailable
 The initial hub SHALL NOT expose agent screen inspection, capture, input, or command-control operations, while source envelopes SHALL remain versioned and MAY advertise capabilities for a future separately specified bidirectional transport.

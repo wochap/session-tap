@@ -7,11 +7,15 @@ Session-gated Claude Code, Codex, and Qwen event ingestion — mapping provider 
 ## Requirements
 
 ### Requirement: Built-in providers are normalized
-SessionTap SHALL provide independently implemented adapters for Claude Code, Codex, and Qwen that map documented session, prompt, tool, permission, notification, stop, failure-stop, and session-end signals into the common event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
+SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, and Qwen. Each adapter SHALL own its provider's hook configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported provider session, prompt, tool, permission, notification, stop, failure-stop, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
+
+#### Scenario: Provider behavior changes independently
+- **WHEN** one provider changes its hook names, payload shape, setup requirements, or launch options
+- **THEN** SessionTap changes that provider's concrete adapter without adding provider conditionals to another provider adapter
 
 #### Scenario: New user turn begins
 - **WHEN** a built-in adapter receives its provider's user-prompt or turn-start signal
-- **THEN** it emits working activity, identifies the event as a new turn, and includes the provider's verified turn identifier when available
+- **THEN** it emits working activity, identifies the internal event as a new turn, and includes the provider's verified turn identifier when available
 
 #### Scenario: Provider asks a question
 - **WHEN** an adapter can distinguish a user question or elicitation from a permission approval, including a recognized Claude `AskUserQuestion` permission request
@@ -23,11 +27,11 @@ SessionTap SHALL provide independently implemented adapters for Claude Code, Cod
 
 #### Scenario: Provider ends a turn normally
 - **WHEN** a provider emits its normal turn-stop signal
-- **THEN** the adapter identifies the event as completed and emits idle activity without marking the process stopped
+- **THEN** the adapter identifies the internal event as completed and emits idle activity without marking the process stopped
 
 #### Scenario: Provider turn fails
 - **WHEN** a provider emits a documented failure-stop signal
-- **THEN** the adapter identifies the event as failed and emits idle activity without marking the process stopped
+- **THEN** the adapter identifies the internal event as failed and emits idle activity without marking the process stopped
 
 #### Scenario: Provider emits an idle reminder
 - **WHEN** a provider emits an idle-prompt notification without a turn-stop cause
@@ -42,7 +46,7 @@ SessionTap SHALL provide independently implemented adapters for Claude Code, Cod
 - **THEN** the adapter emits only their sanitized provider-neutral representations and omits unavailable fields
 
 #### Scenario: Usage is unavailable
-- **WHEN** a Codex or Claude hook contains no verified token or context-utilization fields
+- **WHEN** a provider hook contains no verified token or context-utilization fields
 - **THEN** the adapter does not estimate or synthesize usage
 
 ### Requirement: Provider metadata extraction is bounded and evidence-based
@@ -173,11 +177,15 @@ The Qwen adapter SHALL use hooks as its baseline and MAY add Qwen's dedicated du
 - **THEN** SessionTap preserves the user's argument and uses hook-only observation rather than overriding it
 
 ### Requirement: Adapter behavior is versioned and extensible
-The core SHALL depend on a versioned adapter trait rather than provider conditionals, and configuration SHALL allow a custom executable name to inherit a built-in adapter dialect and redaction policy.
+The core SHALL depend on the adapter trait rather than provider conditionals. The registry SHALL instantiate separate built-in Claude, Codex, and Qwen adapter types, and configuration SHALL allow a custom executable name to inherit one built-in adapter's complete behavior and redaction policy.
 
 #### Scenario: Claude-compatible wrapper
 - **WHEN** the user configures `company-claude` to inherit the Claude adapter
 - **THEN** `sessiontap company-claude [args...]` launches that executable with Claude-compatible hook normalization and a distinct configured provider identity
+
+#### Scenario: Built-in adapter registration
+- **WHEN** the adapter registry is initialized
+- **THEN** each built-in provider resolves to its own concrete adapter implementation rather than a dialect-parameterized generic implementation
 
 ### Requirement: Implementation is clean-room MIT work
 The project SHALL NOT copy or mechanically transform external non-MIT source, tests, generated hook scripts, or implementation-specific trust algorithms and SHALL document the public or independently captured basis for each provider mapping.
@@ -185,3 +193,21 @@ The project SHALL NOT copy or mechanically transform external non-MIT source, te
 #### Scenario: Adapter contribution
 - **WHEN** a provider mapping is added or changed
 - **THEN** its tests and documentation identify the provider contract or sanitized independent fixture used to establish the behavior
+
+### Requirement: Adapter output is normalized-only
+A provider adapter SHALL pass only typed provider-neutral events and metadata across the adapter boundary. It SHALL NOT choose or overwrite the configured provider identity and SHALL NOT expose raw provider JSON, provider store records, arbitrary unknown fields, or provider-specific payload types to the daemon, storage, sinks, or hub. The daemon SHALL stamp normalized facts with the configured provider identity associated with the authenticated invocation; adapter dialect SHALL remain an internal dispatch detail.
+
+#### Scenario: Hook contains unknown provider data
+- **WHEN** a raw hook contains fields that the provider adapter does not explicitly normalize
+- **THEN** those fields do not cross the adapter boundary or appear in persisted normalized state
+
+#### Scenario: Configured provider inherits a dialect
+- **WHEN** `company-claude` is configured to inherit the Claude adapter
+- **THEN** the Claude adapter normalizes its hook while the daemon records `company-claude`, not `claude`, as the invocation's configured provider identity
+
+### Requirement: Future provider enrichment shares the normalized boundary
+A future provider-specific collector that reads agent-owned stores, histories, or transcripts SHALL live with that provider integration and SHALL emit sanitized typed metadata through the same normalized internal state path used by hook-derived metadata.
+
+#### Scenario: Provider history contains additional metadata
+- **WHEN** a future collector extracts a verified safe fact unavailable in hook payloads
+- **THEN** downstream storage, public projection, sinks, and hub aggregation consume the normalized fact without parsing or identifying the provider's source format

@@ -18,33 +18,37 @@ The hub SHALL read a versioned YAML configuration defining subscriptions as norm
 - **THEN** the hub reports the error and does not silently run a partial or broadened rule set
 
 ### Requirement: Subscriptions match normalized agent data
-Subscription match criteria SHALL support source ID, provider, event kind, public status, lifecycle, and repository, with different fields combined by logical AND and values within one field combined by logical OR.
+Subscription match criteria SHALL support source ID, changed public field paths, and fields available in the canonical public envelope, including provider, public status, public reason kind, and repository. Routing SHALL NOT depend on internal lifecycle, activity, normalized event kind, process control data, or multiplexer metadata. Different fields SHALL be combined by logical AND and values within one field by logical OR.
 
 #### Scenario: Multi-field rule matches
-- **WHEN** an update is from source `sandbox`, provider `codex`, event `waiting_input`, and status `blocked`, and all are allowed by a subscription
+- **WHEN** an update is from source `sandbox`, provider `codex`, includes changed field `status`, has status `blocked` and reason kind `input`, and all are allowed by a subscription
 - **THEN** that subscription matches the update
 
 #### Scenario: One field does not match
-- **WHEN** every configured criterion except source ID matches an update
+- **WHEN** every configured public criterion except source ID matches an update
 - **THEN** that subscription does not run
 
-### Requirement: Subscriptions filter material field changes
-A subscription SHALL be able to require changes to one or more normalized fields, including status and attention, by comparing the previously persisted state with the accepted resulting state.
+#### Scenario: Internal criterion is configured
+- **WHEN** routing configuration tries to match internal activity, event kind, multiplexer, or process metadata
+- **THEN** configuration validation rejects the unsupported private criterion
 
-#### Scenario: Attention changes while status remains blocked
-- **WHEN** a subscription watches `status` and `attention` and an accepted update changes only attention
-- **THEN** the subscription runs with the new canonical envelope
+### Requirement: Subscriptions filter material field changes
+A subscription SHALL be able to require changes to one or more `PublicAgentView` fields, including status and reason, by comparing the previously persisted public view with the accepted complete resulting view.
+
+#### Scenario: Reason changes while status remains blocked
+- **WHEN** a subscription watches `status` and `reason` and an accepted update changes only the bounded reason
+- **THEN** the subscription runs with the new canonical public envelope
 
 #### Scenario: Unrelated enrichment arrives
-- **WHEN** a subscription watches only status and attention and an update changes neither field
+- **WHEN** a subscription watches only status and reason and an update changes neither field
 - **THEN** the subscription does not run
 
 ### Requirement: Commands receive canonical structured input
-The hub SHALL execute configured commands directly as argument arrays without shell evaluation, SHALL provide the accepted canonical envelope on stdin, and SHALL expose documented scalar `SESSIONTAP_*` environment variables as conveniences rather than an alternative schema.
+The hub SHALL execute configured commands directly as argument arrays without shell evaluation, SHALL provide the accepted canonical public envelope on stdin, and SHALL expose documented public scalar `SESSIONTAP_*` environment variables as conveniences rather than an alternative schema. Private source fields and internal event metadata SHALL not be available.
 
 #### Scenario: Notification script runs
-- **WHEN** a matching waiting-input update is accepted
-- **THEN** the configured script can read source, provider, event, status, session identity, and attention from the canonical JSON on stdin
+- **WHEN** a matching blocked-input public update is accepted
+- **THEN** the configured script can read source, provider, changed fields, status, session identity, and bounded reason from canonical JSON on stdin
 
 #### Scenario: Command contains shell metacharacters
 - **WHEN** a configured argument contains spaces or shell metacharacters
