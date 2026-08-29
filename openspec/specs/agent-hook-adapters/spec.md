@@ -322,3 +322,56 @@ Built-in adapters SHALL reject a payload with a documented non-empty child-agent
 #### Scenario: Child hook includes root session identity
 - **WHEN** a subagent payload also contains the root provider session ID or turn ID
 - **THEN** the adapter ignores the entire payload and the root invocation remains unchanged
+
+### Requirement: Adapter evidence is typed and transport-stamped
+Every normalized adapter event SHALL carry typed evidence identifying its observation channel and trust basis. Collector revision, bounded collector instance identity, and source sequence SHALL be optional. Evidence fields MUST be stamped after invocation authentication or by a trusted local collector and MUST NOT be copied from provider payload fields.
+
+#### Scenario: Managed hook is authenticated
+- **WHEN** a managed provider hook passes invocation and provider authentication
+- **THEN** the daemon stamps authenticated managed-hook evidence and the active collector revision
+
+#### Scenario: Provider attempts to supply evidence
+- **WHEN** provider JSON contains fields named `source`, `verified`, `collectorRevision`, `clientRevision`, or `sequence`
+- **THEN** those values do not control normalized evidence unless the trusted transport independently establishes the corresponding fact
+
+#### Scenario: Local process observation is created
+- **WHEN** SessionTap observes child-process binding, exit, or liveness locally
+- **THEN** it stamps local process-observation evidence rather than authenticated-hook evidence
+
+#### Scenario: Collector supplies no ordering
+- **WHEN** a trusted collector cannot establish a source sequence
+- **THEN** it omits source ordering and the normalized event remains valid
+
+### Requirement: Adapters emit bounded root tool activity
+A built-in adapter SHALL convert supported root-agent tool lifecycle payloads into provider-neutral tool activity updates containing only phase, a bounded normalized tool label, an optional bounded correlation ID, and optional allowlisted safe detail. It SHALL discard arbitrary tool input, commands, URLs, results, errors, and provider-specific objects.
+
+#### Scenario: Root tool starts
+- **WHEN** a supported root pre-tool event contains a valid tool name and correlation ID
+- **THEN** the adapter emits a start update with the normalized label and bounded correlation ID
+
+#### Scenario: Root tool completes
+- **WHEN** a supported root post-tool event contains a correlation ID
+- **THEN** the adapter emits a finish update identifying the matching tool without copying its result
+
+#### Scenario: Tool has an eligible description
+- **WHEN** an exact provider/tool mapping permits a scalar description and the value passes sanitization, redaction, and bounds
+- **THEN** the adapter may emit that value as safe activity detail
+
+#### Scenario: Tool targets a workspace file
+- **WHEN** an exact provider/tool mapping permits a file target that canonicalizes beneath the invocation workspace
+- **THEN** the adapter may emit a bounded workspace-relative target as safe activity detail
+
+#### Scenario: Tool input contains a command or URL
+- **WHEN** arbitrary tool input contains a shell command, URL, credential, nested object, or unapproved scalar
+- **THEN** the adapter omits it from tool activity and all normalized metadata
+
+#### Scenario: Subagent tool event arrives
+- **WHEN** a tool lifecycle payload belongs to a documented child agent
+- **THEN** the adapter ignores it before emitting evidence or tool activity
+
+### Requirement: Adapter output changes apply in place
+Normalized adapter output SHALL use typed evidence and tool activity directly without retaining the free-form source field, compatibility aliases, or version-negotiated variants.
+
+#### Scenario: Adapter event is serialized
+- **WHEN** a built-in adapter emits a normalized root event
+- **THEN** its target internal representation contains typed evidence and no legacy source field

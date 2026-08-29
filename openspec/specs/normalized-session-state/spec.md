@@ -256,3 +256,105 @@ Internal normalized event kinds and reducer inputs SHALL use the target schema d
 #### Scenario: Incompatible retained alpha data is encountered
 - **WHEN** retained internal data cannot decode under the target schema
 - **THEN** SessionTap reports the incompatibility without invoking a legacy decoder or changing a schema version
+
+### Requirement: Evidence authority is enforced by observation channel
+The broker SHALL accept normalized facts only within the authority assigned to their trusted evidence channel. Managed hooks and verified provider side channels SHALL be allowed to assert mapped provider state; process observations SHALL assert lifecycle only; provider-artifact observations SHALL enrich approved metadata or usage only.
+
+#### Scenario: Process observation carries activity
+- **WHEN** a process-observation event attempts to assert working, waiting, idle, or terminal provider activity
+- **THEN** the broker rejects that activity assertion while retaining an eligible lifecycle observation
+
+#### Scenario: Artifact observation carries lifecycle
+- **WHEN** provider-artifact evidence attempts to assert process lifecycle, agent activity, attention, or tool execution
+- **THEN** the broker rejects those facts without changing current state
+
+#### Scenario: Authenticated hook asserts mapped activity
+- **WHEN** authenticated managed-hook evidence carries an adapter-approved activity assertion
+- **THEN** the broker applies it subject to session, turn, ordering, and terminal-generation guards
+
+### Requirement: State timing and confirmation are private durable state
+The broker SHALL retain the trusted receipt time at which current activity began, the latest accepted authoritative assertion time, whether restored nonterminal activity has live confirmation, and the latest accepted evidence. Provider observation time SHALL NOT determine freshness.
+
+#### Scenario: State changes
+- **WHEN** an accepted authoritative event changes normalized activity
+- **THEN** state start and last assertion times become the trusted receipt time and confirmation becomes live
+
+#### Scenario: Same state is asserted again
+- **WHEN** an authoritative event repeats current activity without changing it
+- **THEN** the broker preserves state start time and refreshes last assertion time
+
+#### Scenario: Enrichment arrives
+- **WHEN** an enrichment-only event changes metadata or usage
+- **THEN** it does not refresh activity assertion time or live confirmation
+
+#### Scenario: Daemon restores nonterminal activity
+- **WHEN** startup hydrates working, waiting-input, or waiting-approval activity for a process that remains alive
+- **THEN** the broker marks that activity restored-unconfirmed until a matching authoritative live assertion arrives
+
+### Requirement: Stale working activity expires without a terminal cause
+The broker SHALL change working activity to unknown after 30 minutes without an accepted authoritative activity assertion. It SHALL preserve live process lifecycle and provider-session identity, clear current tool activity and incompatible status reason, and SHALL NOT emit a completed, failed, interrupted, idle, or lifecycle-exit cause.
+
+#### Scenario: Working evidence becomes stale
+- **WHEN** an alive invocation remains working for 30 minutes without an authoritative activity assertion
+- **THEN** activity becomes unknown and public status becomes idle without a terminal reason
+
+#### Scenario: Tool operation exceeds the stale interval
+- **WHEN** current tool activity receives no authoritative progress or state assertion during the stale interval
+- **THEN** the stale sweep clears the tool and changes working activity to unknown without claiming completion
+
+#### Scenario: Waiting state remains silent
+- **WHEN** an alive invocation remains waiting-input or waiting-approval without another hook
+- **THEN** silence alone does not clear the waiting state or its compatible reason
+
+#### Scenario: Activity resumes after expiry
+- **WHEN** a later authoritative event asserts working for a nonterminal current turn
+- **THEN** activity becomes working with live confirmation and fresh state timing
+
+### Requirement: Current root tool activity reduces deterministically
+The broker SHALL retain at most one private current root tool activity containing a bounded correlation ID, normalized label, optional safe detail, start time, and last-observed time. Tool updates SHALL obey turn, session, terminal, evidence-authority, and matching-ID guards.
+
+#### Scenario: New tool starts
+- **WHEN** an accepted authoritative start update identifies a root tool
+- **THEN** it replaces current tool activity and records trusted start and last-observed times
+
+#### Scenario: Matching tool progresses
+- **WHEN** an accepted progress update matches current tool identity
+- **THEN** it refreshes last-observed time without changing the original start time
+
+#### Scenario: Matching tool finishes
+- **WHEN** an accepted finish or failure update matches current tool identity
+- **THEN** the broker clears current tool activity without treating tool failure as turn failure
+
+#### Scenario: Late tool completion arrives
+- **WHEN** a finish update identifies an older tool after another tool became current
+- **THEN** the broker preserves the newer current tool activity
+
+#### Scenario: Turn or session boundary arrives
+- **WHEN** a new turn, idle state, terminal turn outcome, provider-session boundary, lifecycle exit, lifecycle loss, or stale-working expiry is accepted
+- **THEN** the broker clears current tool activity
+
+### Requirement: Evidence and activity remain private projections
+Event evidence, confirmation, state timing, source ordering, collector revision, tool identity, and tool detail SHALL remain absent from `PublicAgentView`, public changed fields, local public envelopes, sinks, hub persistence, hub listening, routing input, and receiver output.
+
+#### Scenario: Only private activity changes
+- **WHEN** accepted tool progress changes private activity without changing any public field
+- **THEN** the broker persists private state without enqueueing a public listener or sink update
+
+#### Scenario: Public state changes with private activity
+- **WHEN** one transaction changes both private activity and a public field
+- **THEN** the published complete view contains only recognized public fields and its changed set excludes private paths
+
+#### Scenario: Public golden fixtures are serialized
+- **WHEN** status, listen, sink, hub, or receiver envelopes are serialized
+- **THEN** their public schema remains unchanged
+
+### Requirement: Evidence and activity schemas apply in place
+Internal normalized events, request payloads, reducer state, and persisted snapshots SHALL use the target evidence, timing, confirmation, and activity types without schema-version increments, compatibility fields, or legacy aliases.
+
+#### Scenario: Target snapshot is persisted
+- **WHEN** the broker commits private evidence or current activity
+- **THEN** it writes the target in-place internal representation while public envelope versions remain unchanged
+
+#### Scenario: Incompatible retained alpha state is encountered
+- **WHEN** retained internal data cannot decode into the target representation
+- **THEN** SessionTap reports the incompatibility without legacy decoding or version negotiation
