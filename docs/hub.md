@@ -100,8 +100,9 @@ anywhere without a trusted list.
 Hub updates carry only the complete resulting `PublicAgentView` and typed
 changed public fields. The hub never receives or interprets provider hooks,
 internal events, lifecycle/activity state, credentials, process-control data,
-or multiplexer metadata. Bounded blocked reasons and fields such as cwd,
-repository paths, and session names remain potentially sensitive.
+or multiplexer metadata. Bounded blocked or stopped reasons and fields such as
+cwd, repository paths, and session names remain potentially sensitive. Hub
+sinks are trusted, operator-controlled observers of these selected fields.
 
 ## Token authentication
 
@@ -132,6 +133,13 @@ subscriptions:
     commands:
       - [notify-send, "Agent is waiting"]
       - [/home/me/bin/agent-page.sh]
+  - name: completed-notify
+    match:
+      statuses: [stopped]
+      reasons: [completed]
+    changes: [status, reason]
+    commands:
+      - [notify-send, "Agent responded"]
 ```
 
 `changes` compares the previously persisted state with the accepted resulting
@@ -181,7 +189,7 @@ conveniences, not an alternative schema — read stdin for anything richer:
 | `SESSIONTAP_CHANGED` | Comma-separated changed canonical fields |
 | `SESSIONTAP_SESSION_ID` / `SESSIONTAP_SESSION_NAME` | Provider session when known |
 | `SESSIONTAP_REPOSITORY_ROOT` / `SESSIONTAP_REPOSITORY_BRANCH` | Repository when known |
-| `SESSIONTAP_REASON_KIND` / `SESSIONTAP_REASON_SUMMARY` | Bounded blocked reason when present |
+| `SESSIONTAP_REASON_KIND` / `SESSIONTAP_REASON_SUMMARY` | Bounded compatible blocked or stopped reason when present |
 
 Command failures are logged to the hub's stderr and never reject or redeliver
 an already accepted ingestion. Scripts that need stronger than best-effort
@@ -210,6 +218,12 @@ complete resulting public view, and changed public field names:
 Consumers receive updates strictly after their baseline revision; a reconnect
 (after a hub or consumer restart) receives a fresh complete baseline first.
 Notify on post-baseline updates only.
+
+Reason filters accept exactly `input`, `approval`, `completed`, and `failed`.
+A `stopped + completed` rule does not match lifecycle-only stopped views because
+those contain no reason. Public stopped does not expose whether the supervised
+process is alive; scripts that need completion notifications should match the
+reason rather than treating every stopped view as a response.
 
 ### Migrating Quickshell from broker listen
 

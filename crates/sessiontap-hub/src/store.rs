@@ -3,7 +3,10 @@ use chrono::{Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use sessiontap_core::{
-    domain::{InvocationId, PublicAgentView, PublicField, PublicStatus, changed_public_fields},
+    domain::{
+        InvocationId, PublicAgentView, PublicField, PublicReasonKind, PublicStatus,
+        STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, changed_public_fields,
+    },
     protocol::{HUB_SCHEMA_VERSION, SourceEnvelope},
 };
 use std::{
@@ -189,6 +192,11 @@ impl HubStore {
         if source.id.is_empty() {
             return Err(Reject::Malformed("empty source identity".into()));
         }
+        if views.iter().any(|view| !valid_public_reason(view)) {
+            return Err(Reject::Malformed(
+                "invalid or status-incompatible public reason".into(),
+            ));
+        }
         let mut ids = HashSet::new();
         if views.iter().any(|v| !ids.insert(v.invocation_id.clone())) {
             return Err(Reject::Malformed("duplicate invocation in snapshot".into()));
@@ -237,6 +245,11 @@ impl HubStore {
         if source_id.is_empty() || delivery_id.is_empty() || changed.is_empty() {
             return Err(Reject::Malformed(
                 "missing delivery identity or changed fields".into(),
+            ));
+        }
+        if !valid_public_reason(view) {
+            return Err(Reject::Malformed(
+                "invalid or status-incompatible public reason".into(),
             ));
         }
         let mut conn = self.conn.lock().expect("hub store mutex poisoned");
@@ -333,6 +346,29 @@ fn validate_version(version: u32) -> std::result::Result<(), Reject> {
     } else {
         Err(Reject::UnsupportedVersion(version))
     }
+}
+
+fn valid_public_reason(view: &PublicAgentView) -> bool {
+    let Some(reason) = &view.reason else {
+        return true;
+    };
+    if reason.summary.is_empty()
+        || reason.summary.len() > STATUS_REASON_MAX_BYTES
+        || reason.summary.chars().count() > STATUS_REASON_MAX_CHARS
+        || reason.summary.chars().any(char::is_control)
+    {
+        return false;
+    }
+    matches!(
+        (view.status, reason.kind),
+        (
+            PublicStatus::Blocked,
+            PublicReasonKind::Input | PublicReasonKind::Approval
+        ) | (
+            PublicStatus::Stopped,
+            PublicReasonKind::Completed | PublicReasonKind::Failed
+        )
+    )
 }
 fn malformed(error: impl std::fmt::Display) -> Reject {
     Reject::Malformed(error.to_string())
@@ -494,5 +530,80 @@ mod tests {
         let (_, _, agents) = store.merged().unwrap();
         assert_eq!(agents[0].view.status, PublicStatus::Running);
         assert!(agents[0].view.reason.is_none());
+    }
+
+    #[test]
+    fn stopped_completed_and_failed_reasons_round_trip_in_current_views() {
+        use sessiontap_core::domain::{PublicReasonKind, PublicStatusReason};
+        let store = HubStore::memory().unwrap();
+        let mut completed = view("00000000-0000-4000-8000-000000000001");
+        completed.status = PublicStatus::Stopped;
+        completed.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Completed,
+            summary: "Done".into(),
+        });
+        store
+            .ingest_snapshot(&snapshot("a", 1, vec![completed.clone()]))
+            .unwrap();
+        assert_eq!(
+            store.merged().unwrap().2[0]
+                .view
+                .reason
+                .as_ref()
+                .unwrap()
+                .kind,
+            PublicReasonKind::Completed
+        );
+
+        completed.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Failed,
+            summary: "Timed out".into(),
+        });
+        completed.updated_at = Utc::now();
+        let update = SourceEnvelope::Update {
+            schema_version: 1,
+            source_id: "a".into(),
+            delivery_id: "failed".into(),
+            revision: 2,
+            changed: BTreeSet::from([PublicField::Reason]),
+            view: Box::new(completed),
+        };
+        assert!(matches!(
+            store.ingest_update(&update).unwrap(),
+            UpdateAccept::Applied { .. }
+        ));
+        assert_eq!(
+            store.merged().unwrap().2[0]
+                .view
+                .reason
+                .as_ref()
+                .unwrap()
+                .kind,
+            PublicReasonKind::Failed
+        );
+    }
+
+    #[test]
+    fn incompatible_or_unbounded_public_reasons_are_rejected() {
+        use sessiontap_core::domain::{PublicReasonKind, PublicStatusReason};
+        let store = HubStore::memory().unwrap();
+        let mut invalid = view("00000000-0000-4000-8000-000000000001");
+        invalid.status = PublicStatus::Stopped;
+        invalid.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Input,
+            summary: "Choose".into(),
+        });
+        assert!(matches!(
+            store.ingest_snapshot(&snapshot("a", 1, vec![invalid.clone()])),
+            Err(Reject::Malformed(_))
+        ));
+        invalid.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Completed,
+            summary: "x".repeat(STATUS_REASON_MAX_CHARS + 1),
+        });
+        assert!(matches!(
+            store.ingest_snapshot(&snapshot("a", 1, vec![invalid])),
+            Err(Reject::Malformed(_))
+        ));
     }
 }

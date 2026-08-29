@@ -5,21 +5,31 @@ The MVP maps `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `PermissionRequest`, `Notification`, `Stop`, `StopFailure`, and `SessionEnd`.
 `UserPromptSubmit` starts a turn, tool activity marks working, permission prompts
 mark waiting for approval, input notifications mark waiting for input, and
-`Stop`/`StopFailure` return a live process to idle. Raw prompts, tool input,
-transcript paths, and assistant messages are discarded.
+`Stop`/`StopFailure` leave a live process publicly stopped. A later documented
+`idle_prompt` explicitly moves it to idle. Raw prompts, arbitrary tool input,
+transcript paths, and complete assistant messages are discarded; a root Stop
+may select the first 100 sanitized characters of `last_assistant_message` as a
+current `completed` reason.
 When a readable `transcript_path` is supplied, SessionTap extracts only the
 latest bounded `aiTitle` or `customTitle` value for provider-session metadata;
 the transcript body and path are not normalized or persisted.
 
 Direct `PermissionRequest` carries bounded approval context. `AskUserQuestion`
 and MCP `Elicitation` are ordinary input waits. `agent_needs_input` is an input
-wait, delayed `permission_prompt` is broker-deduplicated, and `idle_prompt` is
-enrichment rather than completion. Post-tool signals resume work. `Stop` means
-completion; `StopFailure` carries only an allowlisted failure category.
+wait, delayed `permission_prompt` is enrichment, and `idle_prompt` is explicit
+idle rather than completion. Post-tool signals resume work. `Stop` means
+completion; `StopFailure` exposes only an allowlisted failure category when
+available. Approval summaries use a normalized tool label plus the first 100
+sanitized description characters, falling back to the command excerpt.
 
 An independently sanitized capture maps `prompt_id` to current turn and
-allowlisted `permission_mode` and `effort.level` to provider metadata, but
-establishes no usage fields. Question/options content is discarded.
+allowlisted `permission_mode` (including `dontAsk`) and `effort.level` to provider metadata, but
+establishes no usage fields. At most the first sanitized question is selected
+as current input context; options and remaining question content are discarded.
+
+Hooks with a non-empty `agent_id`, plus `SubagentStart` and `SubagentStop`, are
+ignored before extracting root activity, reasons, session metadata, or usage.
+An `agent_type` without `agent_id` is still treated as the main session.
 
 Minimum locally tested version: Claude Code 2.1.241. New event fields and
 unknown events are ignored. Live smoke testing is opt-in; see

@@ -12,18 +12,19 @@ beyond tested contracts.
 
 ## Alpha data and deferred fields
 
-SessionTap is single-user alpha software. The public-view cutover intentionally
-does not migrate or read older local or hub protocols and databases. If an
-existing `sessiontap` or `sessiontap-hub` SQLite database is incompatible,
-stop the corresponding daemon, remove that database, and let the service
-recreate it. No schema-version increment or compatibility shim is provided.
+SessionTap is single-user alpha software. The stopped-reason change is a
+breaking public semantic and daemon/hub binaries must be upgraded together.
+The daemon migrates legacy blocked-attention rows into the generalized current
+status-reason table; the canonical alpha wire schema remains version 1.
 
 `PublicAgentView` is observer-facing, not non-sensitive: working directories,
-repository paths, session names, model metadata, usage, and bounded blocked
+repository paths, session names, model metadata, usage, and bounded status
 reasons can disclose personal or project information. Preserve local socket
 permissions, sink authentication, and transport security.
 
-Running/stopped reasons, a public `last_outcome`, provider-store/history
-collection, and remote control are deferred. Internal lifecycle, activity,
-normalized event kinds, process identities, and multiplexer state remain
-reducer/control-only data.
+Stopped `completed`/`failed` reasons are current-state-only. A live completed
+agent stays stopped until a verified idle signal or reliable new work; process
+exit can also produce stopped with no reason. Provider-store/history collection,
+a public lifecycle field, and remote control remain deferred. Internal
+lifecycle, activity, normalized event kinds, process identities, and
+multiplexer state remain reducer/control-only data.

@@ -1,14 +1,15 @@
 use crate::{
-    AgentAdapter, LaunchPreparation, SetupAction, SetupReport, attention_context, bounded_field,
-    failure_context, merge_hook_config, probe_qwen_dual_output, provider_metadata,
-    qwen_has_user_side_channel, sanitize_bounded,
+    AgentAdapter, LaunchPreparation, SetupAction, SetupReport, bounded_field,
+    completed_reason_context, failed_reason_context, is_subagent_payload, merge_hook_config,
+    probe_qwen_dual_output, provider_metadata, qwen_has_user_side_channel, sanitize_bounded,
+    status_reason_context,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use sessiontap_core::domain::{
-    EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent, Usage,
+    AdapterOutcome, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent, Usage,
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -28,6 +29,17 @@ pub const HOOK_EVENTS: &[&str] = &[
 ];
 pub struct QwenAdapter;
 
+#[cfg(test)]
+impl QwenAdapter {
+    /// Test helper for cases that expect a normalized root event.
+    pub fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
+        match <Self as AgentAdapter>::normalize(self, id, raw)? {
+            AdapterOutcome::Event(event) => Ok(*event),
+            AdapterOutcome::Ignored => anyhow::bail!("ignored subagent hook"),
+        }
+    }
+}
+
 #[async_trait]
 impl AgentAdapter for QwenAdapter {
     fn dialect(&self) -> &'static str {
@@ -44,7 +56,10 @@ impl AgentAdapter for QwenAdapter {
             side_channel: Some(path),
         })
     }
-    fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
+    fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<AdapterOutcome> {
+        if is_subagent_payload(raw) {
+            return Ok(AdapterOutcome::Ignored);
+        }
         let name = raw
             .get("hook_event_name")
             .or_else(|| raw.get("event_name"))
@@ -74,6 +89,8 @@ impl AgentAdapter for QwenAdapter {
             EventKind::ProviderSessionStarted
         } else if name.contains("sessionend") {
             EventKind::ProviderSessionEnded
+        } else if notification == "idle_prompt" {
+            EventKind::Idle
         } else if empty_prompt {
             EventKind::Enrichment
         } else if name.contains("userprompt")
@@ -83,7 +100,9 @@ impl AgentAdapter for QwenAdapter {
             EventKind::NewTurn
         } else if ask {
             EventKind::WaitingInput
-        } else if name.contains("permission") || notification.contains("permission_prompt") {
+        } else if name == "notification" && notification == "permission_prompt" {
+            EventKind::Enrichment
+        } else if name.contains("permission") {
             EventKind::WaitingApproval
         } else if name.contains("question")
             || name.contains("elicitation")
@@ -112,12 +131,13 @@ impl AgentAdapter for QwenAdapter {
             .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&Utc))
             .unwrap_or(received_at);
-        let attention = match kind {
-            EventKind::WaitingApproval => attention_context(raw, false),
-            EventKind::WaitingInput => attention_context(raw, true),
+        let status_reason = match kind {
+            EventKind::WaitingApproval => status_reason_context(raw, false),
+            EventKind::WaitingInput => status_reason_context(raw, true),
+            EventKind::Completed => completed_reason_context(raw),
+            EventKind::Failed => failed_reason_context(raw),
             _ => None,
         };
-        let failure = (kind == EventKind::Failed).then(|| failure_context(raw));
         let usage = Usage {
             input_tokens: raw.get("input_tokens").and_then(Value::as_u64),
             output_tokens: raw.get("output_tokens").and_then(Value::as_u64),
@@ -133,7 +153,7 @@ impl AgentAdapter for QwenAdapter {
             .get("turn_id")
             .and_then(Value::as_str)
             .and_then(|v| sanitize_bounded(v, 128));
-        Ok(NormalizedAdapterEvent {
+        Ok(AdapterOutcome::Event(Box::new(NormalizedAdapterEvent {
             event: NormalizedEvent {
                 schema_version: sessiontap_core::SCHEMA_VERSION,
                 event_id: raw
@@ -163,9 +183,8 @@ impl AgentAdapter for QwenAdapter {
                 usage,
                 turn_id,
             },
-            attention,
-            failure,
-        })
+            status_reason,
+        })))
     }
     async fn setup(
         &self,

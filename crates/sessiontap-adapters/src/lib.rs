@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use sessiontap_core::{
     config::Config,
     domain::{
-        ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, AttentionContext, AttentionSource,
-        FailureContext, InvocationId, NormalizedAdapterEvent, ProviderMetadata,
+        AdapterOutcome, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
+        STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, StatusReasonContext, StatusReasonSource,
     },
 };
 use std::{
@@ -60,11 +60,7 @@ pub trait AgentAdapter: Send + Sync {
     fn prepare_launch(&self, _args: &[String], _private_dir: &Path) -> Result<LaunchPreparation> {
         Ok(LaunchPreparation::default())
     }
-    fn normalize(
-        &self,
-        invocation_id: &InvocationId,
-        raw: &Value,
-    ) -> Result<NormalizedAdapterEvent>;
+    fn normalize(&self, invocation_id: &InvocationId, raw: &Value) -> Result<AdapterOutcome>;
     async fn setup(
         &self,
         home: &Path,
@@ -338,7 +334,14 @@ pub(crate) fn provider_metadata(
     let permission_mode = bounded_field(raw, &["permission_mode"], 32).filter(|v| {
         matches!(
             v.as_str(),
-            "default" | "acceptEdits" | "auto" | "plan" | "yolo" | "bypassPermissions"
+            "default"
+                | "acceptEdits"
+                | "auto"
+                | "auto_edit"
+                | "plan"
+                | "yolo"
+                | "dontAsk"
+                | "bypassPermissions"
         )
     });
     let current_turn_id = raw
@@ -432,8 +435,8 @@ fn bounded_one_line(value: &str) -> Option<String> {
             out.push(' ');
         }
         spaced = false;
-        if out.chars().count() >= ATTENTION_MAX_CHARS
-            || out.len() + ch.len_utf8() > ATTENTION_MAX_BYTES
+        if out.chars().count() >= STATUS_REASON_MAX_CHARS
+            || out.len() + ch.len_utf8() > STATUS_REASON_MAX_BYTES
         {
             break;
         }
@@ -449,27 +452,103 @@ fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
         .find_map(|name| raw.get(*name).and_then(Value::as_str))
 }
 
-pub(crate) fn attention_context(raw: &Value, input: bool) -> Option<AttentionContext> {
+pub(crate) fn is_subagent_payload(raw: &Value) -> bool {
+    if raw
+        .get("agent_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
+    {
+        return true;
+    }
+    raw.get("hook_event_name")
+        .or_else(|| raw.get("event_name"))
+        .or_else(|| raw.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("SubagentStart") || name.eq_ignore_ascii_case("SubagentStop")
+        })
+}
+
+pub(crate) fn status_excerpt(value: &str) -> Option<String> {
+    let mut escaped = false;
+    let mut clean = String::new();
+    let mut pending_space = false;
+    for ch in value.chars() {
+        if ch == '\u{1b}' {
+            escaped = true;
+            continue;
+        }
+        if escaped {
+            if ch.is_ascii_alphabetic() {
+                escaped = false;
+            }
+            continue;
+        }
+        if ch.is_control() || ch.is_whitespace() {
+            pending_space = !clean.is_empty();
+            continue;
+        }
+        if pending_space && !clean.ends_with(' ') {
+            clean.push(' ');
+        }
+        pending_space = false;
+        clean.push(ch);
+    }
+    let out = clean
+        .chars()
+        .take(STATUS_EXCERPT_MAX_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_owned();
+    (!out.is_empty()).then_some(out)
+}
+
+fn tool_label(raw: &Value) -> Option<String> {
+    let raw = field(raw, &["tool_name", "tool", "name"])?;
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("apply_patch") || lower.contains("applypatch") || lower == "patch" {
+        return Some("patch".into());
+    }
+    if [
+        "bash",
+        "shell",
+        "exec_command",
+        "run_shell_command",
+        "command",
+    ]
+    .iter()
+    .any(|alias| lower == *alias || lower.ends_with(&format!("__{alias}")))
+    {
+        return Some("bash".into());
+    }
+    let mut label = String::new();
+    let mut separator = false;
+    for ch in lower.chars() {
+        if ch.is_alphanumeric() {
+            if separator && !label.is_empty() {
+                label.push('-');
+            }
+            separator = false;
+            label.push(ch);
+        } else {
+            separator = true;
+        }
+        if label.chars().count() >= 24 {
+            break;
+        }
+    }
+    let label = label.trim_matches('-').to_owned();
+    (!label.is_empty()).then_some(label)
+}
+
+pub(crate) fn status_reason_context(raw: &Value, input: bool) -> Option<StatusReasonContext> {
     let args = raw
         .get("tool_input")
         .or_else(|| raw.get("arguments"))
         .or_else(|| raw.get("input"));
-    let description = field(raw, &["description", "message"])
-        .and_then(bounded_one_line)
-        .or_else(|| {
-            args.and_then(|value| field(value, &["description"]))
-                .and_then(bounded_one_line)
-        });
-    if let Some(summary) = description {
-        return Some(AttentionContext {
-            summary,
-            source: AttentionSource::Description,
-        });
-    }
-    let tool = field(raw, &["tool_name", "tool", "name"]);
     if input {
-        let question = field(raw, &["question", "prompt"])
-            .or_else(|| args.and_then(|v| field(v, &["question", "prompt", "message"])))
+        let question = field(raw, &["question"])
+            .or_else(|| args.and_then(|v| field(v, &["question"])))
             .or_else(|| {
                 args.and_then(|v| {
                     v.get("questions")?
@@ -478,95 +557,85 @@ pub(crate) fn attention_context(raw: &Value, input: bool) -> Option<AttentionCon
                         .get("question")?
                         .as_str()
                 })
-            });
-        if let Some(summary) = question.and_then(bounded_one_line) {
-            return Some(AttentionContext {
+            })
+            .or_else(|| field(raw, &["prompt"]))
+            .or_else(|| args.and_then(|v| field(v, &["prompt"])));
+        if let Some(summary) = question.and_then(status_excerpt) {
+            return Some(StatusReasonContext {
                 summary,
-                source: AttentionSource::Question,
+                source: StatusReasonSource::Question,
             });
         }
-    }
-    if let Some(tool) = tool {
-        let lower = tool.to_ascii_lowercase();
-        if lower.contains("patch") {
-            return Some(AttentionContext {
-                summary: "Apply a patch".into(),
-                source: AttentionSource::ToolSummary,
+        if let Some(summary) = field(raw, &["message"])
+            .or_else(|| args.and_then(|v| field(v, &["message"])))
+            .and_then(status_excerpt)
+        {
+            return Some(StatusReasonContext {
+                summary,
+                source: StatusReasonSource::Question,
             });
         }
-        if ["read", "write", "edit", "glob", "grep"]
-            .iter()
-            .any(|name| lower == *name || lower.ends_with(&format!("__{name}")))
-        {
-            if let Some(path) = args.and_then(|v| field(v, &["file_path", "path"])) {
-                let base = Path::new(path)
-                    .file_name()
-                    .and_then(|v| v.to_str())
-                    .unwrap_or("file");
-                return bounded_one_line(&format!("{tool}: {base}")).map(|summary| {
-                    AttentionContext {
-                        summary,
-                        source: AttentionSource::ToolSummary,
-                    }
-                });
-            }
-        }
-        if ["bash", "shell", "command", "exec_command"]
-            .iter()
-            .any(|name| lower.contains(name))
-        {
-            if let Some(command) = args.and_then(|v| field(v, &["command", "cmd"])) {
-                let suspicious = [
-                    "token",
-                    "secret",
-                    "password",
-                    "authorization",
-                    "api_key",
-                    "api-key",
-                    "bearer",
-                    "sk-",
-                ]
-                .iter()
-                .any(|needle| command.to_ascii_lowercase().contains(needle));
-                let summary = if suspicious {
-                    Some("Run a shell command".into())
-                } else {
-                    bounded_one_line(command)
-                };
-                return summary.map(|summary| AttentionContext {
-                    summary,
-                    source: AttentionSource::Command,
-                });
-            }
-        }
-        return bounded_one_line(tool).map(|summary| AttentionContext {
-            summary,
-            source: AttentionSource::ToolName,
+        return Some(StatusReasonContext {
+            summary: "Input requested".into(),
+            source: StatusReasonSource::GenericInput,
         });
     }
-    input.then(|| AttentionContext {
-        summary: "Input requested".into(),
-        source: AttentionSource::GenericInput,
+
+    let label = tool_label(raw)?;
+    let description = field(raw, &["description"])
+        .or_else(|| args.and_then(|value| field(value, &["description"])))
+        .and_then(status_excerpt);
+    if let Some(description) = description {
+        return Some(StatusReasonContext {
+            summary: format!("{label} {description}"),
+            source: StatusReasonSource::Description,
+        });
+    }
+    let command = args
+        .and_then(|value| field(value, &["command", "cmd"]))
+        .and_then(status_excerpt);
+    let source = if command.is_some() {
+        StatusReasonSource::Command
+    } else {
+        StatusReasonSource::ToolName
+    };
+    Some(StatusReasonContext {
+        summary: command.map_or_else(|| label.clone(), |command| format!("{label} {command}")),
+        source,
     })
 }
 
-pub(crate) fn failure_context(raw: &Value) -> FailureContext {
+pub(crate) fn completed_reason_context(raw: &Value) -> Option<StatusReasonContext> {
+    raw.get("last_assistant_message")
+        .and_then(Value::as_str)
+        .and_then(status_excerpt)
+        .map(|summary| StatusReasonContext {
+            summary,
+            source: StatusReasonSource::AssistantMessage,
+        })
+}
+
+pub(crate) fn failed_reason_context(raw: &Value) -> Option<StatusReasonContext> {
     let category = field(raw, &["error_category", "failure_category", "reason"])
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if category.contains("auth") {
-        FailureContext::Authentication
+    let summary = if category.contains("auth") {
+        "Authentication failed"
     } else if category.contains("permission") || category.contains("denied") {
-        FailureContext::PermissionDenied
+        "Permission denied"
     } else if category.contains("rate") {
-        FailureContext::RateLimited
+        "Rate limited"
     } else if category.contains("timeout") {
-        FailureContext::Timeout
+        "Timed out"
     } else if category.contains("tool") {
-        FailureContext::ToolError
+        "Tool error"
     } else {
-        FailureContext::Unknown
-    }
+        return None;
+    };
+    Some(StatusReasonContext {
+        summary: summary.into(),
+        source: StatusReasonSource::FailureCategory,
+    })
 }
 
 pub fn qwen_has_user_side_channel(args: &[String]) -> bool {
@@ -1050,7 +1119,7 @@ mod tests {
         let metadata = claude.event.provider_metadata.unwrap();
         assert_eq!(metadata.effort.as_deref(), Some("high"));
         assert_eq!(metadata.permission_mode.as_deref(), Some("acceptEdits"));
-        assert!(claude.attention.is_some());
+        assert!(claude.status_reason.is_some());
         assert!(claude.event.usage.is_none());
 
         let qwen: Value =
@@ -1104,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn attention_fallbacks_are_bounded_and_safe() {
+    fn status_reason_fallbacks_are_bounded_and_safe() {
         let id = InvocationId::new();
         let raw = json!({
             "hook_event_name": "PermissionRequest",
@@ -1115,13 +1184,13 @@ mod tests {
                 "description": "Nested description"
             }
         });
-        let attention = codex::CodexAdapter
+        let reason = codex::CodexAdapter
             .normalize(&id, &raw)
             .unwrap()
-            .attention
+            .status_reason
             .unwrap();
-        assert_eq!(attention.summary, "Top-level description");
-        assert_eq!(attention.source, AttentionSource::Description);
+        assert_eq!(reason.summary, "bash Top-level description");
+        assert_eq!(reason.source, StatusReasonSource::Description);
 
         let raw = json!({
             "hook_event_name": "PermissionRequest",
@@ -1131,43 +1200,43 @@ mod tests {
                 "description": "May I run the verification?"
             }
         });
-        let attention = codex::CodexAdapter
+        let reason = codex::CodexAdapter
             .normalize(&id, &raw)
             .unwrap()
-            .attention
+            .status_reason
             .unwrap();
-        assert_eq!(attention.summary, "May I run the verification?");
-        assert_eq!(attention.source, AttentionSource::Description);
+        assert_eq!(reason.summary, "bash May I run the verification?");
+        assert_eq!(reason.source, StatusReasonSource::Description);
 
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"echo\nsecret token=abc"}});
         assert_eq!(
             claude::ClaudeAdapter
                 .normalize(&id, &raw)
                 .unwrap()
-                .attention
+                .status_reason
                 .unwrap()
                 .summary,
-            "Run a shell command"
+            "bash echo secret token=abc"
         );
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"apply_patch","tool_input":{"patch":"PRIVATE"}});
         assert_eq!(
             claude::ClaudeAdapter
                 .normalize(&id, &raw)
                 .unwrap()
-                .attention
+                .status_reason
                 .unwrap()
                 .summary,
-            "Apply a patch"
+            "patch"
         );
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Unknown","tool_input":{"private":"PRIVATE"}});
         assert_eq!(
             claude::ClaudeAdapter
                 .normalize(&id, &raw)
                 .unwrap()
-                .attention
+                .status_reason
                 .unwrap()
                 .summary,
-            "Unknown"
+            "unknown"
         );
     }
 
@@ -1181,14 +1250,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(done.event.kind, EventKind::Completed);
-        assert!(done.attention.is_none());
+        assert_eq!(done.status_reason.unwrap().summary, "PRIVATE");
         let failed = qwen::QwenAdapter
             .normalize(
                 &id,
                 &json!({"hook_event_name":"StopFailure","reason":"timeout","error":"PRIVATE"}),
             )
             .unwrap();
-        assert_eq!(failed.failure, Some(FailureContext::Timeout));
+        assert_eq!(failed.status_reason.as_ref().unwrap().summary, "Timed out");
         assert!(!serde_json::to_string(&failed).unwrap().contains("PRIVATE"));
 
         let private = codex::CodexAdapter
@@ -1248,6 +1317,138 @@ mod tests {
         let serialized = serde_json::to_string(&normalized).unwrap();
         assert!(!serialized.contains("PRIVATE"));
         assert!(!serialized.contains("session.jsonl"));
+    }
+
+    #[test]
+    fn subagent_payloads_are_explicitly_ignored_before_normalization() {
+        let id = InvocationId::new();
+        let fixtures = [
+            (
+                "claude",
+                serde_json::from_str(include_str!("../tests/fixtures/claude-subagent.json"))
+                    .unwrap(),
+            ),
+            (
+                "codex",
+                serde_json::from_str(include_str!("../tests/fixtures/codex-subagent.json"))
+                    .unwrap(),
+            ),
+            (
+                "qwen",
+                serde_json::from_str(include_str!("../tests/fixtures/qwen-subagent.json")).unwrap(),
+            ),
+        ];
+        for (provider, raw) in fixtures {
+            let outcome = match provider {
+                "claude" => AgentAdapter::normalize(&claude::ClaudeAdapter, &id, &raw),
+                "codex" => AgentAdapter::normalize(&codex::CodexAdapter, &id, &raw),
+                "qwen" => AgentAdapter::normalize(&qwen::QwenAdapter, &id, &raw),
+                _ => unreachable!(),
+            }
+            .unwrap();
+            assert_eq!(outcome, AdapterOutcome::Ignored);
+        }
+
+        let root = AgentAdapter::normalize(
+            &claude::ClaudeAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "Stop",
+                "agent_type": "general-purpose",
+                "last_assistant_message": "root response"
+            }),
+        )
+        .unwrap();
+        assert!(matches!(root, AdapterOutcome::Event(_)));
+    }
+
+    #[test]
+    fn selected_text_is_control_free_collapsed_and_unicode_bounded() {
+        let selected =
+            status_excerpt(&format!("\u{1b}[31m  first\n\t{}tail", "界".repeat(120))).unwrap();
+        assert!(!selected.chars().any(char::is_control));
+        assert!(!selected.contains("  "));
+        assert_eq!(selected.chars().count(), STATUS_EXCERPT_MAX_CHARS);
+
+        let reason = status_reason_context(
+            &json!({
+                "message": "fallback message",
+                "tool_input": {
+                    "questions": [{"question": "first question"}, {"question": "second"}]
+                }
+            }),
+            true,
+        )
+        .unwrap();
+        assert_eq!(reason.summary, "first question");
+    }
+
+    #[test]
+    fn stop_idle_failure_and_permission_contracts_are_normalized() {
+        let id = InvocationId::new();
+        let message_less = qwen::QwenAdapter
+            .normalize(&id, &json!({"hook_event_name":"Stop"}))
+            .unwrap();
+        assert_eq!(message_less.event.kind, EventKind::Completed);
+        assert!(message_less.status_reason.is_none());
+
+        let unknown_failure = claude::ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name":"StopFailure","reason":"unclassified","error":"PRIVATE"}),
+            )
+            .unwrap();
+        assert_eq!(unknown_failure.event.kind, EventKind::Failed);
+        assert!(unknown_failure.status_reason.is_none());
+
+        for normalized in [
+            claude::ClaudeAdapter
+                .normalize(
+                    &id,
+                    &json!({"hook_event_name":"Notification","notification_type":"idle_prompt","message":"idle"}),
+                )
+                .unwrap(),
+            qwen::QwenAdapter
+                .normalize(
+                    &id,
+                    &json!({"hook_event_name":"Notification","notification_type":"idle_prompt","message":"idle"}),
+                )
+                .unwrap(),
+        ] {
+            assert_eq!(normalized.event.kind, EventKind::Idle);
+            assert!(normalized.status_reason.is_none());
+        }
+
+        let claude_permission = claude::ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name":"Stop","permission_mode":"dontAsk"}),
+            )
+            .unwrap();
+        assert_eq!(
+            claude_permission
+                .event
+                .provider_metadata
+                .unwrap()
+                .permission_mode
+                .as_deref(),
+            Some("dontAsk")
+        );
+        let qwen_permission = qwen::QwenAdapter
+            .normalize(
+                &id,
+                &json!({"hook_event_name":"Stop","permission_mode":"auto_edit"}),
+            )
+            .unwrap();
+        assert_eq!(
+            qwen_permission
+                .event
+                .provider_metadata
+                .unwrap()
+                .permission_mode
+                .as_deref(),
+            Some("auto_edit")
+        );
     }
 
     #[test]

@@ -15,13 +15,20 @@ restart at offset zero after truncation.
 
 Direct permission requests carry bounded approval context;
 `ask_user_question` and documented input-needed notifications are ordinary
-input waits. Observed `auto`, `plan`, and `yolo` permission modes are retained,
+input waits. Observed `auto`, `auto_edit`, `plan`, and `yolo` permission modes are retained,
 and valid hook timestamps become the event's provider-observed time. Empty
 `UserPromptSubmit` callbacks emitted around tool activity are enrichment rather
 than new turns. Delayed permission reminders are broker-deduplicated,
-`idle_prompt` is enrichment, and post-tool signals resume work. `Stop` means
-completion; `StopFailure` carries only an allowlisted category. Raw failure
-details and assistant messages are excluded.
+`idle_prompt` is explicit idle, and post-tool signals resume work. `Stop` makes
+the live root agent publicly stopped and may select the first 100 sanitized
+characters of `last_assistant_message` as `completed`; `StopFailure` may expose
+only an allowlisted category. Raw failure details and complete assistant
+messages are excluded. Approval summaries use a normalized tool label plus a
+bounded description or command excerpt.
+
+Any non-empty `agent_id`, `SubagentStart`, or `SubagentStop` payload is ignored
+before root activity, reason, session metadata, or usage extraction. An
+`agent_type` alone does not cause exclusion.
 
 An independently sanitized stop capture establishes top-level `input_tokens`
 and fractional `context_usage`; `0.5` becomes 50 percent. Other usage remains unknown.

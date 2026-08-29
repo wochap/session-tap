@@ -13,8 +13,16 @@ components, integrity, logging/privacy, and server-side requests.
   per-invocation credential. Credentials are environment-only and compared
   without early byte mismatch.
 - Stored/forwarded arguments are arrays with generic/provider redaction. Raw
-  hook payloads, prompts, transcripts, terminal streams, and tool inputs are
-  transient and excluded.
+  hook payloads, complete prompts/assistant messages, transcripts, terminal
+  streams, and arbitrary tool inputs are transient and excluded. The explicit
+  observer contract may select only a control-free, whitespace-collapsed
+  100-character question, description, command, final response, or allowlisted
+  failure summary as the latest current status reason.
+- Non-empty provider `agent_id` payloads and subagent lifecycle hooks are
+  ignored before root activity, metadata, usage, or reason extraction.
+- Configured sinks are trusted by the single operator and can receive bounded
+  public reasons; sink access control and transport security protect that
+  potentially sensitive observer data.
 - Remote cleartext HTTP is rejected; timeouts and payload caps are bounded.
 - tmux input uses `load-buffer`/`paste-buffer`, not a shell string, and target
   identities are checked immediately before each operation.

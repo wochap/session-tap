@@ -50,6 +50,7 @@ pub enum Activity {
     Working,
     WaitingInput,
     WaitingApproval,
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,8 @@ pub enum PublicStatus {
 pub enum PublicReasonKind {
     Input,
     Approval,
+    Completed,
+    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +135,7 @@ pub const fn derive_status(lifecycle: Lifecycle, activity: Activity) -> PublicSt
         Lifecycle::Starting => PublicStatus::Idle,
         Lifecycle::Alive => match activity {
             Activity::WaitingInput | Activity::WaitingApproval => PublicStatus::Blocked,
+            Activity::Stopped => PublicStatus::Stopped,
             Activity::Working => PublicStatus::Running,
             Activity::Unknown | Activity::Idle => PublicStatus::Idle,
         },
@@ -141,24 +145,22 @@ pub const fn derive_status(lifecycle: Lifecycle, activity: Activity) -> PublicSt
 #[must_use]
 pub fn project_public(
     snapshot: &InvocationSnapshot,
-    attention: Option<&ActiveAttention>,
+    current_reason: Option<&CurrentStatusReason>,
 ) -> PublicAgentView {
     let status = derive_status(snapshot.lifecycle, snapshot.activity);
-    let reason = if status == PublicStatus::Blocked {
-        attention.and_then(|attention| {
-            let kind = match attention.kind {
-                EventKind::WaitingInput => PublicReasonKind::Input,
-                EventKind::WaitingApproval => PublicReasonKind::Approval,
-                _ => return None,
-            };
-            Some(PublicStatusReason {
-                kind,
-                summary: attention.context.summary.clone(),
-            })
+    let reason = current_reason.and_then(|reason| {
+        let kind = match (status, &reason.kind) {
+            (PublicStatus::Blocked, EventKind::WaitingInput) => PublicReasonKind::Input,
+            (PublicStatus::Blocked, EventKind::WaitingApproval) => PublicReasonKind::Approval,
+            (PublicStatus::Stopped, EventKind::Completed) => PublicReasonKind::Completed,
+            (PublicStatus::Stopped, EventKind::Failed) => PublicReasonKind::Failed,
+            _ => return None,
+        };
+        Some(PublicStatusReason {
+            kind,
+            summary: reason.context.summary.clone(),
         })
-    } else {
-        None
-    };
+    });
     PublicAgentView {
         invocation_id: snapshot.invocation_id.clone(),
         provider: snapshot.provider.clone(),
@@ -329,6 +331,7 @@ pub struct InvocationSnapshot {
 pub enum EventKind {
     NewTurn,
     Working,
+    Idle,
     WaitingInput,
     WaitingApproval,
     Completed,
@@ -339,50 +342,40 @@ pub enum EventKind {
     Enrichment,
 }
 
-pub const ATTENTION_MAX_CHARS: usize = 160;
-pub const ATTENTION_MAX_BYTES: usize = 512;
+pub const STATUS_EXCERPT_MAX_CHARS: usize = 100;
+pub const STATUS_REASON_MAX_CHARS: usize = 128;
+pub const STATUS_REASON_MAX_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttentionSource {
+pub enum StatusReasonSource {
     Description,
     ToolSummary,
     Command,
     Question,
     ToolName,
     GenericInput,
+    AssistantMessage,
+    FailureCategory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttentionContext {
+pub struct StatusReasonContext {
     pub summary: String,
-    pub source: AttentionSource,
+    pub source: StatusReasonSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActiveAttention {
+pub struct CurrentStatusReason {
     pub kind: EventKind,
-    pub context: AttentionContext,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FailureContext {
-    Authentication,
-    PermissionDenied,
-    RateLimited,
-    Timeout,
-    ToolError,
-    Unknown,
+    pub context: StatusReasonContext,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveEventMetadata {
     pub kind: EventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub attention: Option<AttentionContext>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failure: Option<FailureContext>,
+    pub status_reason: Option<StatusReasonContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
 }
@@ -391,9 +384,23 @@ pub struct LiveEventMetadata {
 pub struct NormalizedAdapterEvent {
     pub event: NormalizedEvent,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attention: Option<AttentionContext>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure: Option<FailureContext>,
+    pub status_reason: Option<StatusReasonContext>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdapterOutcome {
+    Event(Box<NormalizedAdapterEvent>),
+    Ignored,
+}
+
+impl AdapterOutcome {
+    #[must_use]
+    pub fn into_event(self) -> Option<NormalizedAdapterEvent> {
+        match self {
+            Self::Event(event) => Some(*event),
+            Self::Ignored => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -430,6 +437,7 @@ mod tests {
             Activity::Working,
             Activity::WaitingInput,
             Activity::WaitingApproval,
+            Activity::Stopped,
         ] {
             assert_eq!(
                 derive_status(Lifecycle::Exited, activity),
@@ -459,6 +467,158 @@ mod tests {
         assert_eq!(
             derive_status(Lifecycle::Alive, Activity::Unknown),
             PublicStatus::Idle
+        );
+        assert_eq!(
+            derive_status(Lifecycle::Alive, Activity::Stopped),
+            PublicStatus::Stopped
+        );
+    }
+
+    #[test]
+    fn public_reason_projection_requires_a_compatible_status_and_kind() {
+        let now = Utc::now();
+        let mut snapshot = InvocationSnapshot {
+            schema_version: 1,
+            revision: 1,
+            invocation_id: InvocationId::new(),
+            provider: "fixture".into(),
+            executable: "fixture".into(),
+            args: vec![],
+            cwd: "/fixture".into(),
+            process: ProcessMetadata::default(),
+            created_at: now,
+            updated_at: now,
+            lifecycle: Lifecycle::Alive,
+            activity: Activity::Stopped,
+            status: PublicStatus::Stopped,
+            provider_session: None,
+            provider_metadata: None,
+            usage: None,
+            repository: None,
+            multiplexer: None,
+            capabilities: Capabilities::default(),
+            turn_generation: 1,
+            completed_generation: Some(1),
+        };
+        let completed = CurrentStatusReason {
+            kind: EventKind::Completed,
+            context: StatusReasonContext {
+                summary: "Done".into(),
+                source: StatusReasonSource::AssistantMessage,
+            },
+        };
+        assert_eq!(
+            project_public(&snapshot, Some(&completed))
+                .reason
+                .unwrap()
+                .kind,
+            PublicReasonKind::Completed
+        );
+        let blocked = CurrentStatusReason {
+            kind: EventKind::WaitingInput,
+            context: StatusReasonContext {
+                summary: "Choose".into(),
+                source: StatusReasonSource::Question,
+            },
+        };
+        assert!(project_public(&snapshot, Some(&blocked)).reason.is_none());
+        snapshot.activity = Activity::WaitingInput;
+        assert_eq!(
+            project_public(&snapshot, Some(&blocked))
+                .reason
+                .unwrap()
+                .kind,
+            PublicReasonKind::Input
+        );
+        assert!(project_public(&snapshot, Some(&completed)).reason.is_none());
+
+        let approval = CurrentStatusReason {
+            kind: EventKind::WaitingApproval,
+            context: StatusReasonContext {
+                summary: "Approve".into(),
+                source: StatusReasonSource::Description,
+            },
+        };
+        snapshot.activity = Activity::WaitingApproval;
+        assert_eq!(
+            project_public(&snapshot, Some(&approval))
+                .reason
+                .unwrap()
+                .kind,
+            PublicReasonKind::Approval
+        );
+        let failed = CurrentStatusReason {
+            kind: EventKind::Failed,
+            context: StatusReasonContext {
+                summary: "Timed out".into(),
+                source: StatusReasonSource::FailureCategory,
+            },
+        };
+        snapshot.activity = Activity::Stopped;
+        assert_eq!(
+            project_public(&snapshot, Some(&failed))
+                .reason
+                .unwrap()
+                .kind,
+            PublicReasonKind::Failed
+        );
+    }
+
+    #[test]
+    fn changed_fields_cover_blocked_stopped_failed_idle_and_lifecycle_stop() {
+        let now = Utc::now();
+        let base = PublicAgentView {
+            invocation_id: InvocationId::new(),
+            provider: "fixture".into(),
+            status: PublicStatus::Idle,
+            reason: None,
+            cwd: "/fixture".into(),
+            created_at: now,
+            updated_at: now,
+            session: None,
+            metadata: None,
+            usage: None,
+            repository: None,
+        };
+        let mut blocked = base.clone();
+        blocked.status = PublicStatus::Blocked;
+        blocked.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Input,
+            summary: "Choose".into(),
+        });
+        assert_eq!(
+            changed_public_fields(Some(&base), &blocked),
+            BTreeSet::from([PublicField::Status, PublicField::Reason])
+        );
+
+        let mut completed = blocked.clone();
+        completed.status = PublicStatus::Stopped;
+        completed.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Completed,
+            summary: "Done".into(),
+        });
+        assert_eq!(
+            changed_public_fields(Some(&blocked), &completed),
+            BTreeSet::from([PublicField::Status, PublicField::Reason])
+        );
+        let mut failed = completed.clone();
+        failed.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Failed,
+            summary: "Timed out".into(),
+        });
+        assert_eq!(
+            changed_public_fields(Some(&completed), &failed),
+            BTreeSet::from([PublicField::Reason])
+        );
+        assert_eq!(
+            changed_public_fields(Some(&failed), &base),
+            BTreeSet::from([PublicField::Status, PublicField::Reason])
+        );
+        let mut lifecycle_only = base.clone();
+        lifecycle_only.status = PublicStatus::Stopped;
+        assert_eq!(
+            changed_public_fields(Some(&base), &lifecycle_only),
+            BTreeSet::from([PublicField::Status])
         );
     }
 
@@ -509,16 +669,14 @@ mod tests {
     fn live_metadata_uses_stable_snake_case() {
         let value = serde_json::to_value(LiveEventMetadata {
             kind: EventKind::WaitingApproval,
-            attention: Some(AttentionContext {
+            status_reason: Some(StatusReasonContext {
                 summary: "Run tests".into(),
-                source: AttentionSource::ToolSummary,
+                source: StatusReasonSource::ToolSummary,
             }),
-            failure: Some(FailureContext::PermissionDenied),
             turn_id: None,
         })
         .unwrap();
         assert_eq!(value["kind"], "waiting_approval");
-        assert_eq!(value["attention"]["source"], "tool_summary");
-        assert_eq!(value["failure"], "permission_denied");
+        assert_eq!(value["status_reason"]["source"], "tool_summary");
     }
 }

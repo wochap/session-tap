@@ -429,7 +429,10 @@ async fn tail_provider_side_channel(
         match tail.poll() {
             Ok(values) => {
                 for value in values {
-                    if let Ok(mut normalized) = adapter.normalize(&invocation_id, &value) {
+                    if let Ok(Some(mut normalized)) = adapter
+                        .normalize(&invocation_id, &value)
+                        .map(|outcome| outcome.into_event())
+                    {
                         normalized.event.provider = provider.clone();
                         let _ = request(
                             &paths,
@@ -438,8 +441,7 @@ async fn tail_provider_side_channel(
                                 invocation_id: invocation_id.clone(),
                                 credential: credential.clone(),
                                 event: Box::new(normalized.event),
-                                attention: normalized.attention,
-                                failure: normalized.failure,
+                                status_reason: normalized.status_reason,
                             },
                         )
                         .await;
@@ -504,7 +506,10 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let Ok(value) = serde_json::from_slice(&raw) else {
         return Ok(());
     };
-    let Ok(mut normalized) = adapter.normalize(&uuid, &value) else {
+    let Ok(Some(mut normalized)) = adapter
+        .normalize(&uuid, &value)
+        .map(|outcome| outcome.into_event())
+    else {
         return Ok(());
     };
     // The adapter selects a dialect; the authenticated invocation selects the
@@ -517,8 +522,7 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
             invocation_id: uuid,
             credential,
             event: Box::new(normalized.event),
-            attention: normalized.attention,
-            failure: normalized.failure,
+            status_reason: normalized.status_reason,
         },
     );
     let _ = tokio::time::timeout(HOOK_TIMEOUT, future).await;

@@ -108,8 +108,8 @@ Each `PublicAgentView` contains only observer-facing normalized fields:
 | --- | --- | --- |
 | `invocation_id` | string (uuid) | unique wrapper invocation |
 | `provider` | string | configured identity, including aliases |
-| `status` | enum | `running` / `blocked` / `idle` / `stopped` |
-| `reason` | object? | bounded blocked reason: `input` or `approval` |
+| `status` | enum | `running` / `blocked` / `idle` / `stopped`; `stopped` includes a live agent that finished or failed a response |
+| `reason` | object? | bounded compatible reason: blocked `input`/`approval` or stopped `completed`/`failed` |
 | `cwd` | string | launch working directory |
 | `created_at`, `updated_at` | RFC 3339 | timestamps |
 | `session` | object? | sanitized `{id, name, start_reason}` |
@@ -121,10 +121,13 @@ Each `PublicAgentView` contains only observer-facing normalized fields:
 
 Public fields are sanitized: no credentials, executable arguments, process or
 multiplexer identities, reducer state, raw prompt, transcript, hook body, or
-tool input is serialized. Sinks are disabled by default; HTTP sinks require
-HTTPS except loopback development receivers. See `docs/cli.md` for sink and
-custom-adapter configuration, and `docs/smoke-tests.md` for live provider
-testing.
+complete tool/assistant input is serialized. A reason may intentionally expose
+the first 100 sanitized Unicode characters of a selected question, approval
+description/command, final assistant response, or an allowlisted failure
+category. Sinks are disabled by default and are trusted, operator-controlled
+observers; HTTP sinks require HTTPS except loopback development receivers. See
+`docs/cli.md` for sink and custom-adapter configuration, and
+`docs/smoke-tests.md` for live provider testing.
 
 Snapshot envelopes are non-notifying baselines. Updates contain the complete
 resulting view and a deterministic non-empty set of changed public field paths.

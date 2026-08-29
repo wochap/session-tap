@@ -16,9 +16,16 @@ provider launch.
 Permission requests carry bounded approval context. Documented
 `UserInputRequest`/question forms map to ordinary input when present, and
 post-tool signals resume work. `turn_id` is retained as the sanitized current
-turn identity. `Stop` is completion and `SessionEnd` closes only the provider
-session; wrapper exit remains authoritative. The supported public contract has no reliable turn-failure hook, so a
+turn identity. `Stop` makes the live agent publicly stopped and may expose the
+first 100 sanitized characters of `last_assistant_message` as a current
+`completed` reason. `SessionEnd` closes only the provider session and preserves
+the current activity; wrapper exit remains authoritative. The supported public contract has no reliable turn-failure hook, so a
 nonzero process exit is not promoted to a turn-level failure.
+
+Approval summaries use `<normalized-tool> <description>`, falling back to the
+first 100 sanitized command characters. Documented permission modes include
+`dontAsk`. Payloads with non-empty `agent_id`, `SubagentStart`, or
+`SubagentStop` are ignored before root normalization.
 
 Minimum locally tested version: Codex CLI 0.149.1. Unknown fields/events are
 ignored and raw hook input is never persisted. Supplied sanitized captures do

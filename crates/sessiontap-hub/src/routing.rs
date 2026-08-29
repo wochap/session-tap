@@ -214,4 +214,32 @@ mod tests {
         };
         assert!(matches(&subscription, &update()));
     }
+
+    #[test]
+    fn completed_subscription_matches_response_but_not_lifecycle_only_stop() {
+        let subscription = Subscription {
+            name: Some("completed".into()),
+            match_criteria: MatchCriteria {
+                statuses: vec!["stopped".into()],
+                reasons: vec!["completed".into()],
+                ..Default::default()
+            },
+            changes: vec!["status".into(), "reason".into()],
+            commands: vec![vec!["true".into()]],
+        };
+        let mut completed = update();
+        completed.view.status = PublicStatus::Stopped;
+        completed.view.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Completed,
+            summary: "All tests pass".into(),
+        });
+        completed.changed = BTreeSet::from([PublicField::Status, PublicField::Reason]);
+        assert!(matches(&subscription, &completed));
+        let vars = environment(&completed);
+        assert!(vars.contains(&("SESSIONTAP_REASON_KIND".into(), "completed".into())));
+        assert!(vars.contains(&("SESSIONTAP_REASON_SUMMARY".into(), "All tests pass".into())));
+
+        completed.view.reason = None;
+        assert!(!matches(&subscription, &completed));
+    }
 }

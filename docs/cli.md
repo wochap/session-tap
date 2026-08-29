@@ -80,11 +80,19 @@ Internal lifecycle, activity, event kinds, and reducer bookkeeping are not
 part of either observation protocol. Notify only on post-baseline updates,
 never on initial or lag-recovery snapshots.
 
-Attention prefers a provider description, safe tool summary, bounded command
-or first question, tool name, then generic input text. It is flattened to one
-line and capped at 160 characters and 512 UTF-8 bytes. Only the current object
-is stored locally and it is cleared when work resumes or terminates. Arbitrary
-command redaction is best effort and cannot cover every credential syntax.
+The optional current status reason is status-compatible: blocked views may use
+`input` or `approval`; stopped views may use `completed` or `failed`. Selected
+question, provider message, description, command, or final assistant text has
+controls removed, whitespace collapsed, and is truncated to its first 100
+Unicode characters. Approval summaries are `<tool> <description>`, falling
+back to `<tool> <first 100 command characters>`; patch bodies and unrelated
+arguments are never selected. Only the latest reason is stored, outside
+normalized event history, and reliable work or explicit idle clears it.
+
+`stopped` is a breaking semantic: it can mean a live provider finished or
+failed a response, not only that its process exited. Match
+`status: stopped` plus `reason.kind: completed` for evidence-backed response
+notifications. A message-less completion or lifecycle-only exit has no reason.
 
 When launched inside tmux, the daemon retains socket/session/window/pane data
 only for local control. Public status, listen, sink, and hub payloads never
@@ -127,10 +135,11 @@ without bound; local normalized state continues to commit after the cap is
 reached. Credential files must not be symlinks and must have no group/other
 permissions. Provider hooks fail open and produce no provider-visible output.
 Credentials, process-control data, multiplexer fields, internal reducer state,
-raw failures, prompts, transcripts, assistant messages, and arbitrary provider
-fields never enter stdout or HTTP sink payloads. Public cwd, repository paths,
-session names, metadata, usage, and bounded blocked reasons remain potentially
-sensitive observer data.
+raw failures, complete prompts/transcripts/assistant messages, and arbitrary
+provider fields never enter stdout or HTTP sink payloads. Configured sinks are
+trusted by the single operator and may receive explicitly selected bounded
+status summaries. Public cwd, repository paths, session names, metadata, usage,
+and bounded reasons remain potentially sensitive observer data.
 
 ## Shell completions
 

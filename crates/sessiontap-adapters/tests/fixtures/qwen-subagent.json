@@ -1,0 +1,1 @@
+{"hook_event_name":"PreToolUse","session_id":"root-session","agent_id":"agent-3","agent_type":"Explorer","tool_name":"Bash","tool_input":{"command":"PRIVATE_SUBAGENT_COMMAND"},"permission_mode":"auto_edit","timestamp":"2026-08-28T15:04:17.615Z"}

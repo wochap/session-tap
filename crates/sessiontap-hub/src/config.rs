@@ -134,7 +134,7 @@ impl HubConfig {
                 }
             }
             for reason in &subscription.match_criteria.reasons {
-                if !["input", "approval"].contains(&reason.as_str()) {
+                if !["input", "approval", "completed", "failed"].contains(&reason.as_str()) {
                     return Err(format!(
                         "subscription #{index} names unknown public reason '{reason}'"
                     ));
@@ -247,6 +247,25 @@ subscriptions:
             ..Default::default()
         };
         assert!(config.validate().is_err());
+
+        let config = HubConfig {
+            subscriptions: vec![Subscription {
+                name: None,
+                match_criteria: MatchCriteria {
+                    reasons: vec!["unknown".into()],
+                    ..Default::default()
+                },
+                changes: vec![],
+                commands: vec![vec!["true".into()]],
+            }],
+            ..Default::default()
+        };
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("unknown public reason")
+        );
     }
 
     #[test]

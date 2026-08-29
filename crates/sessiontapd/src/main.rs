@@ -240,8 +240,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             invocation_id,
             credential,
             event,
-            attention,
-            failure,
+            status_reason,
         } => {
             if event.invocation_id != invocation_id
                 || event.provider != provider
@@ -254,8 +253,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             let publish = broker.publish();
             if let Some(update) = broker.storage.apply_event_with_context(
                 &event,
-                attention.as_ref(),
-                failure,
+                status_reason.as_ref(),
                 Some(&publish),
             )? {
                 let _ = broker.updates.send(update);

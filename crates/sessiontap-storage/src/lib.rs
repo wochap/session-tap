@@ -4,9 +4,10 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sessiontap_core::{
     config::SinkConfig,
     domain::{
-        ATTENTION_MAX_BYTES, ATTENTION_MAX_CHARS, ActiveAttention, Activity, AttentionContext,
-        EventKind, FailureContext, InvocationId, InvocationSnapshot, Lifecycle, NormalizedEvent,
-        PublicAgentView, PublicField, changed_public_fields, derive_status, project_public,
+        Activity, CurrentStatusReason, EventKind, InvocationId, InvocationSnapshot, Lifecycle,
+        NormalizedEvent, PublicAgentView, PublicField, STATUS_REASON_MAX_BYTES,
+        STATUS_REASON_MAX_CHARS, StatusReasonContext, changed_public_fields, derive_status,
+        project_public,
     },
     protocol::{HUB_SCHEMA_VERSION, SourceEnvelope, SourceIdentity},
 };
@@ -20,6 +21,7 @@ const MIGRATION: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (1,CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (2,CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES (3,CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS broker_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT OR IGNORE INTO broker_meta(key,value) VALUES ('revision',0);
 CREATE TABLE IF NOT EXISTS invocations (
@@ -42,6 +44,14 @@ CREATE TABLE IF NOT EXISTS local_active_attention (
  kind TEXT NOT NULL, attention_json TEXT NOT NULL CHECK(length(attention_json) <= 2048),
  updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS local_status_reasons (
+ invocation_id TEXT PRIMARY KEY REFERENCES invocations(invocation_id) ON DELETE CASCADE,
+ kind TEXT NOT NULL, reason_json TEXT NOT NULL CHECK(length(reason_json) <= 2048),
+ updated_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO local_status_reasons(invocation_id,kind,reason_json,updated_at)
+ SELECT invocation_id,kind,attention_json,updated_at FROM local_active_attention;
+DELETE FROM local_active_attention;
 CREATE TABLE IF NOT EXISTS hub_sink_state (
  sink_name TEXT PRIMARY KEY,
  snapshot_revision INTEGER
@@ -188,7 +198,7 @@ impl Storage {
         &self,
         id: &InvocationId,
         credential: &str,
-        clear_attention: bool,
+        clear_incompatible_reason: bool,
         f: impl FnOnce(&mut InvocationSnapshot),
         kind: EventKind,
         synthetic_label: &str,
@@ -206,22 +216,26 @@ impl Storage {
         let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
-        let prior_attention = current_attention(&tx, id)?;
-        let prior_view = project_public(&snapshot, prior_attention.as_ref());
+        let prior_reason = current_status_reason(&tx, id)?;
+        let prior_view = project_public(&snapshot, prior_reason.as_ref());
         f(&mut snapshot);
         snapshot.revision = next_revision(&tx)?;
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
-        if clear_attention {
-            clear_attention_row(&tx, id)?;
+        if clear_incompatible_reason
+            && prior_reason.as_ref().is_some_and(|reason| {
+                !matches!(reason.kind, EventKind::Completed | EventKind::Failed)
+            })
+        {
+            clear_status_reason_row(&tx, id)?;
         }
-        let attention = current_attention(&tx, id)?;
-        let provisional = project_public(&snapshot, attention.as_ref());
+        let reason = current_status_reason(&tx, id)?;
+        let provisional = project_public(&snapshot, reason.as_ref());
         let changed = changed_public_fields(Some(&prior_view), &provisional);
         if !changed.is_empty() {
             snapshot.updated_at = Utc::now();
         }
         persist_snapshot(&tx, &snapshot, credential)?;
-        let view = project_public(&snapshot, attention.as_ref());
+        let view = project_public(&snapshot, reason.as_ref());
         let changed = changed_public_fields(Some(&prior_view), &view);
         let event_id = synthetic_event_id(synthetic_label, id, snapshot.revision);
         let _ = kind;
@@ -242,7 +256,7 @@ impl Storage {
         event: &NormalizedEvent,
         publish: Option<&Publish<'_>>,
     ) -> Result<Option<InvocationSnapshot>> {
-        self.apply_event_with_context(event, None, None, publish)?
+        self.apply_event_with_context(event, None, publish)?
             .map(|_| self.invocation(&event.invocation_id))
             .transpose()
     }
@@ -250,17 +264,16 @@ impl Storage {
     pub fn apply_event_with_context(
         &self,
         event: &NormalizedEvent,
-        attention: Option<&AttentionContext>,
-        _failure: Option<FailureContext>,
+        status_reason: Option<&StatusReasonContext>,
         publish: Option<&Publish<'_>>,
     ) -> Result<Option<AppliedUpdate>> {
-        if attention.is_some_and(|context| {
+        if status_reason.is_some_and(|context| {
             context.summary.is_empty()
-                || context.summary.len() > ATTENTION_MAX_BYTES
-                || context.summary.chars().count() > ATTENTION_MAX_CHARS
+                || context.summary.len() > STATUS_REASON_MAX_BYTES
+                || context.summary.chars().count() > STATUS_REASON_MAX_CHARS
                 || context.summary.chars().any(char::is_control)
         }) {
-            bail!("attention context is not bounded normalized text");
+            bail!("status reason context is not bounded normalized text");
         }
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
@@ -282,8 +295,8 @@ impl Storage {
         let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
-        let prior_attention = current_attention(&tx, &event.invocation_id)?;
-        let prior_public = project_public(&snapshot, prior_attention.as_ref());
+        let prior_reason = current_status_reason(&tx, &event.invocation_id)?;
+        let prior_public = project_public(&snapshot, prior_reason.as_ref());
         let stale_session = event.provider_session_id.as_ref().is_some_and(|id| {
             snapshot
                 .provider_session
@@ -299,50 +312,72 @@ impl Storage {
                 .is_some_and(|current| current != id)
                 && event.kind != EventKind::NewTurn
         });
-        let stale = stale_session || stale_turn;
-        if !stale {
+        let terminal_for_turn = snapshot.completed_generation == Some(snapshot.turn_generation);
+        let suppressed_terminal_event = terminal_for_turn
+            && matches!(
+                event.kind,
+                EventKind::Working
+                    | EventKind::WaitingInput
+                    | EventKind::WaitingApproval
+                    | EventKind::Completed
+                    | EventKind::Failed
+            );
+        let suppressed = stale_session || stale_turn || suppressed_terminal_event;
+        if !suppressed {
             reduce(&mut snapshot, event);
         }
         let revision = next_revision(&tx)?;
         snapshot.revision = revision;
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
-        match if stale {
+        match if suppressed {
             &EventKind::Enrichment
         } else {
             &event.kind
         } {
-            EventKind::WaitingApproval | EventKind::WaitingInput => {
-                if let Some(context) = attention {
-                    let active = ActiveAttention {
+            EventKind::WaitingApproval
+            | EventKind::WaitingInput
+            | EventKind::Completed
+            | EventKind::Failed => {
+                if let Some(context) = status_reason {
+                    let current = CurrentStatusReason {
                         kind: event.kind.clone(),
                         context: context.clone(),
                     };
-                    tx.execute("INSERT INTO local_active_attention(invocation_id,kind,attention_json,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(invocation_id) DO UPDATE SET kind=excluded.kind,attention_json=excluded.attention_json,updated_at=excluded.updated_at", params![event.invocation_id.to_string(), serde_json::to_string(&event.kind)?, serde_json::to_string(&active)?, Utc::now().to_rfc3339()])?;
+                    tx.execute("INSERT INTO local_status_reasons(invocation_id,kind,reason_json,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(invocation_id) DO UPDATE SET kind=excluded.kind,reason_json=excluded.reason_json,updated_at=excluded.updated_at", params![event.invocation_id.to_string(), serde_json::to_string(&event.kind)?, serde_json::to_string(&current)?, Utc::now().to_rfc3339()])?;
+                } else {
+                    clear_status_reason_row(&tx, &event.invocation_id)?;
                 }
             }
             EventKind::NewTurn
             | EventKind::Working
-            | EventKind::Completed
-            | EventKind::Failed
-            | EventKind::ProviderSessionStarted
-            | EventKind::ProviderSessionEnded
-            | EventKind::SessionEnded => clear_attention_row(&tx, &event.invocation_id)?,
-            EventKind::Enrichment => {}
+            | EventKind::Idle
+            | EventKind::ProviderSessionStarted => {
+                clear_status_reason_row(&tx, &event.invocation_id)?;
+            }
+            EventKind::SessionEnded => {
+                let current = current_status_reason(&tx, &event.invocation_id)?;
+                if current.as_ref().is_some_and(|reason| {
+                    !matches!(reason.kind, EventKind::Completed | EventKind::Failed)
+                }) {
+                    clear_status_reason_row(&tx, &event.invocation_id)?;
+                }
+            }
+            EventKind::ProviderSessionEnded | EventKind::Enrichment => {}
         }
         tx.execute(
             "INSERT INTO event_dedup(event_id,committed_at) VALUES (?1,?2)",
             params![event.event_id, Utc::now().to_rfc3339()],
         )?;
         tx.execute("INSERT INTO normalized_events(event_id,invocation_id,revision,received_at,event_json) VALUES (?1,?2,?3,?4,?5)", params![event.event_id, event.invocation_id.to_string(), revision, event.received_at.to_rfc3339(), serde_json::to_string(event)?])?;
-        let current_attention = current_attention(&tx, &event.invocation_id)?;
-        let provisional = project_public(&snapshot, current_attention.as_ref());
+        let current_reason = current_status_reason(&tx, &event.invocation_id)?;
+        let provisional = project_public(&snapshot, current_reason.as_ref());
         let substantive = changed_public_fields(Some(&prior_public), &provisional);
         let materially_changed = !substantive.is_empty();
         if materially_changed {
             snapshot.updated_at = Utc::now();
         }
         persist_snapshot(&tx, &snapshot, &credential)?;
-        let view = project_public(&snapshot, current_attention.as_ref());
+        let view = project_public(&snapshot, current_reason.as_ref());
         let changed = changed_public_fields(Some(&prior_public), &view);
         if materially_changed {
             enqueue_transition(&tx, publish, &view, &event.event_id, revision, &changed)?;
@@ -386,12 +421,12 @@ impl Storage {
         Ok((revision, values))
     }
 
-    pub fn snapshot_with_attention(
+    pub fn snapshot_with_reasons(
         &self,
     ) -> Result<(
         u64,
         Vec<InvocationSnapshot>,
-        BTreeMap<InvocationId, ActiveAttention>,
+        BTreeMap<InvocationId, CurrentStatusReason>,
     )> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let revision = conn.query_row(
@@ -417,8 +452,8 @@ impl Storage {
             })
             .collect::<Result<Vec<_>>>()?;
         let mut stmt =
-            conn.prepare("SELECT invocation_id,attention_json FROM local_active_attention")?;
-        let attention = stmt
+            conn.prepare("SELECT invocation_id,reason_json FROM local_status_reasons")?;
+        let reasons = stmt
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
@@ -427,15 +462,15 @@ impl Storage {
                 Ok((id.parse()?, serde_json::from_str(&raw)?))
             })
             .collect::<Result<BTreeMap<_, _>>>()?;
-        Ok((revision, snapshots, attention))
+        Ok((revision, snapshots, reasons))
     }
 
-    /// Projects internal snapshots and attention from one consistent read.
+    /// Projects internal snapshots and current reasons from one consistent read.
     pub fn public_snapshot(&self) -> Result<(u64, Vec<PublicAgentView>)> {
-        let (revision, snapshots, attention) = self.snapshot_with_attention()?;
+        let (revision, snapshots, reasons) = self.snapshot_with_reasons()?;
         let views = snapshots
             .iter()
-            .map(|snapshot| project_public(snapshot, attention.get(&snapshot.invocation_id)))
+            .map(|snapshot| project_public(snapshot, reasons.get(&snapshot.invocation_id)))
             .collect();
         Ok((revision, views))
     }
@@ -537,24 +572,34 @@ impl Storage {
                 let mut conn = self.conn.lock().expect("storage mutex poisoned");
                 let tx = conn.transaction()?;
                 let mut lost = snapshot;
-                let prior_attention = current_attention(&tx, &lost.invocation_id)?;
-                let prior_view = project_public(&lost, prior_attention.as_ref());
+                let prior_reason = current_status_reason(&tx, &lost.invocation_id)?;
+                let prior_view = project_public(&lost, prior_reason.as_ref());
                 lost.lifecycle = Lifecycle::Lost;
                 lost.status = derive_status(lost.lifecycle, lost.activity);
-                lost.updated_at = Utc::now();
                 lost.revision = next_revision(&tx)?;
                 let credential: String = tx.query_row(
                     "SELECT credential FROM invocations WHERE invocation_id=?1",
                     [lost.invocation_id.to_string()],
                     |r| r.get(0),
                 )?;
-                persist_snapshot(&tx, &lost, &credential)?;
-                clear_attention_row(&tx, &lost.invocation_id)?;
+                if prior_reason.as_ref().is_some_and(|reason| {
+                    !matches!(reason.kind, EventKind::Completed | EventKind::Failed)
+                }) {
+                    clear_status_reason_row(&tx, &lost.invocation_id)?;
+                }
                 let event_id =
                     synthetic_event_id("reconcile_lost", &lost.invocation_id, lost.revision);
-                let view = project_public(&lost, None);
+                let reason = current_status_reason(&tx, &lost.invocation_id)?;
+                let provisional = project_public(&lost, reason.as_ref());
+                if !changed_public_fields(Some(&prior_view), &provisional).is_empty() {
+                    lost.updated_at = Utc::now();
+                }
+                persist_snapshot(&tx, &lost, &credential)?;
+                let view = project_public(&lost, reason.as_ref());
                 let fields = changed_public_fields(Some(&prior_view), &view);
-                enqueue_transition(&tx, publish, &view, &event_id, lost.revision, &fields)?;
+                if !fields.is_empty() {
+                    enqueue_transition(&tx, publish, &view, &event_id, lost.revision, &fields)?;
+                }
                 tx.commit()?;
                 changed += 1;
             }
@@ -620,10 +665,13 @@ fn synthetic_event_id(label: &str, invocation_id: &InvocationId, revision: u64) 
     format!("synthetic:{label}:{invocation_id}:{revision}")
 }
 
-fn current_attention(tx: &Transaction<'_>, id: &InvocationId) -> Result<Option<ActiveAttention>> {
+fn current_status_reason(
+    tx: &Transaction<'_>,
+    id: &InvocationId,
+) -> Result<Option<CurrentStatusReason>> {
     let raw: Option<String> = tx
         .query_row(
-            "SELECT attention_json FROM local_active_attention WHERE invocation_id=?1",
+            "SELECT reason_json FROM local_status_reasons WHERE invocation_id=?1",
             [id.to_string()],
             |r| r.get(0),
         )
@@ -675,9 +723,9 @@ fn enqueue_transition(
     Ok(())
 }
 
-fn clear_attention_row(tx: &Transaction<'_>, id: &InvocationId) -> Result<()> {
+fn clear_status_reason_row(tx: &Transaction<'_>, id: &InvocationId) -> Result<()> {
     tx.execute(
-        "DELETE FROM local_active_attention WHERE invocation_id=?1",
+        "DELETE FROM local_status_reasons WHERE invocation_id=?1",
         [id.to_string()],
     )?;
     Ok(())
@@ -715,17 +763,30 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
         EventKind::Working if snapshot.completed_generation != Some(snapshot.turn_generation) => {
             snapshot.activity = Activity::Working
         }
-        EventKind::WaitingInput => snapshot.activity = Activity::WaitingInput,
-        EventKind::WaitingApproval => snapshot.activity = Activity::WaitingApproval,
+        EventKind::Idle => snapshot.activity = Activity::Idle,
+        EventKind::WaitingInput
+            if snapshot.completed_generation != Some(snapshot.turn_generation) =>
+        {
+            snapshot.activity = Activity::WaitingInput;
+        }
+        EventKind::WaitingApproval
+            if snapshot.completed_generation != Some(snapshot.turn_generation) =>
+        {
+            snapshot.activity = Activity::WaitingApproval;
+        }
         EventKind::Completed | EventKind::Failed => {
-            snapshot.activity = Activity::Idle;
+            snapshot.activity = Activity::Stopped;
             snapshot.completed_generation = Some(snapshot.turn_generation);
         }
-        EventKind::ProviderSessionStarted | EventKind::ProviderSessionEnded => {
+        EventKind::ProviderSessionStarted => {
             snapshot.activity = Activity::Idle;
         }
+        EventKind::ProviderSessionEnded => {}
         EventKind::SessionEnded => snapshot.lifecycle = Lifecycle::Exited,
-        EventKind::Enrichment | EventKind::Working => {}
+        EventKind::Enrichment
+        | EventKind::Working
+        | EventKind::WaitingInput
+        | EventKind::WaitingApproval => {}
     }
     if let Some(id) = &event.provider_session_id {
         let prior = snapshot.provider_session.as_ref();
@@ -819,6 +880,7 @@ mod legacy_tests {
             completed_generation: None,
         }
     }
+
     fn event(s: &InvocationSnapshot, kind: EventKind, id: &str) -> NormalizedEvent {
         NormalizedEvent {
             schema_version: 1,
@@ -1657,6 +1719,33 @@ mod tests {
         }
     }
 
+    fn normalized_event(value: &InvocationSnapshot, kind: EventKind, id: &str) -> NormalizedEvent {
+        NormalizedEvent {
+            schema_version: 1,
+            event_id: id.into(),
+            invocation_id: value.invocation_id.clone(),
+            provider_event_id: None,
+            provider: value.provider.clone(),
+            observed_at: Utc::now(),
+            received_at: Utc::now(),
+            source: "hook".into(),
+            kind,
+            provider_session_id: None,
+            provider_session_name: None,
+            provider_session_start_reason: None,
+            provider_metadata: None,
+            usage: None,
+            turn_id: None,
+        }
+    }
+
+    fn completed_reason(summary: &str) -> StatusReasonContext {
+        StatusReasonContext {
+            summary: summary.into(),
+            source: sessiontap_core::domain::StatusReasonSource::AssistantMessage,
+        }
+    }
+
     #[test]
     fn public_projection_and_outbox_exclude_private_state() {
         let db = Storage::memory().unwrap();
@@ -1715,11 +1804,10 @@ mod tests {
         let update = db
             .apply_event_with_context(
                 &event,
-                Some(&AttentionContext {
+                Some(&StatusReasonContext {
                     summary: "Choose an option".into(),
-                    source: sessiontap_core::domain::AttentionSource::Question,
+                    source: sessiontap_core::domain::StatusReasonSource::Question,
                 }),
-                None,
                 None,
             )
             .unwrap()
@@ -1728,6 +1816,23 @@ mod tests {
         assert_eq!(update.view.reason.unwrap().kind, PublicReasonKind::Input);
         assert!(update.changed.contains(&PublicField::Status));
         assert!(update.changed.contains(&PublicField::Reason));
+
+        let replacement = db
+            .apply_event_with_context(
+                &normalized_event(&value, EventKind::WaitingInput, "wait-replacement"),
+                Some(&StatusReasonContext {
+                    summary: "Choose the newer option".into(),
+                    source: sessiontap_core::domain::StatusReasonSource::Question,
+                }),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            replacement.view.reason.unwrap().summary,
+            "Choose the newer option"
+        );
+        assert_eq!(db.snapshot_with_reasons().unwrap().2.len(), 1);
     }
 
     #[test]
@@ -1753,9 +1858,284 @@ mod tests {
             turn_id: None,
         };
         assert!(
-            db.apply_event_with_context(&event, None, None, None)
+            db.apply_event_with_context(&event, None, None)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn stopped_outcomes_persist_clear_and_resist_late_work() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        let value = snapshot();
+        let db = Storage::open(&path).unwrap();
+        db.register(&value, "credential", None).unwrap();
+        db.apply_event(&normalized_event(&value, EventKind::NewTurn, "turn"), None)
+            .unwrap();
+        let completed = db
+            .apply_event_with_context(
+                &normalized_event(&value, EventKind::Completed, "completed"),
+                Some(&completed_reason("All tests pass")),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.view.status, PublicStatus::Stopped);
+        assert_eq!(
+            completed.view.reason.as_ref().unwrap().kind,
+            PublicReasonKind::Completed
+        );
+        assert!(
+            db.apply_event(
+                &normalized_event(&value, EventKind::Working, "late-work"),
+                None
+            )
+            .unwrap()
+            .is_none()
+        );
+        drop(db);
+
+        let db = Storage::open(&path).unwrap();
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(views[0].status, PublicStatus::Stopped);
+        assert_eq!(views[0].reason.as_ref().unwrap().summary, "All tests pass");
+        let idle = db
+            .apply_event_with_context(
+                &normalized_event(&value, EventKind::Idle, "idle"),
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(idle.view.status, PublicStatus::Idle);
+        assert!(idle.view.reason.is_none());
+    }
+
+    #[test]
+    fn provider_end_and_lifecycle_exit_preserve_outcomes_without_duplicates() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        db.apply_event(&normalized_event(&value, EventKind::NewTurn, "turn"), None)
+            .unwrap();
+        db.apply_event_with_context(
+            &normalized_event(&value, EventKind::Failed, "failed"),
+            Some(&StatusReasonContext {
+                summary: "Rate limited".into(),
+                source: sessiontap_core::domain::StatusReasonSource::FailureCategory,
+            }),
+            None,
+        )
+        .unwrap();
+        assert!(
+            db.apply_event(
+                &normalized_event(&value, EventKind::ProviderSessionEnded, "provider-end"),
+                None,
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            db.mark_exit(&value.invocation_id, "credential", Some(1), None, None)
+                .unwrap()
+                .is_none()
+        );
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(
+            views[0].reason.as_ref().unwrap().kind,
+            PublicReasonKind::Failed
+        );
+    }
+
+    #[test]
+    fn lifecycle_only_exit_clears_blocked_reason() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        db.apply_event_with_context(
+            &normalized_event(&value, EventKind::WaitingInput, "waiting"),
+            Some(&StatusReasonContext {
+                summary: "Choose".into(),
+                source: sessiontap_core::domain::StatusReasonSource::Question,
+            }),
+            None,
+        )
+        .unwrap();
+        let exit = db
+            .mark_exit(&value.invocation_id, "credential", Some(0), None, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(exit.view.status, PublicStatus::Stopped);
+        assert!(exit.view.reason.is_none());
+        assert!(exit.changed.contains(&PublicField::Status));
+        assert!(exit.changed.contains(&PublicField::Reason));
+    }
+
+    #[test]
+    fn legacy_attention_rows_migrate_to_current_status_reasons() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("legacy.sqlite3");
+        let mut value = snapshot();
+        value.activity = Activity::WaitingApproval;
+        value.status = PublicStatus::Blocked;
+        let db = Storage::open(&path).unwrap();
+        db.register(&value, "credential", None).unwrap();
+        let legacy = CurrentStatusReason {
+            kind: EventKind::WaitingApproval,
+            context: StatusReasonContext {
+                summary: "Approve legacy".into(),
+                source: sessiontap_core::domain::StatusReasonSource::Description,
+            },
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("DELETE FROM local_status_reasons", [])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO local_active_attention(invocation_id,kind,attention_json,updated_at) VALUES (?1,?2,?3,?4)",
+                params![
+                    value.invocation_id.to_string(),
+                    serde_json::to_string(&EventKind::WaitingApproval).unwrap(),
+                    serde_json::to_string(&legacy).unwrap(),
+                    Utc::now().to_rfc3339()
+                ],
+            )
+            .unwrap();
+        }
+        drop(db);
+        let db = Storage::open(&path).unwrap();
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(views[0].reason.as_ref().unwrap().summary, "Approve legacy");
+    }
+
+    #[test]
+    fn selected_summaries_stay_out_of_normalized_event_history() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        db.apply_event_with_context(
+            &normalized_event(&value, EventKind::Completed, "private-event"),
+            Some(&completed_reason("SELECTED_CURRENT_ONLY")),
+            None,
+        )
+        .unwrap();
+        let conn = db.conn.lock().unwrap();
+        let raw: String = conn
+            .query_row(
+                "SELECT event_json FROM normalized_events WHERE event_id='private-event'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!raw.contains("SELECTED_CURRENT_ONLY"));
+        let current: String = conn
+            .query_row(
+                "SELECT reason_json FROM local_status_reasons WHERE invocation_id=?1",
+                [value.invocation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(current.contains("SELECTED_CURRENT_ONLY"));
+    }
+
+    #[test]
+    fn stopped_reason_is_delivered_once_without_internal_or_raw_fields() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        let sinks = BTreeMap::from([(
+            "observer".into(),
+            SinkConfig::Stdout {
+                enabled: true,
+                fields: vec![],
+            },
+        )]);
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "sandbox",
+            source_name: None,
+        };
+        db.register(&value, "credential", Some(&publish)).unwrap();
+        db.apply_event(
+            &normalized_event(&value, EventKind::NewTurn, "sink-turn"),
+            Some(&publish),
+        )
+        .unwrap();
+        db.apply_event_with_context(
+            &normalized_event(&value, EventKind::Completed, "sink-completed"),
+            Some(&completed_reason("Bounded final response")),
+            Some(&publish),
+        )
+        .unwrap();
+        let before_exit = db.due_outbox(10).unwrap();
+        assert_eq!(before_exit.len(), 3);
+        let completion = before_exit
+            .iter()
+            .find(|record| record.event_id == "sink-completed")
+            .unwrap();
+        let payload = String::from_utf8(completion.payload.clone()).unwrap();
+        assert!(payload.contains("Bounded final response"));
+        assert!(payload.contains("\"kind\":\"completed\""));
+        for private in [
+            "last_assistant_message",
+            "normalized_events",
+            "lifecycle",
+            "activity",
+            "process",
+            "multiplexer",
+        ] {
+            assert!(!payload.contains(private));
+        }
+        assert!(
+            db.mark_exit(
+                &value.invocation_id,
+                "credential",
+                Some(0),
+                None,
+                Some(&publish),
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(db.due_outbox(10).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn lost_reconciliation_does_not_republish_an_unchanged_stopped_view() {
+        let db = Storage::memory().unwrap();
+        let mut value = snapshot();
+        value.process.child_pid = Some(424_242);
+        let sinks = BTreeMap::from([(
+            "observer".into(),
+            SinkConfig::Stdout {
+                enabled: true,
+                fields: vec![],
+            },
+        )]);
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "sandbox",
+            source_name: None,
+        };
+        db.register(&value, "credential", Some(&publish)).unwrap();
+        db.apply_event(
+            &normalized_event(&value, EventKind::NewTurn, "lost-turn"),
+            Some(&publish),
+        )
+        .unwrap();
+        db.apply_event_with_context(
+            &normalized_event(&value, EventKind::Completed, "lost-completed"),
+            Some(&completed_reason("Done before process loss")),
+            Some(&publish),
+        )
+        .unwrap();
+        assert_eq!(db.due_outbox(10).unwrap().len(), 3);
+        assert_eq!(db.reconcile(|_, _| false, 7, Some(&publish)).unwrap(), 1);
+        assert_eq!(db.due_outbox(10).unwrap().len(), 3);
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(
+            views[0].reason.as_ref().unwrap().summary,
+            "Done before process loss"
         );
     }
 }

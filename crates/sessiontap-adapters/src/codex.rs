@@ -1,12 +1,15 @@
 use crate::{
-    AgentAdapter, SetupAction, SetupReport, attention_context, bounded_field, merge_hook_config,
-    provider_metadata, sanitize_bounded,
+    AgentAdapter, SetupAction, SetupReport, bounded_field, completed_reason_context,
+    is_subagent_payload, merge_hook_config, provider_metadata, sanitize_bounded,
+    status_reason_context,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
-use sessiontap_core::domain::{EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent};
+use sessiontap_core::domain::{
+    AdapterOutcome, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
+};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -22,12 +25,26 @@ pub const HOOK_EVENTS: &[&str] = &[
 ];
 pub struct CodexAdapter;
 
+#[cfg(test)]
+impl CodexAdapter {
+    /// Test helper for cases that expect a normalized root event.
+    pub fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
+        match <Self as AgentAdapter>::normalize(self, id, raw)? {
+            AdapterOutcome::Event(event) => Ok(*event),
+            AdapterOutcome::Ignored => anyhow::bail!("ignored subagent hook"),
+        }
+    }
+}
+
 #[async_trait]
 impl AgentAdapter for CodexAdapter {
     fn dialect(&self) -> &'static str {
         "codex"
     }
-    fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
+    fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<AdapterOutcome> {
+        if is_subagent_payload(raw) {
+            return Ok(AdapterOutcome::Ignored);
+        }
         let name = raw
             .get("hook_event_name")
             .or_else(|| raw.get("event_name"))
@@ -69,7 +86,7 @@ impl AgentAdapter for CodexAdapter {
         } else {
             EventKind::Enrichment
         };
-        Ok(build(id, raw, kind))
+        Ok(AdapterOutcome::Event(Box::new(build(id, raw, kind))))
     }
     async fn setup(
         &self,
@@ -95,9 +112,10 @@ impl AgentAdapter for CodexAdapter {
 
 fn build(id: &InvocationId, raw: &Value, kind: EventKind) -> NormalizedAdapterEvent {
     let now = Utc::now();
-    let attention = match kind {
-        EventKind::WaitingApproval => attention_context(raw, false),
-        EventKind::WaitingInput => attention_context(raw, true),
+    let status_reason = match kind {
+        EventKind::WaitingApproval => status_reason_context(raw, false),
+        EventKind::WaitingInput => status_reason_context(raw, true),
+        EventKind::Completed => completed_reason_context(raw),
         _ => None,
     };
     let turn_id = raw
@@ -134,7 +152,6 @@ fn build(id: &InvocationId, raw: &Value, kind: EventKind) -> NormalizedAdapterEv
             usage: None,
             turn_id,
         },
-        attention,
-        failure: None,
+        status_reason,
     }
 }

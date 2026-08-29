@@ -1,6 +1,6 @@
 use crate::domain::{
-    AttentionContext, FailureContext, InvocationId, InvocationSnapshot, NormalizedEvent,
-    PublicAgentView, PublicField,
+    InvocationId, InvocationSnapshot, NormalizedEvent, PublicAgentView, PublicField,
+    StatusReasonContext,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -64,9 +64,7 @@ pub enum Request {
         credential: String,
         event: Box<NormalizedEvent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        attention: Option<AttentionContext>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        failure: Option<FailureContext>,
+        status_reason: Option<StatusReasonContext>,
     },
     Status,
     Listen,
@@ -235,10 +233,10 @@ mod tests {
         );
 
         let mut rich = view();
-        rich.status = PublicStatus::Blocked;
+        rich.status = PublicStatus::Stopped;
         rich.reason = Some(PublicStatusReason {
-            kind: PublicReasonKind::Approval,
-            summary: "Run tests".into(),
+            kind: PublicReasonKind::Completed,
+            summary: "All tests pass".into(),
         });
         rich.updated_at = Utc.with_ymd_and_hms(2026, 8, 28, 12, 1, 0).unwrap();
         rich.session = Some(PublicProviderSession {
