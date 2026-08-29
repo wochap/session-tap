@@ -450,17 +450,23 @@ fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
 }
 
 pub(crate) fn attention_context(raw: &Value, input: bool) -> Option<AttentionContext> {
-    if let Some(summary) = field(raw, &["description", "message"]).and_then(bounded_one_line) {
+    let args = raw
+        .get("tool_input")
+        .or_else(|| raw.get("arguments"))
+        .or_else(|| raw.get("input"));
+    let description = field(raw, &["description", "message"])
+        .and_then(bounded_one_line)
+        .or_else(|| {
+            args.and_then(|value| field(value, &["description"]))
+                .and_then(bounded_one_line)
+        });
+    if let Some(summary) = description {
         return Some(AttentionContext {
             summary,
             source: AttentionSource::Description,
         });
     }
     let tool = field(raw, &["tool_name", "tool", "name"]);
-    let args = raw
-        .get("tool_input")
-        .or_else(|| raw.get("arguments"))
-        .or_else(|| raw.get("input"));
     if input {
         let question = field(raw, &["question", "prompt"])
             .or_else(|| args.and_then(|v| field(v, &["question", "prompt", "message"])))
@@ -1100,6 +1106,39 @@ mod tests {
     #[test]
     fn attention_fallbacks_are_bounded_and_safe() {
         let id = InvocationId::new();
+        let raw = json!({
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "description": "Top-level description",
+            "tool_input": {
+                "command": "echo command",
+                "description": "Nested description"
+            }
+        });
+        let attention = codex::CodexAdapter
+            .normalize(&id, &raw)
+            .unwrap()
+            .attention
+            .unwrap();
+        assert_eq!(attention.summary, "Top-level description");
+        assert_eq!(attention.source, AttentionSource::Description);
+
+        let raw = json!({
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "echo command",
+                "description": "May I run the verification?"
+            }
+        });
+        let attention = codex::CodexAdapter
+            .normalize(&id, &raw)
+            .unwrap()
+            .attention
+            .unwrap();
+        assert_eq!(attention.summary, "May I run the verification?");
+        assert_eq!(attention.source, AttentionSource::Description);
+
         let raw = json!({"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"echo\nsecret token=abc"}});
         assert_eq!(
             claude::ClaudeAdapter
