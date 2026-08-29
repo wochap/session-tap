@@ -7,39 +7,39 @@ Session-gated Claude Code, Codex, and Qwen event ingestion — mapping provider 
 ## Requirements
 
 ### Requirement: Built-in providers are normalized
-SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, and Qwen. Each adapter SHALL own its provider's hook configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported provider session, prompt, tool, permission, notification, stop, failure-stop, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
+SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, and Qwen. Each adapter SHALL own its provider's hook configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported root-agent session, prompt, tool, permission, notification, stop, failure-stop, explicit-idle, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
 
 #### Scenario: Provider behavior changes independently
 - **WHEN** one provider changes its hook names, payload shape, setup requirements, or launch options
 - **THEN** SessionTap changes that provider's concrete adapter without adding provider conditionals to another provider adapter
 
 #### Scenario: New user turn begins
-- **WHEN** a built-in adapter receives its provider's user-prompt or turn-start signal
+- **WHEN** a built-in adapter receives its provider's root-agent user-prompt or turn-start signal
 - **THEN** it emits working activity, identifies the internal event as a new turn, and includes the provider's verified turn identifier when available
 
 #### Scenario: Provider asks a question
-- **WHEN** an adapter can distinguish a user question or elicitation from a permission approval, including a recognized Claude `AskUserQuestion` permission request
-- **THEN** it emits waiting_input rather than waiting_approval without retaining the raw question or options
+- **WHEN** an adapter can distinguish a root-agent user question or elicitation from a permission approval, including a recognized Claude `AskUserQuestion` permission request
+- **THEN** it emits waiting_input rather than waiting_approval with optional bounded question context
 
 #### Scenario: Provider requests approval
-- **WHEN** a built-in adapter receives a provider permission request that is not a recognized ordinary-input tool
-- **THEN** it emits waiting_approval with optional bounded provider-neutral attention context
+- **WHEN** a built-in adapter receives a root-agent permission request that is not a recognized ordinary-input tool
+- **THEN** it emits waiting_approval with optional bounded provider-neutral approval context
 
 #### Scenario: Provider ends a turn normally
-- **WHEN** a provider emits its normal turn-stop signal
-- **THEN** the adapter identifies the internal event as completed and emits idle activity without marking the process stopped
+- **WHEN** a provider emits its normal root-agent turn-stop signal
+- **THEN** the adapter identifies the internal event as completed and emits stopped activity without marking the process exited
 
 #### Scenario: Provider turn fails
-- **WHEN** a provider emits a documented failure-stop signal
-- **THEN** the adapter identifies the internal event as failed and emits idle activity without marking the process stopped
+- **WHEN** a provider emits a documented root-agent failure-stop signal
+- **THEN** the adapter identifies the internal event as failed and emits stopped activity without marking the process exited
 
-#### Scenario: Provider emits an idle reminder
-- **WHEN** a provider emits an idle-prompt notification without a turn-stop cause
-- **THEN** the adapter emits enrichment rather than completed or failed
+#### Scenario: Provider emits an explicit idle signal
+- **WHEN** a provider emits a verified root-agent idle notification after a turn stop
+- **THEN** the adapter emits explicit idle activity rather than enrichment or another completion
 
 #### Scenario: Provider session ends while wrapper remains alive
 - **WHEN** a provider emits `SessionEnd` without a supervised process-exit observation
-- **THEN** the adapter emits a provider-session end cause that does not mark the invocation lifecycle exited
+- **THEN** the adapter emits a provider-session end cause that does not mark the invocation lifecycle exited or reset stopped activity
 
 #### Scenario: Verified provider metadata is present
 - **WHEN** a supported hook includes verified model, effort, permission mode, turn, token, or context-utilization fields
@@ -50,15 +50,15 @@ SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, and 
 - **THEN** the adapter does not estimate or synthesize usage
 
 ### Requirement: Provider metadata extraction is bounded and evidence-based
-Built-in adapters SHALL normalize only provider metadata established by public contracts or sanitized independent captures, SHALL validate categorical and numeric values, and SHALL discard arbitrary unknown metadata and conversational content.
+Built-in adapters SHALL normalize only provider metadata established by public contracts or sanitized independent captures, SHALL validate categorical and numeric values, and SHALL discard arbitrary unknown metadata and conversational content except for explicitly selected bounded status summaries.
 
 #### Scenario: Claude turn metadata repeats across hooks
 - **WHEN** Claude supplies one `prompt_id` on prompt, tool, permission, notification, and stop hooks
 - **THEN** SessionTap maps it to one provider-neutral turn ID for correlation
 
 #### Scenario: Permission mode changes during a turn
-- **WHEN** a verified provider hook changes permission mode from `default` to `acceptEdits` or `auto`
-- **THEN** SessionTap updates the normalized current permission mode without copying tool input
+- **WHEN** a verified provider hook changes permission mode to a documented value including `default`, `acceptEdits`, `auto`, `auto_edit`, `plan`, `yolo`, `dontAsk`, or `bypassPermissions`
+- **THEN** SessionTap updates the normalized current permission mode without copying unrelated tool input
 
 #### Scenario: Model contains terminal formatting
 - **WHEN** a provider model value contains control or terminal-formatting sequences
@@ -69,7 +69,7 @@ Built-in adapters SHALL normalize only provider metadata established by public c
 - **THEN** SessionTap normalizes context-window utilization to 50 percent
 
 #### Scenario: Qwen reports hook metadata
-- **WHEN** a verified Qwen hook supplies a valid timestamp or an observed permission mode such as `auto`, `plan`, or `yolo`
+- **WHEN** a verified Qwen hook supplies a valid timestamp or documented permission mode
 - **THEN** SessionTap retains the provider-observed time and sanitized permission mode in provider-neutral fields
 
 #### Scenario: Qwen emits an empty prompt callback
@@ -81,49 +81,69 @@ Built-in adapters SHALL normalize only provider metadata established by public c
 - **THEN** SessionTap ignores those fields rather than guessing their meaning
 
 ### Requirement: Attention context is bounded and provider-neutral
-Built-in adapters SHALL derive optional attention context while the raw hook payload is available, SHALL use deterministic safe fallback rules, and SHALL NOT include the complete hook payload or arbitrary unknown tool input.
+Built-in adapters SHALL derive optional current status context while the raw hook payload is available, SHALL use deterministic event-specific selection rules, and SHALL NOT include the complete hook payload or arbitrary unknown tool input. Selected question, message, description, command, and final-response text SHALL remove controls, collapse whitespace, and retain at most the first 100 Unicode characters before any short tool prefix is added.
 
-#### Scenario: Provider supplies a description
-- **WHEN** a permission request includes a non-empty provider-supplied description
-- **THEN** the adapter uses a sanitized bounded one-line form of that description before considering command text
+#### Scenario: Approval includes a description
+- **WHEN** a permission request includes a non-empty provider-supplied description for a Bash tool
+- **THEN** the adapter emits a summary in the form `bash <description excerpt>`
 
-#### Scenario: File tool has no description
-- **WHEN** a recognized file operation lacks a description but includes a path
-- **THEN** the adapter emits a tool-specific summary containing no file contents and no more path information than required for display
+#### Scenario: Command approval has no description
+- **WHEN** a recognized command tool lacks a description but includes a command
+- **THEN** the adapter emits `<normalized tool label> <first 100 sanitized command characters>`
 
-#### Scenario: Patch tool requests approval
-- **WHEN** an apply-patch operation requires approval
-- **THEN** the adapter emits a generic patch summary and does not expose the patch body
+#### Scenario: Provider asks an explicit question
+- **WHEN** an input event contains a direct question or a documented non-empty questions array
+- **THEN** the adapter uses the first question before considering a generic agent or notification message
+
+#### Scenario: Input has only an agent message
+- **WHEN** an input event contains no explicit question but includes an agent or provider message
+- **THEN** the adapter uses the first 100 sanitized characters of that message
+
+#### Scenario: Stop includes a final assistant message
+- **WHEN** a normal root-agent stop includes `last_assistant_message`
+- **THEN** the adapter emits completed context containing its first 100 sanitized characters
+
+#### Scenario: Stop has no usable message
+- **WHEN** a normal root-agent stop has no non-empty eligible message
+- **THEN** the adapter emits completion without a status reason and does not synthesize generic text
 
 #### Scenario: Unknown tool requests approval
-- **WHEN** an unrecognized tool requests approval without a safe description
-- **THEN** the adapter exposes the bounded tool name alone and does not serialize its arguments
+- **WHEN** an unrecognized tool requests approval without a description or command
+- **THEN** the adapter exposes one bounded sanitized tool label and does not serialize its arguments
 
-#### Scenario: Context contains multiple lines or controls
-- **WHEN** selected display context contains line breaks or control characters
-- **THEN** the adapter removes controls, collapses whitespace to one line, and enforces conservative character and UTF-8 byte limits
+#### Scenario: Patch tool requests approval
+- **WHEN** an apply-patch operation requires approval without a description
+- **THEN** the adapter emits only a short normalized patch label and does not expose the patch body
 
 ### Requirement: Raw conversational content remains private
-Adapters SHALL discard prompts, transcripts, assistant messages, raw error details, and unselected tool input, and SHALL treat command redaction as conservative best effort rather than a guarantee.
+Adapters SHALL discard prompts, transcripts, complete assistant messages, raw error details, and unselected tool input. They MAY select only the bounded current question/message, approval description/command, final assistant excerpt, or allowlisted failure category required by the public status-reason contract.
 
 #### Scenario: Claude transcript contains a session title
 - **WHEN** a Claude hook supplies a readable transcript path containing `aiTitle` or `customTitle` metadata
 - **THEN** the adapter exposes only the latest bounded one-line title as the provider session name and does not normalize or persist the transcript path or body
 
 #### Scenario: Stop includes an assistant message
-- **WHEN** a provider stop hook includes `last_assistant_message`
-- **THEN** SessionTap emits the completion cause without copying that message into normalized state, active attention, or live event metadata
+- **WHEN** a root-agent stop hook includes `last_assistant_message`
+- **THEN** SessionTap selects at most its first 100 sanitized characters as current completed context and does not retain the complete message
 
-#### Scenario: Command may contain a credential
-- **WHEN** a command fallback cannot be summarized without potentially exposing sensitive syntax
-- **THEN** the adapter may replace it with a generic shell summary rather than claiming complete redaction
+#### Scenario: Non-stop hook includes an assistant message
+- **WHEN** a hook not selected for question or completion context includes assistant text
+- **THEN** SessionTap does not copy that text into normalized state, current reason, or public metadata
+
+#### Scenario: Command fallback is selected
+- **WHEN** approval context lacks a description and a command is available
+- **THEN** the adapter selects only its first 100 sanitized characters after a normalized tool label and discards the remaining command and arguments
 
 ### Requirement: Provider mappings avoid duplicate attention causes
-Adapters and the broker SHALL distinguish direct attention signals from delayed provider reminder notifications so one unresolved attention episode does not produce repeated notification causes.
+Adapters and the broker SHALL distinguish direct attention signals from delayed provider reminders and explicit idle signals so one unresolved attention episode does not produce repeated causes and an idle notification does not masquerade as completion.
 
 #### Scenario: Delayed permission notification follows a direct request
 - **WHEN** a provider emits `Notification(permission_prompt)` after an unresolved `PermissionRequest` for the invocation
-- **THEN** SessionTap treats the notification as enrichment of the active attention state rather than a second waiting_approval cause
+- **THEN** SessionTap treats the notification as enrichment of the active blocked state rather than a second waiting_approval cause
+
+#### Scenario: Idle notification follows completion
+- **WHEN** a provider emits a documented `idle_prompt` after a stopped response
+- **THEN** SessionTap emits one explicit idle transition and clears the completed or failed reason
 
 ### Requirement: Global hooks observe only wrapped sessions
 Managed hook entries SHALL be safe to install in user-level provider configuration but SHALL emit events only when both a valid SessionTap invocation credential is present and the launch provider matches the hook provider.
@@ -195,11 +215,19 @@ The project SHALL NOT copy or mechanically transform external non-MIT source, te
 - **THEN** its tests and documentation identify the provider contract or sanitized independent fixture used to establish the behavior
 
 ### Requirement: Adapter output is normalized-only
-A provider adapter SHALL pass only typed provider-neutral events and metadata across the adapter boundary. It SHALL NOT choose or overwrite the configured provider identity and SHALL NOT expose raw provider JSON, provider store records, arbitrary unknown fields, or provider-specific payload types to the daemon, storage, sinks, or hub. The daemon SHALL stamp normalized facts with the configured provider identity associated with the authenticated invocation; adapter dialect SHALL remain an internal dispatch detail.
+A provider adapter SHALL pass only typed provider-neutral events and selected bounded status context across the adapter boundary, or explicitly report that a payload was ignored. It SHALL NOT choose or overwrite the configured provider identity and SHALL NOT expose raw provider JSON, provider store records, arbitrary unknown fields, or provider-specific payload types to the daemon, storage, sinks, or hub. The daemon SHALL stamp normalized facts with the configured provider identity associated with the authenticated invocation; adapter dialect SHALL remain an internal dispatch detail.
 
 #### Scenario: Hook contains unknown provider data
-- **WHEN** a raw hook contains fields that the provider adapter does not explicitly normalize
+- **WHEN** a raw root-agent hook contains fields that the provider adapter does not explicitly normalize
 - **THEN** those fields do not cross the adapter boundary or appear in persisted normalized state
+
+#### Scenario: Hook belongs to a subagent
+- **WHEN** a hook includes a non-empty documented `agent_id` or is a subagent lifecycle event
+- **THEN** the adapter ignores the payload before extracting activity, reason, session, metadata, or usage and the root public view does not change
+
+#### Scenario: Main session uses a named agent
+- **WHEN** a root hook contains `agent_type` without a subagent `agent_id`
+- **THEN** the adapter does not ignore it solely because the main session has an agent type
 
 #### Scenario: Configured provider inherits a dialect
 - **WHEN** `company-claude` is configured to inherit the Claude adapter

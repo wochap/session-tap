@@ -18,15 +18,27 @@ The hub SHALL read a versioned YAML configuration defining subscriptions as norm
 - **THEN** the hub reports the error and does not silently run a partial or broadened rule set
 
 ### Requirement: Subscriptions match normalized agent data
-Subscription match criteria SHALL support source ID, changed public field paths, and fields available in the canonical public envelope, including provider, public status, public reason kind, and repository. Routing SHALL NOT depend on internal lifecycle, activity, normalized event kind, process control data, or multiplexer metadata. Different fields SHALL be combined by logical AND and values within one field by logical OR.
+Subscription match criteria SHALL support source ID, changed public field paths, and fields available in the canonical public envelope, including provider, public status, public reason kind, and repository. Supported public reason filters SHALL include `input`, `approval`, `completed`, and `failed`. Routing SHALL NOT depend on internal lifecycle, activity, normalized event kind, process control data, or multiplexer metadata. Different fields SHALL be combined by logical AND and values within one field by logical OR.
 
 #### Scenario: Multi-field rule matches
 - **WHEN** an update is from source `sandbox`, provider `codex`, includes changed field `status`, has status `blocked` and reason kind `input`, and all are allowed by a subscription
 - **THEN** that subscription matches the update
 
+#### Scenario: Completion-only notification matches
+- **WHEN** a subscription requires status `stopped` and reason `completed` and an accepted update contains both
+- **THEN** that subscription matches the response completion
+
+#### Scenario: Lifecycle-only stop does not match completion
+- **WHEN** a subscription requires reason `completed` and an accepted stopped view has no reason because only the process exited or was lost
+- **THEN** that subscription does not match
+
 #### Scenario: One field does not match
 - **WHEN** every configured public criterion except source ID matches an update
 - **THEN** that subscription does not run
+
+#### Scenario: Unknown reason is configured
+- **WHEN** routing configuration names a public reason other than `input`, `approval`, `completed`, or `failed`
+- **THEN** configuration validation rejects it rather than silently broadening the subscription
 
 #### Scenario: Internal criterion is configured
 - **WHEN** routing configuration tries to match internal activity, event kind, multiplexer, or process metadata

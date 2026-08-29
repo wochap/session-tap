@@ -29,7 +29,7 @@ SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sess
 - **THEN** SessionTap permits unauthenticated delivery subject to the configured network safety policy
 
 ### Requirement: Forwarded data is normalized, complete, and selectable
-The broker SHALL send hub sinks canonical source snapshot and update envelopes containing stable source and delivery identities, revision, deterministic changed public field paths, and complete resulting `PublicAgentView` values. SessionTap SHALL exclude internal invocation snapshots, lifecycle/activity/event enums, process and multiplexer control metadata, raw hook bodies, transcripts, prompt text, assistant messages, tool inputs and responses, credentials, and arbitrary provider payloads from every sink.
+The broker SHALL send hub sinks canonical source snapshot and update envelopes containing stable source and delivery identities, revision, deterministic changed public field paths, and complete resulting `PublicAgentView` values. SessionTap SHALL exclude internal invocation snapshots, lifecycle/activity/event enums, process and multiplexer control metadata, raw hook bodies, transcripts, complete prompt and assistant text, unselected tool inputs and responses, credentials, and arbitrary provider payloads from every sink. Explicitly selected bounded current status summaries SHALL be public fields eligible for configured sink delivery.
 
 #### Scenario: Default HTTP archival sink event
 - **WHEN** a meaningful projected state change is queued for a non-hub HTTP sink
@@ -39,13 +39,17 @@ The broker SHALL send hub sinks canonical source snapshot and update envelopes c
 - **WHEN** internal state changes to waiting approval or waiting input
 - **THEN** the hub update contains a blocked public view with the corresponding optional bounded public reason
 
-#### Scenario: Attention is cleared
-- **WHEN** a later normalized transition clears internal active attention
-- **THEN** the resulting complete public view no longer contains the prior blocked reason
+#### Scenario: Completion is queued for a hub sink
+- **WHEN** a root provider stop changes a live invocation to stopped
+- **THEN** the hub update contains the stopped public view and its optional completed reason
 
 #### Scenario: Failure event is queued for a hub sink
-- **WHEN** an internal failed event leaves the provider process alive
-- **THEN** the hub update contains the resulting idle public view and no raw failure message, internal event kind, tool input, prompt, or transcript
+- **WHEN** a documented root failure-stop event leaves the provider process alive
+- **THEN** the hub update contains the resulting stopped public view with an optional allowlisted failed reason and no raw failure message, internal event kind, tool input, prompt, or transcript
+
+#### Scenario: Current reason is cleared
+- **WHEN** a later normalized transition changes the invocation to running or idle
+- **THEN** the resulting complete public view no longer contains the prior blocked, completed, or failed reason
 
 #### Scenario: Provider metadata changes
 - **WHEN** model, effort, permission mode, current turn, provider session, repository, or verified usage changes meaningfully
@@ -68,7 +72,11 @@ The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as
 
 #### Scenario: Invocation exits without a final provider hook
 - **WHEN** the wrapper records a lifecycle exit that changes the projected public view
-- **THEN** the broker transactionally queues the resulting stopped view for every enabled hub sink
+- **THEN** the broker transactionally queues the resulting stopped view without a completed or failed reason for every enabled hub sink
+
+#### Scenario: Invocation exits after a reported stop
+- **WHEN** lifecycle exit follows an already projected stopped view with the same completed or failed reason and changes no public field
+- **THEN** the broker records lifecycle internally without enqueueing a redundant public update
 
 #### Scenario: Internal-only metadata changes
 - **WHEN** credentials, reducer bookkeeping, process control data, or multiplexer data changes without changing `PublicAgentView`

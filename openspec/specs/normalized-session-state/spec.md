@@ -7,33 +7,41 @@ Provider-neutral lifecycle/activity reduction, SQLite persistence through a sing
 ## Requirements
 
 ### Requirement: Lifecycle and activity are independent
-The broker SHALL store process lifecycle as `starting`, `alive`, `exited`, or `lost` and activity as `unknown`, `idle`, `working`, `waiting_input`, or `waiting_approval`.
+The broker SHALL store process lifecycle as `starting`, `alive`, `exited`, or `lost` and activity as `unknown`, `idle`, `working`, `waiting_input`, `waiting_approval`, or `stopped`. Stopped activity SHALL mean that the provider finished or failed a response while the supervised process may remain alive.
 
 #### Scenario: Completed turn in a live TUI
 - **WHEN** a provider reports that a turn stopped while its process remains alive
+- **THEN** lifecycle remains alive, activity becomes stopped, and public status becomes stopped
+
+#### Scenario: Explicit idle follows a stopped turn
+- **WHEN** a provider emits a verified idle signal after reporting turn stop
 - **THEN** lifecycle remains alive, activity becomes idle, and public status becomes idle
 
 #### Scenario: Approval is required
-- **WHEN** a provider reports an unresolved permission request for a live invocation
+- **WHEN** a provider reports an unresolved permission request for a live root invocation
 - **THEN** activity becomes waiting_approval and public status becomes blocked
 
 ### Requirement: Public status is derived consistently
-The broker SHALL derive exactly one public status using the precedence stopped for exited or lost lifecycle, blocked for either waiting activity, running for working activity, and idle for alive idle activity.
+The broker SHALL derive exactly one public status using the precedence stopped for exited or lost lifecycle, blocked for either waiting activity, stopped for stopped activity on a live process, running for working activity, and idle for alive unknown or idle activity.
 
 #### Scenario: Process exits while blocked
 - **WHEN** a blocked provider process exits
-- **THEN** its public status becomes stopped even if its last activity was waiting_approval
+- **THEN** its public status becomes stopped and its blocked reason is cleared
+
+#### Scenario: Live turn completes
+- **WHEN** a normal completion event changes a live invocation from working or blocked to stopped activity
+- **THEN** public status becomes stopped without implying that the process exited
 
 ### Requirement: Provider events reduce deterministically
-The broker SHALL assign a monotonically increasing broker revision transactionally and SHALL apply adapter-specific session and turn ordering, transition guards, and effective-cause deduplication so delayed hook events cannot regress current metadata, change current attention, resurrect a completed turn, or produce duplicate terminal notification causes incorrectly.
+The broker SHALL assign a monotonically increasing broker revision transactionally and SHALL apply adapter-specific session and turn ordering, transition guards, and effective-cause deduplication so delayed hook events cannot regress current metadata, change current status reason, resurrect a stopped turn, or produce duplicate terminal notification causes incorrectly.
 
 #### Scenario: Late tool event follows turn completion
 - **WHEN** a delayed tool activity event arrives after completion for the same identified turn
-- **THEN** the reducer retains idle unless the event proves a new turn began
+- **THEN** the reducer retains stopped activity unless the event proves a new turn began
 
 #### Scenario: Event from an older provider session arrives
 - **WHEN** a hook carries a provider session ID different from the latest explicitly started provider session
-- **THEN** the reducer does not change current activity, attention, turn, usage, or provider metadata and exposes no actionable effective cause
+- **THEN** the reducer does not change current activity, reason, turn, usage, or provider metadata and exposes no actionable effective cause
 
 #### Scenario: Older provider session ends after a newer session starts
 - **WHEN** provider session B starts and provider session A later emits `SessionEnd`
@@ -41,7 +49,7 @@ The broker SHALL assign a monotonically increasing broker revision transactional
 
 #### Scenario: Current provider session ends before process exit
 - **WHEN** the current provider session ends while the supervised child remains alive
-- **THEN** provider-session state closes without setting process lifecycle to exited
+- **THEN** provider-session state closes without setting process lifecycle to exited or resetting stopped activity to idle
 
 #### Scenario: Duplicate event delivery
 - **WHEN** the broker receives an event with an event ID it already committed
@@ -86,41 +94,53 @@ The broker SHALL be the only SQLite writer and SHALL transactionally persist inv
 
 #### Scenario: Turn completes
 - **WHEN** the reducer commits the first normal terminal event for a live turn
-- **THEN** the update contains an idle public agent view without exposing the internal completed event kind
+- **THEN** the update contains a stopped public agent view with an optional completed reason without exposing the internal completed event kind
 
 #### Scenario: Turn fails
 - **WHEN** the reducer commits the first documented failure event while the process remains alive
-- **THEN** the update contains an idle public agent view rather than a permanent failed public status
+- **THEN** the update contains a stopped public agent view with an optional failed reason rather than a permanent internal failure status
 
 #### Scenario: Listener falls behind
 - **WHEN** the daemon replaces missed updates with a fresh snapshot envelope
 - **THEN** the replacement contains complete current public agent views at the reported revision
 
 ### Requirement: Active attention is local durable state
-The broker SHALL persist at most one bounded active-attention object per invocation outside `InvocationSnapshot`, SHALL update it transactionally with event reduction, and SHALL expose it only through local listen baselines and updates.
+The broker SHALL persist at most one bounded current status-reason object per invocation outside `InvocationSnapshot`, SHALL update it transactionally with event reduction, and SHALL expose it only through the explicit public reason projection in local views and configured sinks. Selected excerpts SHALL not be stored in normalized event history.
 
 #### Scenario: Broker restarts while an invocation is blocked
 - **WHEN** the last committed state for a retained live invocation is waiting_approval or waiting_input
-- **THEN** a listener's initial snapshot baseline includes the retained active attention for that invocation
+- **THEN** a listener's initial snapshot baseline includes the retained active blocked reason for that invocation
 
-#### Scenario: New attention replaces old attention
-- **WHEN** another attention context is committed for an already blocked invocation
-- **THEN** the broker retains only the newest bounded active object rather than a history of attention contexts
+#### Scenario: Broker restarts after completion
+- **WHEN** the last committed state is a stopped live invocation with a bounded completed reason
+- **THEN** a listener's initial snapshot includes that current stopped reason
+
+#### Scenario: New reason replaces old reason
+- **WHEN** a new status reason is committed for an invocation
+- **THEN** the broker retains only the newest bounded current object rather than a history of reason excerpts
 
 #### Scenario: Work resumes
 - **WHEN** a new turn begins or a reliable provider event shows that work resumed
-- **THEN** the broker clears the invocation's active attention in the same transaction
+- **THEN** the broker clears the invocation's current reason in the same transaction
 
-#### Scenario: Turn or invocation terminates
-- **WHEN** the invocation completes, fails, exits, or is reconciled as lost
-- **THEN** the broker clears its active attention
+#### Scenario: Explicit idle follows stop
+- **WHEN** a verified idle event changes stopped activity to idle
+- **THEN** the broker clears the completed or failed reason
+
+#### Scenario: Lifecycle-only exit occurs
+- **WHEN** a running, blocked, or idle invocation exits or is reconciled as lost without a provider stop outcome
+- **THEN** the broker clears any incompatible reason and projects stopped with no reason
+
+#### Scenario: Process exits after reported completion
+- **WHEN** an invocation already projects stopped with a completed or failed reason and its process later exits
+- **THEN** the current outcome reason remains and no public update is emitted if no projected field changed
 
 #### Scenario: Invocation retention expires
 - **WHEN** a retained invocation is deleted under the existing retention policy
-- **THEN** its local active-attention row is deleted as well
+- **THEN** its current status-reason row is deleted as well
 
 ### Requirement: Status payload uses typed structured fields
-Each `PublicAgentView` SHALL contain public invocation identity, configured provider identity, derived status, timestamps, working directory, optional provider session identity/name/start reason, optional sanitized provider metadata, optional verified usage and context measurements, optional repository metadata, and optional bounded blocked-status reason. The public type SHALL NOT contain adapter dialect, credentials, raw hooks, executable arguments, private process identities, multiplexer details, internal lifecycle or activity, internal normalized event kinds, reducer bookkeeping, or control authority. Working directories, repository paths, session names, and bounded reasons SHALL be treated as potentially sensitive observer data despite belonging to the public schema.
+Each `PublicAgentView` SHALL contain public invocation identity, configured provider identity, derived status, timestamps, working directory, optional provider session identity/name/start reason, optional sanitized provider metadata, optional verified usage and context measurements, optional repository metadata, and an optional bounded status-compatible reason. Reason kinds SHALL be `input`, `approval`, `completed`, or `failed`. The public type SHALL NOT contain adapter dialect, credentials, raw hooks, executable arguments, private process identities, multiplexer details, internal lifecycle or activity, internal normalized event kinds, reducer bookkeeping, or control authority. Working directories, repository paths, session names, and bounded reasons SHALL be treated as potentially sensitive observer data intentionally shared with the single operator and configured sinks.
 
 #### Scenario: Enrichment is unavailable
 - **WHEN** usage, context utilization, provider metadata, repository information, session name, or status reason cannot be determined
@@ -139,7 +159,7 @@ Each `PublicAgentView` SHALL contain public invocation identity, configured prov
 - **THEN** the broker does not create a listener- or sink-visible metadata-only change
 
 ### Requirement: Public agent status has four values
-Every `PublicAgentView` SHALL expose exactly one of `running`, `blocked`, `idle`, or `stopped`. The projection SHALL map working activity on a live process to running, either waiting activity on a live process to blocked, unknown or idle activity on a live process to idle, and exited or lost lifecycle to stopped regardless of activity.
+Every `PublicAgentView` SHALL expose exactly one of `running`, `blocked`, `idle`, or `stopped`. The projection SHALL map working activity on a live process to running, either waiting activity on a live process to blocked, stopped activity on a live process to stopped, unknown or idle activity on a live process to idle, and exited or lost lifecycle to stopped regardless of activity.
 
 #### Scenario: Invocation is starting
 - **WHEN** internal lifecycle is starting with any activity
@@ -157,13 +177,17 @@ Every `PublicAgentView` SHALL expose exactly one of `running`, `blocked`, `idle`
 - **WHEN** internal lifecycle is alive and activity is waiting_approval
 - **THEN** public status is blocked with an optional approval reason
 
+#### Scenario: Live agent has stopped responding
+- **WHEN** internal lifecycle is alive and activity is stopped
+- **THEN** public status is stopped with an optional completed or failed reason
+
 #### Scenario: Live agent has unknown activity
 - **WHEN** internal lifecycle is alive and activity is unknown
 - **THEN** public status is idle
 
 #### Scenario: Blocked process exits
 - **WHEN** internal lifecycle becomes exited or lost while activity is waiting_input or waiting_approval
-- **THEN** public status is stopped
+- **THEN** public status is stopped with no blocked reason
 
 ### Requirement: Public changed fields are distinct from current status
 A public update envelope SHALL contain a deterministic non-empty set of typed public field paths describing every material projected field changed by the transaction, while the embedded view status SHALL describe current agent state. An update SHALL NOT choose one cause when several fields change. Internal activity and normalized event-kind enums SHALL remain internal reduction concepts.
@@ -181,7 +205,7 @@ A public update envelope SHALL contain a deterministic non-empty set of typed pu
 - **THEN** the changed set contains both `status` and `session` without applying cause precedence
 
 ### Requirement: Public projection is an explicit privacy boundary
-The daemon SHALL construct public views field-by-field from normalized state and active attention read at the same committed revision before local serialization or sink enqueueing. It SHALL compare and publish the exact projected view associated with that revision. Raw provider data and internal control metadata SHALL remain inaccessible through status, listen, sink, hub ingestion, and hub listening protocols.
+The daemon SHALL construct public views field-by-field from normalized state and current bounded status reason read at the same committed revision before local serialization or sink enqueueing. It SHALL compare and publish the exact projected view associated with that revision. Raw provider data, complete prompts or assistant messages, transcripts, and internal control metadata SHALL remain inaccessible through status, listen, sink, hub ingestion, and hub listening protocols. Selected bounded status summaries SHALL be intentionally observer-facing and MAY be delivered to sinks explicitly configured by the operator.
 
 #### Scenario: Invocation runs inside tmux
 - **WHEN** internal state contains a tmux socket, session, window, pane, TTY, and process identities
@@ -189,11 +213,11 @@ The daemon SHALL construct public views field-by-field from normalized state and
 
 #### Scenario: Hook contains conversational content
 - **WHEN** raw hook input contains prompts, assistant text, transcript paths, or arbitrary tool input
-- **THEN** public output contains only explicitly selected bounded normalized fields and never the raw content
+- **THEN** public output contains only explicitly selected bounded normalized fields, including at most an eligible 100-character status excerpt, and never the raw content
 
-#### Scenario: Attention changes while a baseline is read
-- **WHEN** active attention changes concurrently with a status or listen baseline query
-- **THEN** each returned public view combines internal invocation state and attention from one consistent committed revision
+#### Scenario: Status reason changes while a baseline is read
+- **WHEN** the current reason changes concurrently with a status or listen baseline query
+- **THEN** each returned public view combines internal invocation state and reason from one consistent committed revision
 
 #### Scenario: Canonical envelope is serialized
 - **WHEN** a local snapshot or update is serialized

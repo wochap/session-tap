@@ -77,7 +77,7 @@ The hub SHALL provide a local command that emits one persisted merged public sna
 - **THEN** the hub listener receives the complete view and the full deterministic changed-field set from that update
 
 ### Requirement: Hub retains explicit current attention state
-The hub SHALL retain only the optional bounded public status reason carried inside each complete `PublicAgentView`. It SHALL replace or clear the prior reason whenever an accepted complete view replaces the materialized agent state.
+The hub SHALL retain only the optional bounded public status reason carried inside each complete `PublicAgentView`, including blocked `input`/`approval` and stopped `completed`/`failed` reasons. It SHALL replace or clear the prior reason whenever an accepted complete view replaces the materialized agent state and SHALL NOT infer a reason for a stopped view that omits one.
 
 #### Scenario: Agent stops waiting for input
 - **WHEN** an update changes an agent from blocked to running and its complete public view has no reason
@@ -86,6 +86,14 @@ The hub SHALL retain only the optional bounded public status reason carried insi
 #### Scenario: Approval changes to ordinary input
 - **WHEN** a blocked public view with an approval reason is replaced by a blocked view with an input reason
 - **THEN** the hub retains only the input reason from the latest complete view
+
+#### Scenario: Agent completes a response
+- **WHEN** a stopped public view with a completed reason replaces a running or blocked view
+- **THEN** the hub retains that completed reason and exposes it to listeners and subscription matching
+
+#### Scenario: Process exits without completion context
+- **WHEN** a stopped public view without a reason replaces a running, blocked, or idle view
+- **THEN** the hub clears the prior reason and does not infer completed or failed
 
 ### Requirement: Hub control remains unavailable
 The initial hub SHALL NOT expose agent screen inspection, capture, input, or command-control operations, while source envelopes SHALL remain versioned and MAY advertise capabilities for a future separately specified bidirectional transport.
