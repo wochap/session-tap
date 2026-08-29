@@ -222,3 +222,37 @@ The daemon SHALL construct public views field-by-field from normalized state and
 #### Scenario: Canonical envelope is serialized
 - **WHEN** a local snapshot or update is serialized
 - **THEN** its shape matches the shared golden public-envelope fixtures used by daemon, sink, hub, and receiver tests
+
+### Requirement: Interrupted turns are terminal without being completed
+The broker SHALL reduce `Interrupted` to stopped activity for the current live turn and mark that turn terminal. It SHALL expose public status `stopped` without a completed or failed reason and SHALL NOT treat interruption as a completion-reactive cause.
+
+#### Scenario: Live turn is interrupted
+- **WHEN** the broker accepts `Interrupted` for the active turn of an alive invocation
+- **THEN** lifecycle remains alive, activity becomes stopped, and public status becomes stopped without a reason
+
+#### Scenario: Completion listener observes interruption
+- **WHEN** an interrupted transition is published to local listeners, sinks, or the hub
+- **THEN** the complete resulting public view contains stopped status with no completed or failed reason
+
+#### Scenario: Late activity follows interruption
+- **WHEN** working or attention activity for the same identified turn arrives after interruption
+- **THEN** the reducer retains stopped activity and exposes no actionable effective cause
+
+#### Scenario: Duplicate terminal signal follows interruption
+- **WHEN** a completed, failed, or interrupted signal arrives for the turn already marked interrupted
+- **THEN** the reducer does not expose a second terminal cause
+
+#### Scenario: New turn follows interruption
+- **WHEN** a verified new-turn event arrives after an interrupted turn
+- **THEN** the reducer starts a new turn generation and changes activity to working
+
+### Requirement: Internal event schema changes apply in place
+Internal normalized event kinds and reducer inputs SHALL use the target schema directly without a schema-version increment, compatibility variants, or legacy aliases. Public envelope versions and the four-value public status vocabulary SHALL remain unchanged.
+
+#### Scenario: Interrupted event is serialized
+- **WHEN** an interrupted normalized event is persisted
+- **THEN** it uses the canonical in-place internal event representation
+
+#### Scenario: Incompatible retained alpha data is encountered
+- **WHEN** retained internal data cannot decode under the target schema
+- **THEN** SessionTap reports the incompatibility without invoking a legacy decoder or changing a schema version

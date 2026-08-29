@@ -239,3 +239,86 @@ A future provider-specific collector that reads agent-owned stores, histories, o
 #### Scenario: Provider history contains additional metadata
 - **WHEN** a future collector extracts a verified safe fact unavailable in hook payloads
 - **THEN** downstream storage, public projection, sinks, and hub aggregation consume the normalized fact without parsing or identifying the provider's source format
+
+### Requirement: Provider event dispatch is exact and fail-closed
+Each built-in adapter SHALL classify event names, notification subtypes, and special tool names using provider-owned exact mappings with explicit accepted spelling variants. An unsupported value SHALL produce `AdapterOutcome::Ignored` unless that exact value is explicitly defined as provider-neutral enrichment.
+
+#### Scenario: Documented event is received
+- **WHEN** a built-in adapter receives an exact supported root-agent event name
+- **THEN** it emits the event kind and selected bounded context defined by that provider's mapping
+
+#### Scenario: Unknown event resembles a supported event
+- **WHEN** an event name merely contains text such as `permission`, `stop`, `question`, or `tool` but is not an accepted exact value
+- **THEN** the adapter ignores it without changing normalized state or persisting an enrichment event
+
+#### Scenario: Supported spelling variants exist
+- **WHEN** a provider contract establishes multiple spellings for one event or field
+- **THEN** the adapter lists those variants explicitly and maps them to one semantic outcome
+
+#### Scenario: Unknown notification subtype arrives
+- **WHEN** a recognized notification event carries a subtype outside the provider's exact allowlist
+- **THEN** the adapter ignores the notification without asserting attention or idle state
+
+### Requirement: Managed root hooks cover supported authoritative signals
+Each built-in adapter SHALL register and explicitly map every available root-agent hook needed for session boundaries, new turns, tool progress, ordinary input, approval, explicit idle, compaction, interruption, normal completion, failure, and provider-session end. Registration SHALL remain provider-specific and fail open when an installed provider does not support an expected hook.
+
+#### Scenario: Tool lifecycle completes
+- **WHEN** Claude, Codex, or Qwen emits a supported root `PostToolUse` event
+- **THEN** the adapter emits working activity for the current turn without creating a new turn
+
+#### Scenario: Provider asks for ordinary input through a tool
+- **WHEN** Codex invokes `request_user_input` or Claude or Qwen invokes an explicitly recognized ask-user tool
+- **THEN** the adapter emits waiting-input with optional bounded question context
+
+#### Scenario: Provider emits an elicitation notification
+- **WHEN** a supported provider emits an exact elicitation or agent-needs-input notification subtype
+- **THEN** the adapter emits waiting-input rather than approval or enrichment
+
+#### Scenario: Provider compacts context
+- **WHEN** a supported root-agent pre-compact or post-compact event establishes active compaction
+- **THEN** the adapter emits the provider-defined working or enrichment assertion without creating a new session or turn
+
+#### Scenario: Hook is unavailable
+- **WHEN** setup establishes that the installed provider cannot register a configured event
+- **THEN** setup reports degraded observability and preserves an interactive fail-open launch
+
+### Requirement: Provider interruptions are normalized explicitly
+A built-in adapter SHALL map a documented root-agent cancellation, interrupt event, or unambiguous interrupted stop field to `Interrupted`. It SHALL NOT map session closure, channel shutdown, or user cancellation to normal completion.
+
+#### Scenario: Codex reports interrupt
+- **WHEN** Codex emits its exact root-agent `Interrupt` event
+- **THEN** the adapter emits `Interrupted` for the identified turn
+
+#### Scenario: Provider stop carries interruption evidence
+- **WHEN** a supported provider stop event contains documented unambiguous interruption evidence
+- **THEN** the adapter emits `Interrupted` instead of `Completed`
+
+#### Scenario: Stop has no interruption evidence
+- **WHEN** a normal root-agent stop contains no documented interruption evidence
+- **THEN** the adapter emits `Completed`
+
+### Requirement: Provider artifact access is private and validated
+An adapter SHALL validate a provider-supplied transcript or session-artifact path before reading it. Validation SHALL bind the path to the authenticated invocation and provider, canonicalize it beneath an allowed provider-owned root, require an eligible regular file, and enforce bounded reads. Failure SHALL omit only artifact-derived enrichment.
+
+#### Scenario: Valid transcript supplies a session title
+- **WHEN** an authenticated provider hook supplies an eligible transcript beneath its allowed provider data root
+- **THEN** the adapter may derive a bounded session title without placing the path or transcript body in normalized output
+
+#### Scenario: Path escapes the provider root
+- **WHEN** a candidate path is absolute, relative, or symlinked outside the allowed provider data root
+- **THEN** the adapter rejects artifact access and continues normalizing safe hook fields
+
+#### Scenario: Artifact is invalid or oversized
+- **WHEN** the candidate is missing, not an eligible regular file, changes identity during access, or exceeds configured read bounds
+- **THEN** the adapter omits artifact-derived enrichment without failing the provider session
+
+#### Scenario: Normalized output is serialized
+- **WHEN** an accepted hook produces internal or public data
+- **THEN** no artifact path appears in normalized events, snapshots, reasons, status output, sinks, or hub envelopes
+
+### Requirement: Subagent payloads remain outside root normalization
+Built-in adapters SHALL reject a payload with a documented non-empty child-agent identity or child-agent lifecycle event before extracting state, attention, metadata, usage, or artifacts.
+
+#### Scenario: Child hook includes root session identity
+- **WHEN** a subagent payload also contains the root provider session ID or turn ID
+- **THEN** the adapter ignores the entire payload and the root invocation remains unchanged
