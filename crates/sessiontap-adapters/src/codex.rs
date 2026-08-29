@@ -1,14 +1,14 @@
 use crate::{
     AgentAdapter, SetupAction, SetupReport, bounded_field, completed_reason_context,
     is_subagent_payload, merge_hook_config, provider_metadata, sanitize_bounded,
-    status_reason_context,
+    status_reason_context, tool_activity_update,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use sessiontap_core::domain::{
-    AdapterOutcome, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
+    AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -44,14 +44,21 @@ impl AgentAdapter for CodexAdapter {
     fn dialect(&self) -> &'static str {
         "codex"
     }
-    fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<AdapterOutcome> {
+    fn normalize_with_evidence(
+        &self,
+        id: &InvocationId,
+        raw: &Value,
+        evidence: EventEvidence,
+    ) -> Result<AdapterOutcome> {
         if is_subagent_payload(raw) {
             return Ok(AdapterOutcome::Ignored);
         }
         let Some(kind) = classify(raw) else {
             return Ok(AdapterOutcome::Ignored);
         };
-        Ok(AdapterOutcome::Event(Box::new(build(id, raw, kind))))
+        Ok(AdapterOutcome::Event(Box::new(build(
+            id, raw, kind, evidence,
+        ))))
     }
     async fn setup(
         &self,
@@ -98,7 +105,12 @@ fn classify(raw: &Value) -> Option<EventKind> {
     }
 }
 
-fn build(id: &InvocationId, raw: &Value, kind: EventKind) -> NormalizedAdapterEvent {
+fn build(
+    id: &InvocationId,
+    raw: &Value,
+    kind: EventKind,
+    evidence: EventEvidence,
+) -> NormalizedAdapterEvent {
     let now = Utc::now();
     let status_reason = match kind {
         EventKind::WaitingApproval => status_reason_context(raw, false),
@@ -125,7 +137,7 @@ fn build(id: &InvocationId, raw: &Value, kind: EventKind) -> NormalizedAdapterEv
             provider: "codex".into(),
             observed_at: now,
             received_at: now,
-            source: "hook".into(),
+            evidence,
             kind: kind.clone(),
             provider_session_id: raw
                 .get("session_id")
@@ -139,6 +151,7 @@ fn build(id: &InvocationId, raw: &Value, kind: EventKind) -> NormalizedAdapterEv
             provider_metadata: provider_metadata(raw, None),
             usage: None,
             turn_id,
+            tool_activity: tool_activity_update("codex", raw),
         },
         status_reason,
     }

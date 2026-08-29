@@ -2,12 +2,15 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use fs2::FileExt;
 use rand::RngCore;
-use sessiontap_adapters::{AdapterRegistry, SetupAction};
+use sessiontap_adapters::{
+    ADAPTER_API_VERSION, AdapterRegistry, SetupAction, stamp_invocation_workspace,
+};
 use sessiontap_core::{
     SCHEMA_VERSION,
     config::Config,
     domain::{
-        Activity, InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
+        Activity, ActivityConfirmation, EventEvidence, EvidenceChannel, EvidenceTrust,
+        InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
     },
     multiplexer::{MultiplexerAdapter, TmuxAdapter},
     paths::AppPaths,
@@ -283,6 +286,12 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
             updated_at: now,
             lifecycle: Lifecycle::Starting,
             activity: Activity::Unknown,
+            state_started_at: now,
+            last_state_asserted_at: None,
+            activity_confirmation: ActivityConfirmation::Live,
+            last_evidence: None,
+            source_ordering: vec![],
+            current_tool_activity: None,
             status: derive_status(Lifecycle::Starting, Activity::Unknown),
             provider_session: None,
             provider_metadata: None,
@@ -336,7 +345,8 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         command
             .env("SESSIONTAP_INVOCATION_ID", id.to_string())
             .env("SESSIONTAP_CREDENTIAL", &credential)
-            .env("SESSIONTAP_PROVIDER", provider);
+            .env("SESSIONTAP_PROVIDER", provider)
+            .env("SESSIONTAP_WORKSPACE", &cwd);
     } else {
         remove_tracking_environment(&mut command);
     }
@@ -377,6 +387,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
                 id.clone(),
                 credential.clone(),
                 side_channel,
+                cwd.clone(),
             ))
         })
     } else {
@@ -418,6 +429,7 @@ async fn tail_provider_side_channel(
     invocation_id: InvocationId,
     credential: String,
     path: PathBuf,
+    workspace: PathBuf,
 ) {
     let config = Config::load(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
@@ -425,12 +437,22 @@ async fn tail_provider_side_channel(
         return;
     };
     let mut tail = sessiontap_adapters::qwen::QwenJsonlTail::new(path, 64 * 1024);
+    let mut source_sequence = 0_u64;
     loop {
         match tail.poll() {
             Ok(values) => {
-                for value in values {
+                for mut value in values {
+                    stamp_invocation_workspace(&mut value, Some(&workspace));
+                    source_sequence = source_sequence.saturating_add(1);
+                    let evidence = EventEvidence {
+                        channel: EvidenceChannel::SideChannel,
+                        trust: EvidenceTrust::LocalObservation,
+                        collector_revision: Some(ADAPTER_API_VERSION.into()),
+                        collector_instance_id: Some(invocation_id.to_string()),
+                        source_sequence: Some(source_sequence),
+                    };
                     if let Ok(Some(mut normalized)) = adapter
-                        .normalize(&invocation_id, &value)
+                        .normalize_with_evidence(&invocation_id, &value, evidence)
                         .map(|outcome| outcome.into_event())
                     {
                         normalized.event.provider = provider.clone();
@@ -503,11 +525,17 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
         return Ok(());
     };
     inspect_hook_best_effort(paths, provider, &raw).await;
-    let Ok(value) = serde_json::from_slice(&raw) else {
+    let Ok(mut value) = serde_json::from_slice(&raw) else {
         return Ok(());
     };
+    let workspace = env::var_os("SESSIONTAP_WORKSPACE").map(PathBuf::from);
+    stamp_invocation_workspace(&mut value, workspace.as_deref());
     let Ok(Some(mut normalized)) = adapter
-        .normalize(&uuid, &value)
+        .normalize_with_evidence(
+            &uuid,
+            &value,
+            EventEvidence::managed_hook(ADAPTER_API_VERSION.into()),
+        )
         .map(|outcome| outcome.into_event())
     else {
         return Ok(());
@@ -616,6 +644,7 @@ fn remove_tracking_environment(command: &mut Command) {
         "SESSIONTAP_INVOCATION_ID",
         "SESSIONTAP_CREDENTIAL",
         "SESSIONTAP_PROVIDER",
+        "SESSIONTAP_WORKSPACE",
     ] {
         command.env_remove(key);
     }

@@ -5,8 +5,10 @@ use serde_json::{Value, json};
 use sessiontap_core::{
     config::Config,
     domain::{
-        AdapterOutcome, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
+        AdapterOutcome, EventEvidence, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
         STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, StatusReasonContext, StatusReasonSource,
+        TOOL_CORRELATION_ID_MAX_CHARS, TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS,
+        ToolActivityPhase, ToolActivityUpdate,
     },
 };
 use std::{
@@ -23,6 +25,20 @@ pub mod codex;
 pub mod qwen;
 
 pub const ADAPTER_API_VERSION: u32 = 1;
+const TRUSTED_WORKSPACE_FIELD: &str = "__sessiontap_invocation_workspace";
+
+pub fn stamp_invocation_workspace(raw: &mut Value, workspace: Option<&Path>) {
+    let Some(object) = raw.as_object_mut() else {
+        return;
+    };
+    object.remove(TRUSTED_WORKSPACE_FIELD);
+    if let Some(workspace) = workspace.and_then(Path::to_str) {
+        object.insert(
+            TRUSTED_WORKSPACE_FIELD.to_owned(),
+            Value::String(workspace.to_owned()),
+        );
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct LaunchPreparation {
@@ -60,7 +76,19 @@ pub trait AgentAdapter: Send + Sync {
     fn prepare_launch(&self, _args: &[String], _private_dir: &Path) -> Result<LaunchPreparation> {
         Ok(LaunchPreparation::default())
     }
-    fn normalize(&self, invocation_id: &InvocationId, raw: &Value) -> Result<AdapterOutcome>;
+    fn normalize(&self, invocation_id: &InvocationId, raw: &Value) -> Result<AdapterOutcome> {
+        self.normalize_with_evidence(
+            invocation_id,
+            raw,
+            EventEvidence::managed_hook(ADAPTER_API_VERSION.into()),
+        )
+    }
+    fn normalize_with_evidence(
+        &self,
+        invocation_id: &InvocationId,
+        raw: &Value,
+        evidence: EventEvidence,
+    ) -> Result<AdapterOutcome>;
     async fn setup(
         &self,
         home: &Path,
@@ -256,7 +284,7 @@ fn normalize_provider(
             provider: provider.into(),
             observed_at,
             received_at,
-            source: "hook".into(),
+            evidence: EventEvidence::managed_hook(ADAPTER_API_VERSION.into()),
             kind: kind.clone(),
             provider_session_id: raw
                 .get("session_id")
@@ -283,6 +311,7 @@ fn normalize_provider(
                 })
                 .and_then(Value::as_str)
                 .and_then(|value| sanitize_bounded(value, 128)),
+            tool_activity: None,
         },
         attention,
         failure,
@@ -318,6 +347,122 @@ pub(crate) fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Op
         .iter()
         .find_map(|name| raw.get(name).and_then(Value::as_str))
         .and_then(|value| sanitize_bounded(value, max_chars))
+}
+
+pub(crate) fn tool_activity_update(provider: &str, raw: &Value) -> Option<ToolActivityUpdate> {
+    let event = raw.get("hook_event_name")?.as_str()?;
+    let phase = match event {
+        "PreToolUse" => ToolActivityPhase::Start,
+        "ToolProgress" => ToolActivityPhase::Progress,
+        "PostToolUse" => ToolActivityPhase::Finish,
+        "PostToolUseFailure" => ToolActivityPhase::Failure,
+        "PermissionRequest" => ToolActivityPhase::Attention,
+        _ => return None,
+    };
+    let raw_label = raw.get("tool_name")?.as_str()?;
+    let label = normalized_tool_label(raw_label)?;
+    let correlation_id = match provider {
+        "qwen" => bounded_field(
+            raw,
+            &["tool_use_id", "tool_call_id"],
+            TOOL_CORRELATION_ID_MAX_CHARS,
+        ),
+        "claude" | "codex" => bounded_field(raw, &["tool_use_id"], TOOL_CORRELATION_ID_MAX_CHARS),
+        _ => None,
+    };
+    let detail = activity_detail(provider, raw_label, raw);
+    Some(ToolActivityUpdate {
+        phase,
+        label,
+        correlation_id,
+        detail,
+    })
+}
+
+fn normalized_tool_label(value: &str) -> Option<String> {
+    let clean = sanitize_bounded(value, TOOL_LABEL_MAX_CHARS)?;
+    let mut normalized = String::with_capacity(clean.len());
+    for ch in clean.chars() {
+        if ch.is_ascii_alphanumeric() {
+            normalized.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '_' | '-' | ' ' | ':' | '.') && !normalized.ends_with('_') {
+            normalized.push('_');
+        } else {
+            return None;
+        }
+    }
+    let normalized = normalized.trim_matches('_');
+    (!normalized.is_empty()).then(|| match normalized {
+        "bash" | "shell" | "shell_command" | "run_shell_command" => "shell".to_owned(),
+        "read" | "read_file" => "read_file".to_owned(),
+        "write" | "write_file" => "write_file".to_owned(),
+        "edit" | "edit_file" | "replace" => "edit_file".to_owned(),
+        other => other.to_owned(),
+    })
+}
+
+fn activity_detail(provider: &str, tool: &str, raw: &Value) -> Option<String> {
+    let input = raw.get("tool_input")?.as_object()?;
+    let description_allowed = matches!(
+        (provider, tool),
+        ("claude" | "codex", "Bash" | "bash") | ("qwen", "run_shell_command" | "shell_command")
+    );
+    if description_allowed
+        && let Some(value) = input.get("description").and_then(Value::as_str)
+        && let Some(value) = safe_scalar_detail(value)
+    {
+        return Some(value);
+    }
+    let path_fields: &[&str] = match (provider, tool) {
+        ("claude", "Read" | "Write" | "Edit") => &["file_path"],
+        ("codex", "Read" | "Write" | "Edit" | "read_file" | "write_file" | "edit_file") => {
+            &["file_path", "path"]
+        }
+        ("qwen", "read_file" | "write_file" | "replace") => &["file_path", "path"],
+        _ => &[],
+    };
+    let target = path_fields
+        .iter()
+        .find_map(|field| input.get(*field).and_then(Value::as_str))?;
+    let cwd = raw.get(TRUSTED_WORKSPACE_FIELD)?.as_str()?;
+    workspace_relative_target(Path::new(cwd), Path::new(target))
+}
+
+fn safe_scalar_detail(value: &str) -> Option<String> {
+    let value = sanitize_bounded(value, TOOL_DETAIL_MAX_CHARS)?;
+    let lower = value.to_ascii_lowercase();
+    (!lower.contains("http://")
+        && !lower.contains("https://")
+        && !lower.contains("token=")
+        && !lower.contains("password=")
+        && !lower.contains("authorization:")
+        && !lower.contains("sk-"))
+    .then_some(value)
+}
+
+fn workspace_relative_target(workspace: &Path, target: &Path) -> Option<String> {
+    use std::path::Component;
+    let workspace = workspace.canonicalize().ok()?;
+    let candidate = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        workspace.join(target)
+    };
+    if candidate
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return None;
+    }
+    let resolved = if candidate.exists() {
+        candidate.canonicalize().ok()?
+    } else {
+        let parent = candidate.parent()?.canonicalize().ok()?;
+        parent.join(candidate.file_name()?)
+    };
+    let relative = resolved.strip_prefix(&workspace).ok()?;
+    let value = relative.to_str()?;
+    safe_scalar_detail(value)
 }
 
 pub(crate) fn provider_metadata(
@@ -1841,5 +1986,160 @@ mod tests {
         )
         .unwrap();
         assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn provider_payload_cannot_forge_transport_evidence() {
+        use sessiontap_core::domain::{EvidenceChannel, EvidenceTrust};
+        let id = InvocationId::new();
+        let raw = json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "tool-1",
+            "source": "provider_forgery",
+            "verified": false,
+            "collectorRevision": 999,
+            "clientRevision": 999,
+            "sequence": 999
+        });
+        let normalized = AgentAdapter::normalize_with_evidence(
+            &claude::ClaudeAdapter,
+            &id,
+            &raw,
+            EventEvidence {
+                channel: EvidenceChannel::ManagedHook,
+                trust: EvidenceTrust::AuthenticatedInvocation,
+                collector_revision: Some(1),
+                collector_instance_id: None,
+                source_sequence: None,
+            },
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+        assert_eq!(
+            normalized.event.evidence.channel,
+            EvidenceChannel::ManagedHook
+        );
+        assert_eq!(normalized.event.evidence.collector_revision, Some(1));
+        assert_eq!(normalized.event.evidence.source_sequence, None);
+        let serialized = serde_json::to_string(&normalized).unwrap();
+        assert!(!serialized.contains("provider_forgery"));
+        assert!(!serialized.contains("999"));
+    }
+
+    #[test]
+    fn tool_activity_selects_only_allowlisted_safe_detail() {
+        use sessiontap_core::domain::ToolActivityPhase;
+        let id = InvocationId::new();
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src.rs");
+        fs::write(&file, "fn main() {}\n").unwrap();
+        let cwd = temp.path().to_string_lossy();
+
+        let shell = claude::ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({
+                    "hook_event_name":"PreToolUse",
+                    "tool_name":"Bash",
+                    "tool_use_id":"tool-1",
+                    "cwd":cwd,
+                    "tool_input":{"command":"PRIVATE_COMMAND", "description":"Run unit tests"}
+                }),
+            )
+            .unwrap();
+        let tool = shell.event.tool_activity.as_ref().unwrap();
+        assert_eq!(tool.phase, ToolActivityPhase::Start);
+        assert_eq!(tool.label, "shell");
+        assert_eq!(tool.correlation_id.as_deref(), Some("tool-1"));
+        assert_eq!(tool.detail.as_deref(), Some("Run unit tests"));
+        assert!(
+            !serde_json::to_string(&shell.event)
+                .unwrap()
+                .contains("PRIVATE_COMMAND")
+        );
+
+        let mut read_payload = json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Read",
+            "tool_use_id":"tool-2",
+            "cwd":"/",
+            "__sessiontap_invocation_workspace":"/",
+            "tool_input":{"file_path":file}
+        });
+        stamp_invocation_workspace(&mut read_payload, Some(temp.path()));
+        let read = claude::ClaudeAdapter.normalize(&id, &read_payload).unwrap();
+        assert_eq!(
+            read.event.tool_activity.unwrap().detail.as_deref(),
+            Some("src.rs")
+        );
+
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let mut outside_payload = json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Read",
+            "tool_use_id":"tool-outside",
+            "tool_input":{"file_path":outside.path()}
+        });
+        stamp_invocation_workspace(&mut outside_payload, Some(temp.path()));
+        assert!(
+            claude::ClaudeAdapter
+                .normalize(&id, &outside_payload)
+                .unwrap()
+                .event
+                .tool_activity
+                .unwrap()
+                .detail
+                .is_none()
+        );
+
+        let unsafe_detail = claude::ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({
+                    "hook_event_name":"PreToolUse",
+                    "tool_name":"Bash",
+                    "tool_use_id":"tool-3",
+                    "cwd":cwd,
+                    "tool_input":{"description":"Open https://example.invalid/?token=secret"}
+                }),
+            )
+            .unwrap();
+        assert!(unsafe_detail.event.tool_activity.unwrap().detail.is_none());
+    }
+
+    #[test]
+    fn supported_provider_tool_phases_are_exact_and_result_free() {
+        use sessiontap_core::domain::ToolActivityPhase;
+        let id = InvocationId::new();
+        for (provider, payload, phase) in [
+            (
+                "claude",
+                json!({"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_use_id":"a","error":"PRIVATE"}),
+                ToolActivityPhase::Failure,
+            ),
+            (
+                "codex",
+                json!({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"b","tool_response":"PRIVATE"}),
+                ToolActivityPhase::Finish,
+            ),
+            (
+                "qwen",
+                json!({"hook_event_name":"PermissionRequest","tool_name":"run_shell_command","tool_call_id":"c","tool_input":{"command":"PRIVATE"}}),
+                ToolActivityPhase::Attention,
+            ),
+        ] {
+            let event = match provider {
+                "claude" => claude::ClaudeAdapter.normalize(&id, &payload),
+                "codex" => codex::CodexAdapter.normalize(&id, &payload),
+                "qwen" => qwen::QwenAdapter.normalize(&id, &payload),
+                _ => unreachable!(),
+            }
+            .unwrap()
+            .event;
+            assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
+            assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
+        }
     }
 }

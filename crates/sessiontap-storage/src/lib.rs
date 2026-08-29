@@ -4,10 +4,12 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sessiontap_core::{
     config::SinkConfig,
     domain::{
-        Activity, CurrentStatusReason, EventKind, InvocationId, InvocationSnapshot, Lifecycle,
-        NormalizedEvent, PublicAgentView, PublicField, STATUS_REASON_MAX_BYTES,
-        STATUS_REASON_MAX_CHARS, StatusReasonContext, changed_public_fields, derive_status,
-        project_public,
+        Activity, ActivityConfirmation, CurrentStatusReason, CurrentToolActivity, EventEvidence,
+        EventKind, EvidenceChannel, EvidenceTrust, InvocationId, InvocationSnapshot, Lifecycle,
+        NormalizedEvent, PublicAgentView, PublicField, SOURCE_ORDER_CURSOR_MAX,
+        STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, SourceOrderCursor, StatusReasonContext,
+        TOOL_CORRELATION_ID_MAX_CHARS, TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS,
+        ToolActivityPhase, changed_public_fields, derive_status, project_public,
     },
     protocol::{HUB_SCHEMA_VERSION, SourceEnvelope, SourceIdentity},
 };
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS hub_sink_state (
 );
 "#;
 const MAX_OUTBOX_RECORDS_PER_SINK: u64 = 1_024;
+pub const STALE_WORKING_MINUTES: i64 = 30;
 
 /// Delivery context shared by every transition that must become sink-visible.
 pub struct Publish<'a> {
@@ -213,12 +216,16 @@ impl Storage {
         if !constant_time_eq(stored_credential.as_bytes(), credential.as_bytes()) {
             bail!("invalid invocation credential");
         }
-        let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
+        let mut snapshot = decode_snapshot(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
         let prior_reason = current_status_reason(&tx, id)?;
         let prior_view = project_public(&snapshot, prior_reason.as_ref());
         f(&mut snapshot);
+        snapshot.last_evidence = Some(EventEvidence::local(EvidenceChannel::ProcessObservation));
+        if clear_incompatible_reason {
+            snapshot.current_tool_activity = None;
+        }
         snapshot.revision = next_revision(&tx)?;
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
         if clear_incompatible_reason
@@ -270,6 +277,8 @@ impl Storage {
         status_reason: Option<&StatusReasonContext>,
         publish: Option<&Publish<'_>>,
     ) -> Result<Option<AppliedUpdate>> {
+        validate_evidence(&event.evidence)?;
+        validate_tool_activity(event)?;
         if status_reason.is_some_and(|context| {
             context.summary.is_empty()
                 || context.summary.len() > STATUS_REASON_MAX_BYTES
@@ -295,30 +304,41 @@ impl Storage {
             "SELECT credential,snapshot_json,turn_generation,completed_generation FROM invocations WHERE invocation_id=?1", [event.invocation_id.to_string()],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         ).context("unknown invocation")?;
-        let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
+        let mut snapshot = decode_snapshot(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
         let prior_reason = current_status_reason(&tx, &event.invocation_id)?;
         let prior_public = project_public(&snapshot, prior_reason.as_ref());
-        let stale_session = event.provider_session_id.as_ref().is_some_and(|id| {
+        let mut effective = event_with_channel_authority(event);
+        if matches!(snapshot.lifecycle, Lifecycle::Exited | Lifecycle::Lost) {
+            effective.tool_activity = None;
+            if authoritative_activity(&effective.kind, effective.evidence.channel) {
+                effective.kind = EventKind::Enrichment;
+            }
+        }
+        let stale_order = is_stale_source_order(&snapshot.source_ordering, &event.evidence);
+        let stale_session = effective.provider_session_id.as_ref().is_some_and(|id| {
             snapshot
                 .provider_session
                 .as_ref()
                 .is_some_and(|current| current.id != *id)
-                && event.kind != EventKind::ProviderSessionStarted
+                && effective.kind != EventKind::ProviderSessionStarted
         });
-        let stale_turn = event.turn_id.as_ref().is_some_and(|id| {
+        let stale_turn = effective.turn_id.as_ref().is_some_and(|id| {
             snapshot
                 .provider_metadata
                 .as_ref()
                 .and_then(|m| m.current_turn_id.as_ref())
                 .is_some_and(|current| current != id)
-                && event.kind != EventKind::NewTurn
+                && effective.kind != EventKind::NewTurn
         });
         let terminal_for_turn = snapshot.completed_generation == Some(snapshot.turn_generation);
+        if terminal_for_turn {
+            effective.tool_activity = None;
+        }
         let suppressed_terminal_event = terminal_for_turn
             && matches!(
-                event.kind,
+                effective.kind,
                 EventKind::Working
                     | EventKind::WaitingInput
                     | EventKind::WaitingApproval
@@ -326,9 +346,9 @@ impl Storage {
                     | EventKind::Failed
                     | EventKind::Interrupted
             );
-        let suppressed = stale_session || stale_turn || suppressed_terminal_event;
+        let suppressed = stale_order || stale_session || stale_turn || suppressed_terminal_event;
         if !suppressed {
-            reduce(&mut snapshot, event);
+            reduce(&mut snapshot, &effective);
         }
         let revision = next_revision(&tx)?;
         snapshot.revision = revision;
@@ -336,7 +356,7 @@ impl Storage {
         match if suppressed {
             &EventKind::Enrichment
         } else {
-            &event.kind
+            &effective.kind
         } {
             EventKind::WaitingApproval
             | EventKind::WaitingInput
@@ -345,10 +365,10 @@ impl Storage {
             | EventKind::Interrupted => {
                 if let Some(context) = status_reason {
                     let current = CurrentStatusReason {
-                        kind: event.kind.clone(),
+                        kind: effective.kind.clone(),
                         context: context.clone(),
                     };
-                    tx.execute("INSERT INTO local_status_reasons(invocation_id,kind,reason_json,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(invocation_id) DO UPDATE SET kind=excluded.kind,reason_json=excluded.reason_json,updated_at=excluded.updated_at", params![event.invocation_id.to_string(), serde_json::to_string(&event.kind)?, serde_json::to_string(&current)?, Utc::now().to_rfc3339()])?;
+                    tx.execute("INSERT INTO local_status_reasons(invocation_id,kind,reason_json,updated_at) VALUES (?1,?2,?3,?4) ON CONFLICT(invocation_id) DO UPDATE SET kind=excluded.kind,reason_json=excluded.reason_json,updated_at=excluded.updated_at", params![event.invocation_id.to_string(), serde_json::to_string(&effective.kind)?, serde_json::to_string(&current)?, Utc::now().to_rfc3339()])?;
                 } else {
                     clear_status_reason_row(&tx, &event.invocation_id)?;
                 }
@@ -417,7 +437,7 @@ impl Storage {
             })?
             .map(|raw| {
                 let (raw, generation, completed) = raw?;
-                let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
+                let mut snapshot = decode_snapshot(&raw)?;
                 snapshot.turn_generation = generation;
                 snapshot.completed_generation = completed;
                 Ok(snapshot)
@@ -450,7 +470,7 @@ impl Storage {
             })?
             .map(|row| {
                 let (raw, generation, completed) = row?;
-                let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
+                let mut snapshot = decode_snapshot(&raw)?;
                 snapshot.turn_generation = generation;
                 snapshot.completed_generation = completed;
                 Ok(snapshot)
@@ -553,7 +573,7 @@ impl Storage {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .context("unknown invocation")?;
-        let mut snapshot: InvocationSnapshot = serde_json::from_str(&raw)?;
+        let mut snapshot = decode_snapshot(&raw)?;
         snapshot.turn_generation = generation;
         snapshot.completed_generation = completed;
         Ok(snapshot)
@@ -568,11 +588,33 @@ impl Storage {
         let (_, snapshots) = self.snapshot()?;
         let mut changed = 0;
         for snapshot in snapshots {
+            let process_is_alive = snapshot
+                .process
+                .child_pid
+                .is_some_and(|pid| is_alive(pid, snapshot.process.start_identity.as_deref()));
             if matches!(snapshot.lifecycle, Lifecycle::Alive | Lifecycle::Starting)
-                && !snapshot
-                    .process
-                    .child_pid
-                    .is_some_and(|pid| is_alive(pid, snapshot.process.start_identity.as_deref()))
+                && process_is_alive
+                && matches!(
+                    snapshot.activity,
+                    Activity::Working | Activity::WaitingInput | Activity::WaitingApproval
+                )
+                && snapshot.activity_confirmation != ActivityConfirmation::RestoredUnconfirmed
+            {
+                let mut conn = self.conn.lock().expect("storage mutex poisoned");
+                let tx = conn.transaction()?;
+                let mut restored = snapshot;
+                restored.activity_confirmation = ActivityConfirmation::RestoredUnconfirmed;
+                restored.revision = next_revision(&tx)?;
+                let credential: String = tx.query_row(
+                    "SELECT credential FROM invocations WHERE invocation_id=?1",
+                    [restored.invocation_id.to_string()],
+                    |r| r.get(0),
+                )?;
+                persist_snapshot(&tx, &restored, &credential)?;
+                tx.commit()?;
+                changed += 1;
+            } else if matches!(snapshot.lifecycle, Lifecycle::Alive | Lifecycle::Starting)
+                && !process_is_alive
             {
                 let mut conn = self.conn.lock().expect("storage mutex poisoned");
                 let tx = conn.transaction()?;
@@ -580,6 +622,9 @@ impl Storage {
                 let prior_reason = current_status_reason(&tx, &lost.invocation_id)?;
                 let prior_view = project_public(&lost, prior_reason.as_ref());
                 lost.lifecycle = Lifecycle::Lost;
+                lost.current_tool_activity = None;
+                lost.last_evidence =
+                    Some(EventEvidence::local(EvidenceChannel::ProcessObservation));
                 lost.status = derive_status(lost.lifecycle, lost.activity);
                 lost.revision = next_revision(&tx)?;
                 let credential: String = tx.query_row(
@@ -609,6 +654,7 @@ impl Storage {
                 changed += 1;
             }
         }
+        changed += self.expire_stale_working_at(Utc::now(), publish)?.len();
         let cutoff = (Utc::now()
             - Duration::days(i64::try_from(retention_days).unwrap_or(i64::MAX)))
         .to_rfc3339();
@@ -618,6 +664,76 @@ impl Storage {
             [cutoff],
         )?;
         Ok(changed)
+    }
+
+    pub fn expire_stale_working_at(
+        &self,
+        now: chrono::DateTime<Utc>,
+        publish: Option<&Publish<'_>>,
+    ) -> Result<Vec<AppliedUpdate>> {
+        let (_, snapshots) = self.snapshot()?;
+        let mut updates = Vec::new();
+        for snapshot in snapshots {
+            let last_asserted = snapshot
+                .last_state_asserted_at
+                .unwrap_or(snapshot.state_started_at);
+            if snapshot.lifecycle != Lifecycle::Alive
+                || snapshot.activity != Activity::Working
+                || now.signed_duration_since(last_asserted)
+                    < Duration::minutes(STALE_WORKING_MINUTES)
+            {
+                continue;
+            }
+            let mut conn = self.conn.lock().expect("storage mutex poisoned");
+            let tx = conn.transaction()?;
+            let (credential, raw, generation, completed): (String, String, u64, Option<u64>) = tx
+                .query_row(
+                    "SELECT credential,snapshot_json,turn_generation,completed_generation FROM invocations WHERE invocation_id=?1",
+                    [snapshot.invocation_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
+            let mut current = decode_snapshot(&raw)?;
+            current.turn_generation = generation;
+            current.completed_generation = completed;
+            let current_last = current
+                .last_state_asserted_at
+                .unwrap_or(current.state_started_at);
+            if current.lifecycle != Lifecycle::Alive
+                || current.activity != Activity::Working
+                || now.signed_duration_since(current_last)
+                    < Duration::minutes(STALE_WORKING_MINUTES)
+            {
+                continue;
+            }
+            let prior_reason = current_status_reason(&tx, &current.invocation_id)?;
+            let prior_view = project_public(&current, prior_reason.as_ref());
+            current.activity = Activity::Unknown;
+            current.state_started_at = now;
+            current.current_tool_activity = None;
+            current.revision = next_revision(&tx)?;
+            current.status = derive_status(current.lifecycle, current.activity);
+            clear_status_reason_row(&tx, &current.invocation_id)?;
+            let event_id =
+                synthetic_event_id("stale_working", &current.invocation_id, current.revision);
+            let view_without_timestamp = project_public(&current, None);
+            if !changed_public_fields(Some(&prior_view), &view_without_timestamp).is_empty() {
+                current.updated_at = now;
+            }
+            persist_snapshot(&tx, &current, &credential)?;
+            let view = project_public(&current, None);
+            let fields = changed_public_fields(Some(&prior_view), &view);
+            if !fields.is_empty() {
+                enqueue_transition(&tx, publish, &view, &event_id, current.revision, &fields)?;
+                updates.push(AppliedUpdate {
+                    revision: current.revision,
+                    delivery_id: event_id,
+                    view,
+                    changed: fields,
+                });
+            }
+            tx.commit()?;
+        }
+        Ok(updates)
     }
 
     pub fn due_outbox(&self, limit: usize) -> Result<Vec<OutboxRecord>> {
@@ -758,7 +874,228 @@ fn persist_snapshot(
     Ok(())
 }
 
+fn decode_snapshot(raw: &str) -> Result<InvocationSnapshot> {
+    serde_json::from_str(raw)
+        .context("incompatible retained invocation state; internal alpha schemas change in place")
+}
+
+fn validate_evidence(evidence: &EventEvidence) -> Result<()> {
+    let trusted = matches!(
+        (evidence.channel, evidence.trust),
+        (
+            EvidenceChannel::ManagedHook,
+            EvidenceTrust::AuthenticatedInvocation
+        ) | (
+            EvidenceChannel::SideChannel
+                | EvidenceChannel::ProcessObservation
+                | EvidenceChannel::ProviderArtifact,
+            EvidenceTrust::LocalObservation
+        )
+    );
+    if !trusted {
+        bail!("evidence channel and trust basis are inconsistent");
+    }
+    if evidence
+        .collector_instance_id
+        .as_ref()
+        .is_some_and(|value| {
+            value.is_empty()
+                || value.chars().count() > sessiontap_core::domain::COLLECTOR_INSTANCE_ID_MAX_CHARS
+                || value.chars().any(char::is_control)
+        })
+    {
+        bail!("collector instance identity is not bounded normalized text");
+    }
+    Ok(())
+}
+
+fn validate_tool_activity(event: &NormalizedEvent) -> Result<()> {
+    if event.tool_activity.as_ref().is_some_and(|tool| {
+        tool.label.is_empty()
+            || tool.label.chars().count() > TOOL_LABEL_MAX_CHARS
+            || tool.label.chars().any(char::is_control)
+            || tool.correlation_id.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.chars().count() > TOOL_CORRELATION_ID_MAX_CHARS
+                    || value.chars().any(char::is_control)
+            })
+            || tool.detail.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.chars().count() > TOOL_DETAIL_MAX_CHARS
+                    || value.chars().any(char::is_control)
+            })
+    }) {
+        bail!("tool activity is not bounded normalized data");
+    }
+    Ok(())
+}
+
+fn event_with_channel_authority(event: &NormalizedEvent) -> NormalizedEvent {
+    let mut effective = event.clone();
+    match event.evidence.channel {
+        EvidenceChannel::ManagedHook | EvidenceChannel::SideChannel => {}
+        EvidenceChannel::ProcessObservation => {
+            if effective.kind != EventKind::SessionEnded {
+                effective.kind = EventKind::Enrichment;
+            }
+            effective.provider_session_id = None;
+            effective.provider_session_name = None;
+            effective.provider_session_start_reason = None;
+            effective.provider_metadata = None;
+            effective.usage = None;
+            effective.turn_id = None;
+            effective.tool_activity = None;
+        }
+        EvidenceChannel::ProviderArtifact => {
+            effective.kind = EventKind::Enrichment;
+            effective.provider_session_id = None;
+            effective.provider_session_name = None;
+            effective.provider_session_start_reason = None;
+            effective.turn_id = None;
+            effective.tool_activity = None;
+            if let Some(metadata) = effective.provider_metadata.as_mut() {
+                metadata.permission_mode = None;
+                metadata.current_turn_id = None;
+            }
+        }
+    }
+    effective
+}
+
+fn is_stale_source_order(previous: &[SourceOrderCursor], current: &EventEvidence) -> bool {
+    let Some(sequence) = current.source_sequence else {
+        return false;
+    };
+    previous.iter().any(|cursor| {
+        cursor.channel == current.channel
+            && cursor.collector_revision == current.collector_revision
+            && cursor.collector_instance_id == current.collector_instance_id
+            && sequence <= cursor.sequence
+    })
+}
+
+fn record_source_order(snapshot: &mut InvocationSnapshot, evidence: &EventEvidence) {
+    let Some(sequence) = evidence.source_sequence else {
+        return;
+    };
+    if let Some(cursor) = snapshot.source_ordering.iter_mut().find(|cursor| {
+        cursor.channel == evidence.channel
+            && cursor.collector_revision == evidence.collector_revision
+            && cursor.collector_instance_id == evidence.collector_instance_id
+    }) {
+        cursor.sequence = sequence;
+        return;
+    }
+    if snapshot.source_ordering.len() == SOURCE_ORDER_CURSOR_MAX {
+        snapshot.source_ordering.remove(0);
+    }
+    snapshot.source_ordering.push(SourceOrderCursor {
+        channel: evidence.channel,
+        collector_revision: evidence.collector_revision,
+        collector_instance_id: evidence.collector_instance_id.clone(),
+        sequence,
+    });
+}
+
+fn authoritative_activity(kind: &EventKind, channel: EvidenceChannel) -> bool {
+    matches!(
+        channel,
+        EvidenceChannel::ManagedHook | EvidenceChannel::SideChannel
+    ) && matches!(
+        kind,
+        EventKind::NewTurn
+            | EventKind::Working
+            | EventKind::Idle
+            | EventKind::WaitingInput
+            | EventKind::WaitingApproval
+            | EventKind::Completed
+            | EventKind::Failed
+            | EventKind::Interrupted
+            | EventKind::ProviderSessionStarted
+    )
+}
+
+fn matching_tool(
+    current: &CurrentToolActivity,
+    update: &sessiontap_core::domain::ToolActivityUpdate,
+    allow_label_fallback: bool,
+) -> bool {
+    match (&current.correlation_id, &update.correlation_id) {
+        (Some(current), Some(update)) => current == update,
+        (None, None) => current.label == update.label,
+        _ => allow_label_fallback && current.label == update.label,
+    }
+}
+
+fn reduce_tool_activity(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
+    let session_boundary = event.provider_session_id.as_ref().is_some_and(|id| {
+        snapshot
+            .provider_session
+            .as_ref()
+            .is_none_or(|session| session.id != *id)
+    });
+    if session_boundary
+        || matches!(
+            event.kind,
+            EventKind::NewTurn
+                | EventKind::Idle
+                | EventKind::Completed
+                | EventKind::Failed
+                | EventKind::Interrupted
+                | EventKind::ProviderSessionStarted
+                | EventKind::ProviderSessionEnded
+                | EventKind::SessionEnded
+        )
+    {
+        snapshot.current_tool_activity = None;
+    }
+    let Some(update) = &event.tool_activity else {
+        return;
+    };
+    match update.phase {
+        ToolActivityPhase::Start => {
+            if let Some(current) = snapshot.current_tool_activity.as_mut()
+                && matching_tool(current, update, false)
+            {
+                current.last_observed_at = event.received_at;
+                if update.detail.is_some() {
+                    current.detail.clone_from(&update.detail);
+                }
+            } else {
+                snapshot.current_tool_activity = Some(CurrentToolActivity {
+                    label: update.label.clone(),
+                    correlation_id: update.correlation_id.clone(),
+                    detail: update.detail.clone(),
+                    started_at: event.received_at,
+                    last_observed_at: event.received_at,
+                });
+            }
+        }
+        ToolActivityPhase::Progress | ToolActivityPhase::Attention => {
+            if let Some(current) = snapshot.current_tool_activity.as_mut()
+                && matching_tool(current, update, true)
+            {
+                current.last_observed_at = event.received_at;
+                if update.detail.is_some() {
+                    current.detail.clone_from(&update.detail);
+                }
+            }
+        }
+        ToolActivityPhase::Finish | ToolActivityPhase::Failure => {
+            if snapshot
+                .current_tool_activity
+                .as_ref()
+                .is_some_and(|current| matching_tool(current, update, false))
+            {
+                snapshot.current_tool_activity = None;
+            }
+        }
+    }
+}
+
 fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
+    let prior_activity = snapshot.activity;
+    reduce_tool_activity(snapshot, event);
     match event.kind {
         EventKind::NewTurn => {
             snapshot.turn_generation += 1;
@@ -792,6 +1129,13 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
         | EventKind::Working
         | EventKind::WaitingInput
         | EventKind::WaitingApproval => {}
+    }
+    if authoritative_activity(&event.kind, event.evidence.channel) {
+        if snapshot.activity != prior_activity {
+            snapshot.state_started_at = event.received_at;
+        }
+        snapshot.last_state_asserted_at = Some(event.received_at);
+        snapshot.activity_confirmation = ActivityConfirmation::Live;
     }
     if let Some(id) = &event.provider_session_id {
         let prior = snapshot.provider_session.as_ref();
@@ -845,6 +1189,8 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
     if event.usage.is_some() {
         snapshot.usage.clone_from(&event.usage);
     }
+    record_source_order(snapshot, &event.evidence);
+    snapshot.last_evidence = Some(event.evidence.clone());
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -895,7 +1241,7 @@ mod legacy_tests {
             provider: s.provider.clone(),
             observed_at: Utc::now(),
             received_at: Utc::now(),
-            source: "test".into(),
+            evidence: EventEvidence::managed_hook(1),
             kind,
             provider_session_id: None,
             provider_session_name: None,
@@ -903,6 +1249,7 @@ mod legacy_tests {
             provider_metadata: None,
             usage: None,
             turn_id: None,
+            tool_activity: None,
         }
     }
     #[test]
@@ -1712,6 +2059,12 @@ mod tests {
             updated_at: now,
             lifecycle: Lifecycle::Alive,
             activity: Activity::Idle,
+            state_started_at: now,
+            last_state_asserted_at: Some(now),
+            activity_confirmation: ActivityConfirmation::Live,
+            last_evidence: None,
+            source_ordering: vec![],
+            current_tool_activity: None,
             status: PublicStatus::Idle,
             provider_session: None,
             provider_metadata: None,
@@ -1733,7 +2086,7 @@ mod tests {
             provider: value.provider.clone(),
             observed_at: Utc::now(),
             received_at: Utc::now(),
-            source: "hook".into(),
+            evidence: EventEvidence::managed_hook(1),
             kind,
             provider_session_id: None,
             provider_session_name: None,
@@ -1741,6 +2094,7 @@ mod tests {
             provider_metadata: None,
             usage: None,
             turn_id: None,
+            tool_activity: None,
         }
     }
 
@@ -1797,7 +2151,7 @@ mod tests {
             provider: value.provider.clone(),
             observed_at: Utc::now(),
             received_at: Utc::now(),
-            source: "hook".into(),
+            evidence: EventEvidence::managed_hook(1),
             kind: EventKind::WaitingInput,
             provider_session_id: None,
             provider_session_name: None,
@@ -1805,6 +2159,7 @@ mod tests {
             provider_metadata: None,
             usage: None,
             turn_id: None,
+            tool_activity: None,
         };
         let update = db
             .apply_event_with_context(
@@ -1853,7 +2208,7 @@ mod tests {
             provider: value.provider,
             observed_at: Utc::now(),
             received_at: Utc::now(),
-            source: "hook".into(),
+            evidence: EventEvidence::managed_hook(1),
             kind: EventKind::Enrichment,
             provider_session_id: None,
             provider_session_name: None,
@@ -1861,6 +2216,7 @@ mod tests {
             provider_metadata: None,
             usage: None,
             turn_id: None,
+            tool_activity: None,
         };
         assert!(
             db.apply_event_with_context(&event, None, None)
@@ -2232,6 +2588,331 @@ mod tests {
         assert_eq!(
             views[0].reason.as_ref().unwrap().summary,
             "Done before process loss"
+        );
+    }
+
+    #[test]
+    fn evidence_authority_ordering_and_assertion_timing_are_enforced() {
+        use sessiontap_core::domain::{EvidenceTrust, ProviderMetadata};
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        let first_at = value.created_at + chrono::Duration::seconds(1);
+
+        let mut process = normalized_event(&value, EventKind::Working, "process-cannot-work");
+        process.evidence = EventEvidence::local(EvidenceChannel::ProcessObservation);
+        process.received_at = first_at;
+        process.provider_metadata = Some(ProviderMetadata {
+            model: Some("forged-model".into()),
+            ..Default::default()
+        });
+        db.apply_event(&process, None).unwrap();
+        let unchanged = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(unchanged.activity, Activity::Idle);
+        assert!(unchanged.provider_metadata.is_none());
+
+        let mut working = normalized_event(&value, EventKind::Working, "working-seq-1");
+        working.received_at = first_at;
+        working.evidence = EventEvidence {
+            channel: EvidenceChannel::SideChannel,
+            trust: EvidenceTrust::LocalObservation,
+            collector_revision: Some(2),
+            collector_instance_id: Some("collector-a".into()),
+            source_sequence: Some(1),
+        };
+        db.apply_event(&working, None).unwrap();
+        let started = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(started.activity, Activity::Working);
+        assert_eq!(started.state_started_at, first_at);
+        assert_eq!(started.last_state_asserted_at, Some(first_at));
+        assert_eq!(started.activity_confirmation, ActivityConfirmation::Live);
+
+        let second_at = first_at + chrono::Duration::seconds(10);
+        let mut repeated = working.clone();
+        repeated.event_id = "working-seq-2".into();
+        repeated.received_at = second_at;
+        repeated.evidence.source_sequence = Some(2);
+        db.apply_event(&repeated, None).unwrap();
+        let refreshed = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(refreshed.state_started_at, first_at);
+        assert_eq!(refreshed.last_state_asserted_at, Some(second_at));
+
+        let mut interleaved = normalized_event(&value, EventKind::Enrichment, "interleaved");
+        interleaved.evidence = EventEvidence::local(EvidenceChannel::ProviderArtifact);
+        db.apply_event(&interleaved, None).unwrap();
+
+        let mut late = repeated.clone();
+        late.event_id = "late-idle-seq-1".into();
+        late.kind = EventKind::Idle;
+        late.received_at = second_at + chrono::Duration::seconds(10);
+        late.evidence.source_sequence = Some(1);
+        db.apply_event(&late, None).unwrap();
+        let ordered = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(ordered.activity, Activity::Working);
+        assert_eq!(ordered.last_state_asserted_at, Some(second_at));
+
+        let mut artifact = normalized_event(&value, EventKind::SessionEnded, "artifact");
+        artifact.evidence = EventEvidence::local(EvidenceChannel::ProviderArtifact);
+        artifact.provider_metadata = Some(ProviderMetadata {
+            model: Some("artifact-model".into()),
+            ..Default::default()
+        });
+        db.apply_event(&artifact, None).unwrap();
+        let enriched = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(enriched.lifecycle, Lifecycle::Alive);
+        assert_eq!(
+            enriched
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.model.as_deref()),
+            Some("artifact-model")
+        );
+        assert_eq!(enriched.last_state_asserted_at, Some(second_at));
+    }
+
+    #[test]
+    fn tool_activity_matches_identity_and_private_progress_is_not_published() {
+        use sessiontap_core::domain::{ToolActivityPhase, ToolActivityUpdate};
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        let sinks = BTreeMap::from([(
+            "observer".into(),
+            SinkConfig::Stdout {
+                enabled: true,
+                fields: vec![],
+            },
+        )]);
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "sandbox",
+            source_name: None,
+        };
+        db.register(&value, "credential", Some(&publish)).unwrap();
+
+        let tool_update = |id: &str, event_id: &str, phase: ToolActivityPhase| {
+            let mut event = normalized_event(&value, EventKind::Working, event_id);
+            event.tool_activity = Some(ToolActivityUpdate {
+                phase,
+                label: "shell".into(),
+                correlation_id: Some(id.into()),
+                detail: Some("Run tests".into()),
+            });
+            event
+        };
+        let start = tool_update("a", "start-a", ToolActivityPhase::Start);
+        let started_at = start.received_at;
+        db.apply_event(&start, Some(&publish)).unwrap();
+        let public_count = db.due_outbox(20).unwrap().len();
+        let mut progress = tool_update("a", "progress-a", ToolActivityPhase::Progress);
+        progress.received_at = started_at + chrono::Duration::seconds(5);
+        db.apply_event(&progress, Some(&publish)).unwrap();
+        assert_eq!(db.due_outbox(20).unwrap().len(), public_count);
+        let progressed = db
+            .invocation(&value.invocation_id)
+            .unwrap()
+            .current_tool_activity
+            .unwrap();
+        assert_eq!(progressed.started_at, started_at);
+        assert_eq!(progressed.last_observed_at, progress.received_at);
+
+        db.apply_event(&tool_update("b", "start-b", ToolActivityPhase::Start), None)
+            .unwrap();
+        let mut attention = normalized_event(&value, EventKind::WaitingApproval, "attention-b");
+        attention.tool_activity = Some(ToolActivityUpdate {
+            phase: ToolActivityPhase::Attention,
+            label: "shell".into(),
+            correlation_id: None,
+            detail: Some("Approve tests".into()),
+        });
+        db.apply_event(&attention, None).unwrap();
+        assert_eq!(
+            db.invocation(&value.invocation_id).unwrap().activity,
+            Activity::WaitingApproval
+        );
+        db.apply_event(
+            &tool_update("a", "finish-a", ToolActivityPhase::Finish),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .current_tool_activity
+                .unwrap()
+                .correlation_id
+                .as_deref(),
+            Some("b")
+        );
+        db.apply_event(
+            &tool_update("b", "finish-b", ToolActivityPhase::Failure),
+            None,
+        )
+        .unwrap();
+        assert!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .current_tool_activity
+                .is_none()
+        );
+
+        let lost_db = Storage::memory().unwrap();
+        let mut lost_value = snapshot();
+        lost_value.process.child_pid = Some(424_242);
+        lost_db.register(&lost_value, "credential", None).unwrap();
+        let mut lost_start = normalized_event(&lost_value, EventKind::Working, "lost-tool");
+        lost_start.tool_activity = Some(ToolActivityUpdate {
+            phase: ToolActivityPhase::Start,
+            label: "shell".into(),
+            correlation_id: Some("lost".into()),
+            detail: None,
+        });
+        lost_db.apply_event(&lost_start, None).unwrap();
+        lost_db.reconcile(|_, _| false, 7, None).unwrap();
+        let lost = lost_db.invocation(&lost_value.invocation_id).unwrap();
+        assert_eq!(lost.lifecycle, Lifecycle::Lost);
+        assert!(lost.current_tool_activity.is_none());
+        assert_eq!(
+            lost.last_evidence.as_ref().unwrap().channel,
+            EvidenceChannel::ProcessObservation
+        );
+    }
+
+    #[test]
+    fn tool_activity_clears_at_state_session_and_lifecycle_boundaries() {
+        use sessiontap_core::domain::{ToolActivityPhase, ToolActivityUpdate};
+        for (index, boundary) in [
+            EventKind::NewTurn,
+            EventKind::Idle,
+            EventKind::Completed,
+            EventKind::Failed,
+            EventKind::Interrupted,
+            EventKind::ProviderSessionStarted,
+            EventKind::ProviderSessionEnded,
+            EventKind::SessionEnded,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let db = Storage::memory().unwrap();
+            let value = snapshot();
+            db.register(&value, "credential", None).unwrap();
+            let mut start = normalized_event(&value, EventKind::Working, &format!("start-{index}"));
+            start.tool_activity = Some(ToolActivityUpdate {
+                phase: ToolActivityPhase::Start,
+                label: "read_file".into(),
+                correlation_id: Some(format!("tool-{index}")),
+                detail: None,
+            });
+            db.apply_event(&start, None).unwrap();
+            assert!(
+                db.invocation(&value.invocation_id)
+                    .unwrap()
+                    .current_tool_activity
+                    .is_some()
+            );
+            let mut event = normalized_event(&value, boundary, &format!("boundary-{index}"));
+            if event.kind == EventKind::ProviderSessionStarted {
+                event.provider_session_id = Some("new-session".into());
+            }
+            db.apply_event(&event, None).unwrap();
+            assert!(
+                db.invocation(&value.invocation_id)
+                    .unwrap()
+                    .current_tool_activity
+                    .is_none(),
+                "boundary {:?} retained tool activity",
+                event.kind
+            );
+        }
+
+        let db = Storage::memory().unwrap();
+        let mut value = snapshot();
+        value.process.child_pid = Some(42);
+        db.register(&value, "credential", None).unwrap();
+        let mut start = normalized_event(&value, EventKind::Working, "lifecycle-tool");
+        start.tool_activity = Some(ToolActivityUpdate {
+            phase: ToolActivityPhase::Start,
+            label: "shell".into(),
+            correlation_id: Some("lifecycle".into()),
+            detail: None,
+        });
+        db.apply_event(&start, None).unwrap();
+        db.mark_exit(&value.invocation_id, "credential", Some(0), None, None)
+            .unwrap();
+        assert!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .current_tool_activity
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn stale_working_expires_but_silent_waiting_survives_and_restores_unconfirmed() {
+        let db = Storage::memory().unwrap();
+        let mut value = snapshot();
+        value.process.child_pid = Some(42);
+        db.register(&value, "credential", None).unwrap();
+        let asserted_at = value.created_at + chrono::Duration::seconds(1);
+        let mut working = normalized_event(&value, EventKind::Working, "working");
+        working.received_at = asserted_at;
+        working.tool_activity = Some(sessiontap_core::domain::ToolActivityUpdate {
+            phase: ToolActivityPhase::Start,
+            label: "shell".into(),
+            correlation_id: Some("long-tool".into()),
+            detail: None,
+        });
+        db.apply_event(&working, None).unwrap();
+        assert!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .current_tool_activity
+                .is_some()
+        );
+        assert_eq!(
+            db.expire_stale_working_at(
+                asserted_at + chrono::Duration::minutes(STALE_WORKING_MINUTES),
+                None,
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        let stale = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(stale.lifecycle, Lifecycle::Alive);
+        assert_eq!(stale.activity, Activity::Unknown);
+        assert_eq!(stale.status, PublicStatus::Idle);
+        assert!(stale.current_tool_activity.is_none());
+        assert_ne!(stale.completed_generation, Some(stale.turn_generation));
+
+        let mut waiting = normalized_event(&value, EventKind::WaitingInput, "waiting");
+        waiting.received_at = asserted_at + chrono::Duration::hours(1);
+        db.apply_event(&waiting, None).unwrap();
+        assert!(
+            db.expire_stale_working_at(waiting.received_at + chrono::Duration::hours(8), None,)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            db.invocation(&value.invocation_id).unwrap().activity,
+            Activity::WaitingInput
+        );
+
+        db.reconcile(|pid, _| pid == 42, 7, None).unwrap();
+        assert_eq!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .activity_confirmation,
+            ActivityConfirmation::RestoredUnconfirmed
+        );
+        let mut live = normalized_event(&value, EventKind::WaitingInput, "waiting-live");
+        live.received_at = waiting.received_at + chrono::Duration::hours(9);
+        db.apply_event(&live, None).unwrap();
+        assert_eq!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .activity_confirmation,
+            ActivityConfirmation::Live
         );
     }
 }

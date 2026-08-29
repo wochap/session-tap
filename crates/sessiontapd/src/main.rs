@@ -90,6 +90,7 @@ async fn main() -> Result<()> {
         broker.source_id.clone(),
         broker.source_name.clone(),
     ));
+    tokio::spawn(stale_working_worker(broker.clone()));
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -100,6 +101,26 @@ async fn main() -> Result<()> {
     let _ = fs::remove_file(&socket);
     drop(lock);
     Ok(())
+}
+
+async fn stale_working_worker(broker: Broker) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        let publish = broker.publish();
+        match broker
+            .storage
+            .expire_stale_working_at(chrono::Utc::now(), Some(&publish))
+        {
+            Ok(updates) => {
+                for update in updates {
+                    let _ = broker.updates.send(update);
+                }
+            }
+            Err(error) => eprintln!("sessiontapd: stale-working sweep failed: {error}"),
+        }
+    }
 }
 
 async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
@@ -239,7 +260,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             provider,
             invocation_id,
             credential,
-            event,
+            mut event,
             status_reason,
         } => {
             if event.invocation_id != invocation_id
@@ -250,6 +271,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             {
                 anyhow::bail!("unknown or invalid hook context");
             }
+            event.received_at = chrono::Utc::now();
             let publish = broker.publish();
             if let Some(update) = broker.storage.apply_event_with_context(
                 &event,
@@ -774,7 +796,7 @@ mod legacy_tests {
             provider: initial.provider.clone(),
             observed_at: Utc::now(),
             received_at: Utc::now(),
-            source: "test".into(),
+            evidence: sessiontap_core::domain::EventEvidence::managed_hook(1),
             kind: EventKind::WaitingApproval,
             provider_session_id: None,
             provider_session_name: None,
@@ -782,6 +804,7 @@ mod legacy_tests {
             provider_metadata: None,
             usage: None,
             turn_id: None,
+            tool_activity: None,
         };
         let attention = sessiontap_core::domain::AttentionContext {
             summary: "Approve tests".into(),
@@ -890,7 +913,7 @@ mod legacy_tests {
             provider: "claude".into(),
             observed_at: Utc::now(),
             received_at: Utc::now(),
-            source: "test".into(),
+            evidence: sessiontap_core::domain::EventEvidence::managed_hook(1),
             kind: EventKind::NewTurn,
             provider_session_id: None,
             provider_session_name: None,
@@ -898,6 +921,7 @@ mod legacy_tests {
             provider_metadata: None,
             usage: None,
             turn_id: None,
+            tool_activity: None,
         };
         storage.apply_event(&event, Some(&publish)).unwrap();
         let client = reqwest::Client::new();

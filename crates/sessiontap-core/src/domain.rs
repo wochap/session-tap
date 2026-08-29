@@ -53,6 +53,112 @@ pub enum Activity {
     Stopped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceChannel {
+    ManagedHook,
+    SideChannel,
+    ProcessObservation,
+    ProviderArtifact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceTrust {
+    AuthenticatedInvocation,
+    LocalObservation,
+}
+
+pub const COLLECTOR_INSTANCE_ID_MAX_CHARS: usize = 128;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventEvidence {
+    pub channel: EvidenceChannel,
+    pub trust: EvidenceTrust,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collector_revision: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collector_instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_sequence: Option<u64>,
+}
+
+pub const SOURCE_ORDER_CURSOR_MAX: usize = 32;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceOrderCursor {
+    pub channel: EvidenceChannel,
+    pub collector_revision: Option<u64>,
+    pub collector_instance_id: Option<String>,
+    pub sequence: u64,
+}
+
+impl EventEvidence {
+    #[must_use]
+    pub const fn managed_hook(collector_revision: u64) -> Self {
+        Self {
+            channel: EvidenceChannel::ManagedHook,
+            trust: EvidenceTrust::AuthenticatedInvocation,
+            collector_revision: Some(collector_revision),
+            collector_instance_id: None,
+            source_sequence: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn local(channel: EvidenceChannel) -> Self {
+        Self {
+            channel,
+            trust: EvidenceTrust::LocalObservation,
+            collector_revision: None,
+            collector_instance_id: None,
+            source_sequence: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityConfirmation {
+    Live,
+    RestoredUnconfirmed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolActivityPhase {
+    Start,
+    Progress,
+    Finish,
+    Failure,
+    Attention,
+}
+
+pub const TOOL_CORRELATION_ID_MAX_CHARS: usize = 128;
+pub const TOOL_LABEL_MAX_CHARS: usize = 64;
+pub const TOOL_DETAIL_MAX_CHARS: usize = 160;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolActivityUpdate {
+    pub phase: ToolActivityPhase,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentToolActivity {
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PublicStatus {
@@ -312,6 +418,12 @@ pub struct InvocationSnapshot {
     pub updated_at: DateTime<Utc>,
     pub lifecycle: Lifecycle,
     pub activity: Activity,
+    pub state_started_at: DateTime<Utc>,
+    pub last_state_asserted_at: Option<DateTime<Utc>>,
+    pub activity_confirmation: ActivityConfirmation,
+    pub last_evidence: Option<EventEvidence>,
+    pub source_ordering: Vec<SourceOrderCursor>,
+    pub current_tool_activity: Option<CurrentToolActivity>,
     pub status: PublicStatus,
     pub provider_session: Option<ProviderSession>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -413,7 +525,7 @@ pub struct NormalizedEvent {
     pub provider: String,
     pub observed_at: DateTime<Utc>,
     pub received_at: DateTime<Utc>,
-    pub source: String,
+    pub evidence: EventEvidence,
     pub kind: EventKind,
     pub provider_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -424,6 +536,8 @@ pub struct NormalizedEvent {
     pub provider_metadata: Option<ProviderMetadata>,
     pub usage: Option<Usage>,
     pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_activity: Option<ToolActivityUpdate>,
 }
 
 #[cfg(test)]
@@ -491,6 +605,12 @@ mod tests {
             updated_at: now,
             lifecycle: Lifecycle::Alive,
             activity: Activity::Stopped,
+            state_started_at: now,
+            last_state_asserted_at: Some(now),
+            activity_confirmation: ActivityConfirmation::Live,
+            last_evidence: None,
+            source_ordering: vec![],
+            current_tool_activity: None,
             status: PublicStatus::Stopped,
             provider_session: None,
             provider_metadata: None,
@@ -639,6 +759,29 @@ mod tests {
             updated_at: now,
             lifecycle: Lifecycle::Alive,
             activity: Activity::Idle,
+            state_started_at: now,
+            last_state_asserted_at: Some(now),
+            activity_confirmation: ActivityConfirmation::Live,
+            last_evidence: Some(EventEvidence {
+                channel: EvidenceChannel::ProviderArtifact,
+                trust: EvidenceTrust::LocalObservation,
+                collector_revision: Some(7),
+                collector_instance_id: Some("PRIVATE_COLLECTOR".into()),
+                source_sequence: Some(9),
+            }),
+            source_ordering: vec![SourceOrderCursor {
+                channel: EvidenceChannel::SideChannel,
+                collector_revision: Some(7),
+                collector_instance_id: Some("PRIVATE_ORDERING".into()),
+                sequence: 9,
+            }],
+            current_tool_activity: Some(CurrentToolActivity {
+                label: "PRIVATE_TOOL".into(),
+                correlation_id: Some("PRIVATE_CORRELATION".into()),
+                detail: Some("PRIVATE_DETAIL".into()),
+                started_at: now,
+                last_observed_at: now,
+            }),
             status: PublicStatus::Idle,
             provider_session: None,
             provider_metadata: None,
@@ -660,6 +803,11 @@ mod tests {
             "lifecycle",
             "activity",
             "turn_generation",
+            "PRIVATE_COLLECTOR",
+            "PRIVATE_ORDERING",
+            "PRIVATE_TOOL",
+            "PRIVATE_CORRELATION",
+            "PRIVATE_DETAIL",
         ] {
             assert!(!value.contains(private));
         }

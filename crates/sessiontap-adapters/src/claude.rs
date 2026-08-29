@@ -1,14 +1,14 @@
 use crate::{
     AgentAdapter, SetupAction, SetupReport, bounded_field, claude_session_name,
     completed_reason_context, failed_reason_context, is_subagent_payload, merge_hook_config,
-    provider_metadata, sanitize_bounded, status_reason_context,
+    provider_metadata, sanitize_bounded, status_reason_context, tool_activity_update,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use sessiontap_core::domain::{
-    AdapterOutcome, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
+    AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -46,7 +46,12 @@ impl AgentAdapter for ClaudeAdapter {
     fn dialect(&self) -> &'static str {
         "claude"
     }
-    fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<AdapterOutcome> {
+    fn normalize_with_evidence(
+        &self,
+        id: &InvocationId,
+        raw: &Value,
+        evidence: EventEvidence,
+    ) -> Result<AdapterOutcome> {
         if is_subagent_payload(raw) {
             return Ok(AdapterOutcome::Ignored);
         }
@@ -81,7 +86,7 @@ impl AgentAdapter for ClaudeAdapter {
                 provider: "claude".into(),
                 observed_at: now,
                 received_at: now,
-                source: "hook".into(),
+                evidence,
                 kind: kind.clone(),
                 provider_session_id: raw
                     .get("session_id")
@@ -95,6 +100,7 @@ impl AgentAdapter for ClaudeAdapter {
                 provider_metadata: provider_metadata(raw, Some("prompt_id")),
                 usage: None,
                 turn_id,
+                tool_activity: tool_activity_update("claude", raw),
             },
             status_reason,
         })))
