@@ -19,12 +19,12 @@ pub const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
     "PermissionRequest",
-    "AskUserQuestion",
     "Notification",
     "Stop",
     "StopFailure",
-    "SubagentStop",
     "SessionEnd",
 ];
 pub struct QwenAdapter;
@@ -60,69 +60,8 @@ impl AgentAdapter for QwenAdapter {
         if is_subagent_payload(raw) {
             return Ok(AdapterOutcome::Ignored);
         }
-        let name = raw
-            .get("hook_event_name")
-            .or_else(|| raw.get("event_name"))
-            .or_else(|| raw.get("type"))
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_ascii_lowercase();
-        let notification = raw
-            .get("notification_type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let ask = name.contains("permission")
-            && raw
-                .get("tool_name")
-                .and_then(Value::as_str)
-                .is_some_and(|tool| {
-                    tool.eq_ignore_ascii_case("AskUserQuestion")
-                        || tool.eq_ignore_ascii_case("ask_user_question")
-                });
-        let empty_prompt = (name.contains("userprompt") || name.contains("promptsubmit"))
-            && raw
-                .get("prompt")
-                .and_then(Value::as_str)
-                .is_some_and(|prompt| prompt.trim().is_empty());
-        let kind = if name.contains("sessionstart") {
-            EventKind::ProviderSessionStarted
-        } else if name.contains("sessionend") {
-            EventKind::ProviderSessionEnded
-        } else if notification == "idle_prompt" {
-            EventKind::Idle
-        } else if empty_prompt {
-            EventKind::Enrichment
-        } else if name.contains("userprompt")
-            || name.contains("promptsubmit")
-            || name.contains("turnstart")
-        {
-            EventKind::NewTurn
-        } else if ask {
-            EventKind::WaitingInput
-        } else if name == "notification" && notification == "permission_prompt" {
-            EventKind::Enrichment
-        } else if name.contains("permission") {
-            EventKind::WaitingApproval
-        } else if name.contains("question")
-            || name.contains("elicitation")
-            || name.contains("needs_input")
-            || name.contains("userinputrequest")
-            || notification.contains("needs_input")
-        {
-            EventKind::WaitingInput
-        } else if name.contains("pretool")
-            || name.contains("posttool")
-            || name.contains("toolstart")
-            || name.contains("toolend")
-        {
-            EventKind::Working
-        } else if name.contains("failure") {
-            EventKind::Failed
-        } else if name == "stop" || name.contains("turnend") {
-            EventKind::Completed
-        } else {
-            EventKind::Enrichment
+        let Some(kind) = classify(raw) else {
+            return Ok(AdapterOutcome::Ignored);
         };
         let received_at = Utc::now();
         let observed_at = raw
@@ -199,5 +138,42 @@ impl AgentAdapter for QwenAdapter {
             executable,
             action,
         )
+    }
+}
+
+fn classify(raw: &Value) -> Option<EventKind> {
+    let name = raw.get("hook_event_name")?.as_str()?;
+    let ask_user = raw
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .is_some_and(|tool| matches!(tool, "AskUserQuestion" | "ask_user_question"));
+    match name {
+        "SessionStart" => Some(EventKind::ProviderSessionStarted),
+        "SessionEnd" => Some(EventKind::ProviderSessionEnded),
+        "UserPromptSubmit"
+            if raw
+                .get("prompt")
+                .and_then(Value::as_str)
+                .is_some_and(|prompt| prompt.trim().is_empty()) =>
+        {
+            Some(EventKind::Enrichment)
+        }
+        "UserPromptSubmit" => Some(EventKind::NewTurn),
+        "PreToolUse" if ask_user => Some(EventKind::WaitingInput),
+        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => Some(EventKind::Working),
+        "PermissionRequest" if ask_user => Some(EventKind::WaitingInput),
+        "PermissionRequest" => Some(EventKind::WaitingApproval),
+        "Notification" => match raw.get("notification_type").and_then(Value::as_str) {
+            Some("permission_prompt") => Some(EventKind::WaitingApproval),
+            Some("elicitation_dialog" | "agent_needs_input") => Some(EventKind::WaitingInput),
+            Some("idle_prompt") => Some(EventKind::Idle),
+            _ => None,
+        },
+        "Stop" if raw.get("is_interrupt").and_then(Value::as_bool) == Some(true) => {
+            Some(EventKind::Interrupted)
+        }
+        "Stop" => Some(EventKind::Completed),
+        "StopFailure" => Some(EventKind::Failed),
+        _ => None,
     }
 }

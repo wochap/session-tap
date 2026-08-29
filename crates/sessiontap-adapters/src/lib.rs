@@ -358,33 +358,165 @@ pub(crate) fn provider_metadata(
     (metadata != ProviderMetadata::default()).then_some(metadata)
 }
 
-pub(crate) fn claude_session_name(raw: &Value) -> Option<String> {
-    let path = raw.get("transcript_path")?.as_str()?;
-    latest_transcript_title(Path::new(path)).ok().flatten()
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactProvider {
+    Claude,
 }
 
-fn latest_transcript_title(path: &Path) -> Result<Option<String>> {
+impl ArtifactProvider {
+    fn data_root(self, home: &Path) -> PathBuf {
+        match self {
+            Self::Claude => home.join(".claude/projects"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactKind {
+    Transcript,
+}
+
+struct ArtifactRequest<'a> {
+    provider: ArtifactProvider,
+    kind: ArtifactKind,
+    invocation_id: &'a InvocationId,
+    session_id: &'a str,
+    candidate: &'a Path,
+}
+
+struct ValidatedArtifact {
+    file: File,
+    identity: (u64, u64),
+    _scope: ArtifactScope,
+}
+
+struct ArtifactScope {
+    _invocation_id: InvocationId,
+    _provider: ArtifactProvider,
+    _kind: ArtifactKind,
+    _session_id: String,
+}
+
+impl ValidatedArtifact {
+    fn identity_unchanged(&self) -> Result<bool> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = self.file.metadata()?;
+        Ok(metadata.is_file() && (metadata.dev(), metadata.ino()) == self.identity)
+    }
+}
+
+pub(crate) fn claude_session_name(id: &InvocationId, raw: &Value) -> Option<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    claude_session_name_beneath(id, raw, &ArtifactProvider::Claude.data_root(&home))
+}
+
+fn claude_session_name_beneath(
+    id: &InvocationId,
+    raw: &Value,
+    allowed_root: &Path,
+) -> Option<String> {
+    let session_id = raw.get("session_id")?.as_str()?;
+    let candidate = Path::new(raw.get("transcript_path")?.as_str()?);
+    let artifact = validate_artifact(
+        ArtifactRequest {
+            provider: ArtifactProvider::Claude,
+            kind: ArtifactKind::Transcript,
+            invocation_id: id,
+            session_id,
+            candidate,
+        },
+        allowed_root,
+    )
+    .ok()?;
+    latest_transcript_title(artifact).ok().flatten()
+}
+
+fn validate_artifact(
+    request: ArtifactRequest<'_>,
+    allowed_root: &Path,
+) -> Result<ValidatedArtifact> {
+    const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+
+    let canonical_root = fs::canonicalize(allowed_root)?;
+    let unresolved = if request.candidate.is_absolute() {
+        request.candidate.to_path_buf()
+    } else {
+        canonical_root.join(request.candidate)
+    };
+    let canonical_candidate = fs::canonicalize(unresolved)?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        bail!("provider artifact escapes its allowed root");
+    }
+    let expected_stem = sanitize_bounded(request.session_id, 128)
+        .context("provider artifact has no eligible session identity")?;
+    if canonical_candidate
+        .file_stem()
+        .and_then(|value| value.to_str())
+        != Some(&expected_stem)
+    {
+        bail!("provider artifact does not match the authenticated session");
+    }
+    if canonical_candidate
+        .extension()
+        .and_then(|value| value.to_str())
+        != Some("jsonl")
+    {
+        bail!("provider transcript artifact has an unsupported file type");
+    }
+    if !matches!(request.kind, ArtifactKind::Transcript) {
+        bail!("unsupported provider artifact kind");
+    }
+    let _provider_scope = request.provider;
+    let file = File::open(&canonical_candidate)?;
+    let opened_path = fs::canonicalize(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
+    if opened_path != canonical_candidate || !opened_path.starts_with(&canonical_root) {
+        bail!("provider artifact identity changed while opening");
+    }
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_ARTIFACT_BYTES {
+        bail!("provider artifact is not an eligible bounded regular file");
+    }
+    Ok(ValidatedArtifact {
+        file,
+        identity: (metadata.dev(), metadata.ino()),
+        _scope: ArtifactScope {
+            _invocation_id: request.invocation_id.clone(),
+            _provider: request.provider,
+            _kind: request.kind,
+            _session_id: expected_stem,
+        },
+    })
+}
+
+fn latest_transcript_title(mut artifact: ValidatedArtifact) -> Result<Option<String>> {
     const CHUNK_BYTES: usize = 8 * 1024;
     const MAX_LINE_BYTES: usize = 64 * 1024;
+    const MAX_SCAN_BYTES: u64 = 256 * 1024;
 
-    let mut file = File::open(path)?;
+    let file = &mut artifact.file;
     let mut cursor = file.metadata()?.len();
+    let scan_start = cursor.saturating_sub(MAX_SCAN_BYTES);
     let mut reversed_line = Vec::new();
     let mut line_too_long = false;
 
-    while cursor > 0 {
-        let amount = usize::try_from(cursor.min(CHUNK_BYTES as u64))?;
+    while cursor > scan_start {
+        let amount = usize::try_from((cursor - scan_start).min(CHUNK_BYTES as u64))?;
         cursor -= amount as u64;
         file.seek(SeekFrom::Start(cursor))?;
         let mut chunk = vec![0; amount];
-        std::io::Read::read_exact(&mut file, &mut chunk)?;
+        std::io::Read::read_exact(&mut *file, &mut chunk)?;
 
         for byte in chunk.into_iter().rev() {
             if byte == b'\n' {
                 if !line_too_long {
                     reversed_line.reverse();
                     if let Some(title) = title_from_transcript_line(&reversed_line) {
-                        return Ok(Some(title));
+                        return artifact
+                            .identity_unchanged()?
+                            .then_some(Some(title))
+                            .context("provider artifact identity changed while reading");
                     }
                 }
                 reversed_line.clear();
@@ -400,8 +532,14 @@ fn latest_transcript_title(path: &Path) -> Result<Option<String>> {
     if !line_too_long {
         reversed_line.reverse();
         if let Some(title) = title_from_transcript_line(&reversed_line) {
-            return Ok(Some(title));
+            return artifact
+                .identity_unchanged()?
+                .then_some(Some(title))
+                .context("provider artifact identity changed while reading");
         }
+    }
+    if !artifact.identity_unchanged()? {
+        bail!("provider artifact identity changed while reading");
     }
     Ok(None)
 }
@@ -789,28 +927,35 @@ pub fn merge_hook_config(
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .context("hooks must be an object")?;
+    for groups in hooks.values_mut() {
+        let groups = groups
+            .as_array_mut()
+            .context("hook event must be an array")?;
+        for group in groups.iter_mut() {
+            if let Some(handlers) = group.get_mut("hooks").and_then(Value::as_array_mut) {
+                handlers.retain(|handler| {
+                    !(handler.get("statusMessage").and_then(Value::as_str)
+                        == Some("SessionTap observability")
+                        && handler
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .is_some_and(|command| command.contains(" hook emit ")))
+                });
+            }
+        }
+        groups.retain(|group| {
+            group
+                .get("hooks")
+                .and_then(Value::as_array)
+                .is_none_or(|handlers| !handlers.is_empty())
+        });
+    }
     for event in events {
         let groups = hooks
             .entry((*event).to_owned())
             .or_insert_with(|| json!([]))
             .as_array_mut()
             .context("hook event must be an array")?;
-        for group in groups.iter_mut() {
-            if let Some(handlers) = group.get_mut("hooks").and_then(Value::as_array_mut) {
-                handlers.retain(|h| {
-                    !(h.get("statusMessage").and_then(Value::as_str)
-                        == Some("SessionTap observability")
-                        && h.get("command")
-                            .and_then(Value::as_str)
-                            .is_some_and(|command| command.contains(" hook emit ")))
-                });
-            }
-        }
-        groups.retain(|g| {
-            g.get("hooks")
-                .and_then(Value::as_array)
-                .is_none_or(|h| !h.is_empty())
-        });
         if action != SetupAction::Remove {
             groups.push(json!({"hooks":[owned_handler(provider,executable)?]}));
         }
@@ -968,6 +1113,33 @@ mod tests {
         assert!(v.to_string().contains("mine"));
         assert!(!v.to_string().contains("SessionTap observability"));
     }
+
+    #[test]
+    fn hook_refresh_removes_obsolete_managed_registrations() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"hooks":{"ObsoleteEvent":[{"hooks":[{"type":"command","command":"'sessiontap' hook emit 'qwen'","statusMessage":"SessionTap observability"}]}],"UserEvent":[{"hooks":[{"type":"command","command":"mine"}]}]}}"#,
+        )
+        .unwrap();
+        merge_hook_config(
+            &path,
+            "qwen",
+            qwen::HOOK_EVENTS,
+            Path::new("sessiontap"),
+            SetupAction::Ensure,
+        )
+        .unwrap();
+        let merged: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert!(
+            merged["hooks"]["ObsoleteEvent"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(merged["hooks"]["UserEvent"].to_string().contains("mine"));
+    }
     #[test]
     fn malformed_is_untouched() {
         let t = tempfile::tempdir().unwrap();
@@ -1087,6 +1259,104 @@ mod tests {
                 .unwrap()
                 .contains("context_usage")
         );
+    }
+
+    #[test]
+    fn exact_provider_contract_fixtures_cover_every_managed_hook() {
+        fn verify(provider: &str, events: &[&str], fixture: &str, id: &InvocationId) {
+            let cases: Vec<Value> = serde_json::from_str(fixture).unwrap();
+            let covered = cases
+                .iter()
+                .filter_map(|case| case["payload"]["hook_event_name"].as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                covered,
+                events
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                "fixture coverage differs from {provider} managed hooks"
+            );
+            for case in cases {
+                let payload = &case["payload"];
+                let outcome = match provider {
+                    "claude" => AgentAdapter::normalize(&claude::ClaudeAdapter, id, payload),
+                    "codex" => AgentAdapter::normalize(&codex::CodexAdapter, id, payload),
+                    "qwen" => AgentAdapter::normalize(&qwen::QwenAdapter, id, payload),
+                    _ => unreachable!(),
+                }
+                .unwrap()
+                .into_event()
+                .expect("fixture event must normalize");
+                assert_eq!(
+                    serde_json::to_value(outcome.event.kind).unwrap(),
+                    case["expected"],
+                    "unexpected {provider} outcome for {payload}"
+                );
+            }
+        }
+
+        let id = InvocationId::new();
+        verify(
+            "claude",
+            claude::HOOK_EVENTS,
+            include_str!("../tests/fixtures/claude-events.json"),
+            &id,
+        );
+        verify(
+            "codex",
+            codex::HOOK_EVENTS,
+            include_str!("../tests/fixtures/codex-events.json"),
+            &id,
+        );
+        verify(
+            "qwen",
+            qwen::HOOK_EVENTS,
+            include_str!("../tests/fixtures/qwen-events.json"),
+            &id,
+        );
+    }
+
+    #[test]
+    fn similar_unknown_events_and_notification_subtypes_are_ignored() {
+        let id = InvocationId::new();
+        let cases = [
+            (
+                "claude",
+                json!({"hook_event_name":"PermissionRequestLater"}),
+            ),
+            ("claude", json!({"hook_event_name":"StopFailureNotice"})),
+            (
+                "claude",
+                json!({"hook_event_name":"Notification","notification_type":"permission_prompt_later"}),
+            ),
+            ("codex", json!({"hook_event_name":"Interrupting"})),
+            ("codex", json!({"hook_event_name":"PostToolUseExtra"})),
+            (
+                "qwen",
+                json!({"hook_event_name":"UserPromptSubmitAgain","prompt":"work"}),
+            ),
+            (
+                "qwen",
+                json!({"hook_event_name":"Notification","notification_type":"agent_needs_input_eventually"}),
+            ),
+            ("claude", json!({"event_name":"Stop"})),
+            ("codex", json!({"type":"PermissionRequest"})),
+        ];
+        for (provider, payload) in cases {
+            let outcome = match provider {
+                "claude" => AgentAdapter::normalize(&claude::ClaudeAdapter, &id, &payload),
+                "codex" => AgentAdapter::normalize(&codex::CodexAdapter, &id, &payload),
+                "qwen" => AgentAdapter::normalize(&qwen::QwenAdapter, &id, &payload),
+                _ => unreachable!(),
+            }
+            .unwrap();
+            assert_eq!(
+                outcome,
+                AdapterOutcome::Ignored,
+                "accepted {provider} {payload}"
+            );
+        }
     }
 
     #[test]
@@ -1288,7 +1558,9 @@ mod tests {
     #[test]
     fn claude_uses_latest_bounded_transcript_title() {
         let temp = tempfile::tempdir().unwrap();
-        let transcript = temp.path().join("session.jsonl");
+        let root = temp.path().join(".claude/projects/project");
+        fs::create_dir_all(&root).unwrap();
+        let transcript = root.join("provider-session.jsonl");
         fs::write(
             &transcript,
             concat!(
@@ -1299,24 +1571,50 @@ mod tests {
         )
         .unwrap();
         let id = InvocationId::new();
-        let normalized = claude::ClaudeAdapter
-            .normalize(
-                &id,
-                &json!({
-                    "hook_event_name": "Stop",
-                    "session_id": "provider-session",
-                    "transcript_path": transcript,
-                }),
-            )
-            .unwrap();
+        let raw = json!({
+            "hook_event_name": "Stop",
+            "session_id": "provider-session",
+            "transcript_path": transcript,
+        });
+        let name = claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects"));
 
-        assert_eq!(
-            normalized.event.provider_session_name.as_deref(),
-            Some("Renamed session")
-        );
+        assert_eq!(name.as_deref(), Some("Renamed session"));
+        let normalized = claude::ClaudeAdapter.normalize(&id, &raw).unwrap();
         let serialized = serde_json::to_string(&normalized).unwrap();
         assert!(!serialized.contains("PRIVATE"));
-        assert!(!serialized.contains("session.jsonl"));
+        assert!(!serialized.contains("provider-session.jsonl"));
+    }
+
+    #[test]
+    fn artifact_validator_rejects_escape_wrong_session_and_oversize() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".claude/projects/project");
+        fs::create_dir_all(&root).unwrap();
+        let outside = temp.path().join("outside.jsonl");
+        fs::write(&outside, "{\"aiTitle\":\"PRIVATE\"}\n").unwrap();
+        let escaped = root.join("session-id.jsonl");
+        symlink(&outside, &escaped).unwrap();
+        let id = InvocationId::new();
+        let raw = json!({"session_id":"session-id","transcript_path":escaped});
+        assert!(
+            claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects")).is_none()
+        );
+
+        let wrong = root.join("different-session.jsonl");
+        fs::write(&wrong, "{\"aiTitle\":\"PRIVATE\"}\n").unwrap();
+        let raw = json!({"session_id":"session-id","transcript_path":wrong});
+        assert!(
+            claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects")).is_none()
+        );
+
+        let oversized = root.join("session-id.jsonl");
+        let file = File::create(&oversized).unwrap();
+        file.set_len(64 * 1024 * 1024 + 1).unwrap();
+        let raw = json!({"session_id":"session-id","transcript_path":oversized});
+        assert!(
+            claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects")).is_none()
+        );
     }
 
     #[test]

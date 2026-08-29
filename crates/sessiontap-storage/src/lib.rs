@@ -223,7 +223,10 @@ impl Storage {
         snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
         if clear_incompatible_reason
             && prior_reason.as_ref().is_some_and(|reason| {
-                !matches!(reason.kind, EventKind::Completed | EventKind::Failed)
+                !matches!(
+                    reason.kind,
+                    EventKind::Completed | EventKind::Failed | EventKind::Interrupted
+                )
             })
         {
             clear_status_reason_row(&tx, id)?;
@@ -321,6 +324,7 @@ impl Storage {
                     | EventKind::WaitingApproval
                     | EventKind::Completed
                     | EventKind::Failed
+                    | EventKind::Interrupted
             );
         let suppressed = stale_session || stale_turn || suppressed_terminal_event;
         if !suppressed {
@@ -337,7 +341,8 @@ impl Storage {
             EventKind::WaitingApproval
             | EventKind::WaitingInput
             | EventKind::Completed
-            | EventKind::Failed => {
+            | EventKind::Failed
+            | EventKind::Interrupted => {
                 if let Some(context) = status_reason {
                     let current = CurrentStatusReason {
                         kind: event.kind.clone(),
@@ -774,7 +779,7 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
         {
             snapshot.activity = Activity::WaitingApproval;
         }
-        EventKind::Completed | EventKind::Failed => {
+        EventKind::Completed | EventKind::Failed | EventKind::Interrupted => {
             snapshot.activity = Activity::Stopped;
             snapshot.completed_generation = Some(snapshot.turn_generation);
         }
@@ -1910,6 +1915,97 @@ mod tests {
             .unwrap();
         assert_eq!(idle.view.status, PublicStatus::Idle);
         assert!(idle.view.reason.is_none());
+    }
+
+    #[test]
+    fn interrupted_turn_is_reasonless_terminal_until_a_new_turn() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        let value = snapshot();
+        let sinks = BTreeMap::from([(
+            "observer".into(),
+            SinkConfig::Stdout {
+                enabled: true,
+                fields: vec![],
+            },
+        )]);
+        let publish = Publish {
+            sinks: &sinks,
+            source_id: "sandbox",
+            source_name: None,
+        };
+        let db = Storage::open(&path).unwrap();
+        db.register(&value, "credential", Some(&publish)).unwrap();
+        db.apply_event(
+            &normalized_event(&value, EventKind::NewTurn, "turn"),
+            Some(&publish),
+        )
+        .unwrap();
+        db.apply_event_with_context(
+            &normalized_event(&value, EventKind::WaitingInput, "waiting"),
+            Some(&StatusReasonContext {
+                summary: "PRIVATE QUESTION".into(),
+                source: sessiontap_core::domain::StatusReasonSource::Question,
+            }),
+            Some(&publish),
+        )
+        .unwrap();
+        let interrupted = db
+            .apply_event_with_context(
+                &normalized_event(&value, EventKind::Interrupted, "interrupted"),
+                None,
+                Some(&publish),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(interrupted.view.status, PublicStatus::Stopped);
+        assert!(interrupted.view.reason.is_none());
+        assert_eq!(sessiontap_core::SCHEMA_VERSION, 1);
+        assert_eq!(sessiontap_core::protocol::HUB_SCHEMA_VERSION, 1);
+
+        for (kind, event_id) in [
+            (EventKind::Working, "late-working"),
+            (EventKind::WaitingApproval, "late-approval"),
+            (EventKind::Completed, "duplicate-completed"),
+            (EventKind::Failed, "duplicate-failed"),
+            (EventKind::Interrupted, "duplicate-interrupted"),
+        ] {
+            assert!(
+                db.apply_event(&normalized_event(&value, kind, event_id), Some(&publish))
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        drop(db);
+
+        let db = Storage::open(&path).unwrap();
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(views[0].status, PublicStatus::Stopped);
+        assert!(views[0].reason.is_none());
+        let persisted: String = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT event_json FROM normalized_events WHERE event_id='interrupted'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(persisted.contains("\"kind\":\"interrupted\""));
+        assert!(!persisted.contains("PRIVATE QUESTION"));
+
+        let next = db
+            .apply_event(
+                &normalized_event(&value, EventKind::NewTurn, "next-turn"),
+                Some(&publish),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.activity, Activity::Working);
+        let (_, views) = db.public_snapshot().unwrap();
+        assert_eq!(views[0].status, PublicStatus::Running);
+        assert!(views[0].reason.is_none());
     }
 
     #[test]

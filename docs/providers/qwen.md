@@ -13,13 +13,15 @@ minimum tested version is not yet claimed. Hook-only observation is the safe
 fallback. Side-channel lines are bounded, parsed only after a newline, and
 restart at offset zero after truncation.
 
-Direct permission requests carry bounded approval context;
+Direct permission requests and exact `permission_prompt` notifications carry bounded approval context;
 `ask_user_question` and documented input-needed notifications are ordinary
 input waits. Observed `auto`, `auto_edit`, `plan`, and `yolo` permission modes are retained,
 and valid hook timestamps become the event's provider-observed time. Empty
 `UserPromptSubmit` callbacks emitted around tool activity are enrichment rather
-than new turns. Delayed permission reminders are broker-deduplicated,
-`idle_prompt` is explicit idle, and post-tool signals resume work. `Stop` makes
+than new turns. Repeated permission reminders are broker-deduplicated,
+`idle_prompt` is explicit idle, and post-tool signals resume work. `Stop` with
+exact `is_interrupt: true` is stopped without a completion or failure reason.
+`Stop` otherwise makes
 the live root agent publicly stopped and may select the first 100 sanitized
 characters of `last_assistant_message` as `completed`; `StopFailure` may expose
 only an allowlisted category. Raw failure details and complete assistant
@@ -32,3 +34,4 @@ before root activity, reason, session metadata, or usage extraction. An
 
 An independently sanitized stop capture establishes top-level `input_tokens`
 and fractional `context_usage`; `0.5` becomes 50 percent. Other usage remains unknown.
+Unsupported exact event names and notification subtypes are ignored.

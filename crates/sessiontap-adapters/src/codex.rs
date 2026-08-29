@@ -20,6 +20,9 @@ pub const HOOK_EVENTS: &[&str] = &[
     "PermissionRequest",
     "UserInputRequest",
     "PostToolUse",
+    "PreCompact",
+    "PostCompact",
+    "Interrupt",
     "Stop",
     "SessionEnd",
 ];
@@ -45,46 +48,8 @@ impl AgentAdapter for CodexAdapter {
         if is_subagent_payload(raw) {
             return Ok(AdapterOutcome::Ignored);
         }
-        let name = raw
-            .get("hook_event_name")
-            .or_else(|| raw.get("event_name"))
-            .or_else(|| raw.get("type"))
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_ascii_lowercase();
-        let notification = raw
-            .get("notification_type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let kind = if name.contains("sessionstart") {
-            EventKind::ProviderSessionStarted
-        } else if name.contains("sessionend") {
-            EventKind::ProviderSessionEnded
-        } else if name.contains("userprompt")
-            || name.contains("promptsubmit")
-            || name.contains("turnstart")
-        {
-            EventKind::NewTurn
-        } else if name.contains("permission") || notification.contains("permission_prompt") {
-            EventKind::WaitingApproval
-        } else if name.contains("question")
-            || name.contains("elicitation")
-            || name.contains("needs_input")
-            || name.contains("userinputrequest")
-            || notification.contains("needs_input")
-        {
-            EventKind::WaitingInput
-        } else if name.contains("pretool")
-            || name.contains("posttool")
-            || name.contains("toolstart")
-            || name.contains("toolend")
-        {
-            EventKind::Working
-        } else if name == "stop" || name.contains("turnend") {
-            EventKind::Completed
-        } else {
-            EventKind::Enrichment
+        let Some(kind) = classify(raw) else {
+            return Ok(AdapterOutcome::Ignored);
         };
         Ok(AdapterOutcome::Event(Box::new(build(id, raw, kind))))
     }
@@ -107,6 +72,29 @@ impl AgentAdapter for CodexAdapter {
                 .push_str("; review or refresh trust with Codex /hooks");
         }
         Ok(report)
+    }
+}
+
+fn classify(raw: &Value) -> Option<EventKind> {
+    let name = raw.get("hook_event_name")?.as_str()?;
+    let request_input = raw
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .is_some_and(|tool| matches!(tool, "request_user_input" | "functions.request_user_input"));
+    match name {
+        "SessionStart" => Some(EventKind::ProviderSessionStarted),
+        "SessionEnd" => Some(EventKind::ProviderSessionEnded),
+        "UserPromptSubmit" => Some(EventKind::NewTurn),
+        "PreToolUse" if request_input => Some(EventKind::WaitingInput),
+        "PreToolUse" | "PostToolUse" => Some(EventKind::Working),
+        "PermissionRequest" if request_input => Some(EventKind::WaitingInput),
+        "PermissionRequest" => Some(EventKind::WaitingApproval),
+        "UserInputRequest" => Some(EventKind::WaitingInput),
+        "PreCompact" => Some(EventKind::Working),
+        "PostCompact" => Some(EventKind::Enrichment),
+        "Interrupt" => Some(EventKind::Interrupted),
+        "Stop" => Some(EventKind::Completed),
+        _ => None,
     }
 }
 

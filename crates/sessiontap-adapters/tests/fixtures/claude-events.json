@@ -1,0 +1,21 @@
+[
+  {"expected":"provider_session_started","payload":{"hook_event_name":"SessionStart","session_id":"s","source":"startup"}},
+  {"expected":"new_turn","payload":{"hook_event_name":"UserPromptSubmit","session_id":"s"}},
+  {"expected":"working","payload":{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Bash"}},
+  {"expected":"working","payload":{"hook_event_name":"PostToolUse","session_id":"s","tool_name":"Bash"}},
+  {"expected":"working","payload":{"hook_event_name":"PostToolUseFailure","session_id":"s","tool_name":"Bash"}},
+  {"expected":"waiting_approval","payload":{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash"}},
+  {"expected":"waiting_input","payload":{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"AskUserQuestion"}},
+  {"expected":"waiting_input","payload":{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"ask_user_question"}},
+  {"expected":"waiting_input","payload":{"hook_event_name":"Elicitation","session_id":"s"}},
+  {"expected":"waiting_approval","payload":{"hook_event_name":"Notification","session_id":"s","notification_type":"permission_prompt"}},
+  {"expected":"waiting_input","payload":{"hook_event_name":"Notification","session_id":"s","notification_type":"elicitation_dialog"}},
+  {"expected":"waiting_input","payload":{"hook_event_name":"Notification","session_id":"s","notification_type":"agent_needs_input"}},
+  {"expected":"idle","payload":{"hook_event_name":"Notification","session_id":"s","notification_type":"idle_prompt"}},
+  {"expected":"working","payload":{"hook_event_name":"PreCompact","session_id":"s"}},
+  {"expected":"enrichment","payload":{"hook_event_name":"PostCompact","session_id":"s"}},
+  {"expected":"completed","payload":{"hook_event_name":"Stop","session_id":"s"}},
+  {"expected":"interrupted","payload":{"hook_event_name":"Stop","session_id":"s","is_interrupt":true}},
+  {"expected":"failed","payload":{"hook_event_name":"StopFailure","session_id":"s","reason":"timeout"}},
+  {"expected":"provider_session_ended","payload":{"hook_event_name":"SessionEnd","session_id":"s"}}
+]

@@ -336,6 +336,7 @@ pub enum EventKind {
     WaitingApproval,
     Completed,
     Failed,
+    Interrupted,
     ProviderSessionStarted,
     ProviderSessionEnded,
     SessionEnded,

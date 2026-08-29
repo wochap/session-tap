@@ -76,3 +76,53 @@ fn ingestion_discards_unknown_private_fields_and_deduplicates_delivery() {
     assert!(!serialized.contains("PRIVATE"));
     assert!(!serialized.contains("multiplexer"));
 }
+
+#[test]
+fn reasonless_interruption_projection_is_not_completion_routable() {
+    let store = HubStore::memory().unwrap();
+    let idle = view(PublicStatus::Idle);
+    handle_ingest(
+        &store,
+        None,
+        &request(
+            serde_json::to_value(SourceEnvelope::Snapshot {
+                schema_version: 1,
+                source: SourceIdentity {
+                    id: "sandbox".into(),
+                    display_name: None,
+                },
+                revision: 1,
+                views: vec![idle.clone()],
+            })
+            .unwrap(),
+        ),
+    );
+
+    let mut interrupted = idle;
+    interrupted.status = PublicStatus::Stopped;
+    interrupted.reason = None;
+    interrupted.updated_at = Utc::now();
+    let update = SourceEnvelope::Update {
+        schema_version: 1,
+        source_id: "sandbox".into(),
+        delivery_id: "interrupted".into(),
+        revision: 2,
+        changed: BTreeSet::from([PublicField::Status]),
+        view: Box::new(interrupted),
+    };
+    assert_eq!(
+        handle_ingest(
+            &store,
+            None,
+            &request(serde_json::to_value(update).unwrap())
+        )
+        .body["status"],
+        "applied"
+    );
+    let (_, _, agents) = store.merged().unwrap();
+    assert_eq!(agents[0].view.status, PublicStatus::Stopped);
+    assert!(agents[0].view.reason.is_none());
+    let serialized = serde_json::to_string(&agents).unwrap();
+    assert!(!serialized.contains("completed"));
+    assert!(!serialized.contains("failed"));
+}
