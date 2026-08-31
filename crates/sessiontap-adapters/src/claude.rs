@@ -1,14 +1,16 @@
 use crate::{
-    AgentAdapter, SetupAction, SetupReport, bounded_field, claude_session_name,
-    completed_reason_context, failed_reason_context, is_subagent_payload, merge_hook_config,
-    provider_metadata, sanitize_bounded, status_reason_context, tool_activity_update,
+    AgentAdapter, SetupAction, SetupReport, artifact_collection_context, bounded_field,
+    claude_session_name, completed_reason_context, failed_reason_context, is_subagent_payload,
+    manage_claude_statusline, merge_hook_config, provider_metadata, sanitize_bounded,
+    status_reason_context, tool_activity_update,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use sessiontap_core::domain::{
-    AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
+    AdapterOutcome, CollectorDialect, EventEvidence, EventKind, InvocationId,
+    NormalizedAdapterEvent, NormalizedEvent,
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -103,6 +105,7 @@ impl AgentAdapter for ClaudeAdapter {
                 tool_activity: tool_activity_update("claude", raw),
             },
             status_reason,
+            collection_context: artifact_collection_context(raw, CollectorDialect::Claude),
         })))
     }
     async fn setup(
@@ -111,13 +114,18 @@ impl AgentAdapter for ClaudeAdapter {
         executable: &Path,
         action: SetupAction,
     ) -> Result<SetupReport> {
-        merge_hook_config(
+        let mut hooks = merge_hook_config(
             &home.join(".claude/settings.json"),
             "claude",
             HOOK_EVENTS,
             executable,
             action,
-        )
+        )?;
+        let statusline = manage_claude_statusline(home, executable, action)?;
+        hooks.changed |= statusline.changed;
+        hooks.healthy &= statusline.healthy;
+        hooks.message = format!("{}; {}", hooks.message, statusline.message);
+        Ok(hooks)
     }
 }
 

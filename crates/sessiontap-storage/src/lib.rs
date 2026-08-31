@@ -1140,6 +1140,9 @@ fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
     if let Some(id) = &event.provider_session_id {
         let prior = snapshot.provider_session.as_ref();
         let is_new = prior.is_none_or(|session| session.id != *id);
+        if is_new {
+            snapshot.usage = None;
+        }
         snapshot.provider_session = Some(sessiontap_core::domain::ProviderSession {
             id: id.clone(),
             name: event.provider_session_name.clone().or_else(|| {
@@ -2103,6 +2106,58 @@ mod tests {
             summary: summary.into(),
             source: sessiontap_core::domain::StatusReasonSource::AssistantMessage,
         }
+    }
+
+    #[test]
+    fn provider_session_change_clears_prior_usage() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "secret", None).unwrap();
+        let mut first = normalized_event(&value, EventKind::ProviderSessionStarted, "session-a");
+        first.provider_session_id = Some("a".into());
+        first.usage = Some(sessiontap_core::domain::Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(2),
+            context_tokens: Some(5),
+            context_window_percent: Some(3),
+        });
+        db.apply_event(&first, None).unwrap();
+        assert!(db.invocation(&value.invocation_id).unwrap().usage.is_some());
+
+        let mut second = normalized_event(&value, EventKind::ProviderSessionStarted, "session-b");
+        second.provider_session_id = Some("b".into());
+        db.apply_event(&second, None).unwrap();
+        assert!(db.invocation(&value.invocation_id).unwrap().usage.is_none());
+    }
+
+    #[test]
+    fn provider_artifact_usage_replaces_atomically_and_unchanged_is_suppressed() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "secret", None).unwrap();
+        let mut artifact = normalized_event(&value, EventKind::Enrichment, "usage-1");
+        artifact.evidence = EventEvidence::local(EvidenceChannel::ProviderArtifact);
+        artifact.usage = Some(sessiontap_core::domain::Usage {
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            context_tokens: None,
+            context_window_percent: None,
+        });
+        assert!(
+            db.apply_event_with_context(&artifact, None, None)
+                .unwrap()
+                .is_some()
+        );
+        let mut unchanged = artifact.clone();
+        unchanged.event_id = "usage-2".into();
+        assert!(
+            db.apply_event_with_context(&unchanged, None, None)
+                .unwrap()
+                .is_none()
+        );
+        let stored = db.invocation(&value.invocation_id).unwrap().usage.unwrap();
+        assert_eq!(stored.input_tokens, Some(100));
+        assert_eq!(stored.context_tokens, None);
     }
 
     #[test]

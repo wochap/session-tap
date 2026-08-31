@@ -3,14 +3,16 @@ use chrono::Utc;
 use fs2::FileExt;
 use rand::RngCore;
 use sessiontap_adapters::{
-    ADAPTER_API_VERSION, AdapterRegistry, SetupAction, stamp_invocation_workspace,
+    ADAPTER_API_VERSION, AdapterRegistry, SetupAction, claude_prior_statusline_command,
+    stamp_invocation_workspace,
 };
 use sessiontap_core::{
     SCHEMA_VERSION,
     config::Config,
     domain::{
         Activity, ActivityConfirmation, EventEvidence, EvidenceChannel, EvidenceTrust,
-        InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
+        InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, StatuslineObservation,
+        derive_status,
     },
     multiplexer::{MultiplexerAdapter, TmuxAdapter},
     paths::AppPaths,
@@ -49,6 +51,9 @@ enum Cli {
     HookEmit {
         provider: String,
     },
+    StatuslineEmit {
+        provider: String,
+    },
     Completions {
         shell: Option<String>,
     },
@@ -82,6 +87,9 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
         "hook" if args.next().as_deref() == Some("emit") => Ok(Cli::HookEmit {
             provider: args.next().context("missing provider")?,
         }),
+        "statusline" if args.next().as_deref() == Some("emit") => Ok(Cli::StatuslineEmit {
+            provider: args.next().context("missing provider")?,
+        }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
         "--help" | "-h" => bail!(
             "usage: sessiontap <provider> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
@@ -106,6 +114,7 @@ async fn main() -> Result<()> {
         Cli::InspectHooks => inspect_hooks(&paths).await,
         Cli::Setup { provider, action } => setup(&paths, provider, action).await,
         Cli::HookEmit { provider } => hook_emit(&paths, &provider).await,
+        Cli::StatuslineEmit { provider } => statusline_emit(&paths, &provider).await,
         Cli::Launch { provider, args } => launch(&paths, &provider, args).await,
         Cli::Completions { .. } => unreachable!(),
     }
@@ -464,6 +473,7 @@ async fn tail_provider_side_channel(
                                 credential: credential.clone(),
                                 event: Box::new(normalized.event),
                                 status_reason: normalized.status_reason,
+                                collection_context: normalized.collection_context,
                             },
                         )
                         .await;
@@ -551,10 +561,135 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
             credential,
             event: Box::new(normalized.event),
             status_reason: normalized.status_reason,
+            collection_context: normalized.collection_context,
         },
     );
     let _ = tokio::time::timeout(HOOK_TIMEOUT, future).await;
     Ok(())
+}
+
+const STATUSLINE_MAX_INPUT_BYTES: usize = 64 * 1024;
+
+async fn statusline_emit(paths: &AppPaths, dialect: &str) -> Result<()> {
+    if dialect != "claude" {
+        bail!("unsupported statusline dialect: {dialect}");
+    }
+    let mut raw = Vec::new();
+    std::io::stdin()
+        .take((STATUSLINE_MAX_INPUT_BYTES + 1) as u64)
+        .read_to_end(&mut raw)?;
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let prior = home
+        .as_deref()
+        .and_then(|home| claude_prior_statusline_command(home).ok())
+        .flatten();
+
+    if raw.len() <= STATUSLINE_MAX_INPUT_BYTES
+        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw)
+        && let Some(observation) = claude_statusline_observation(&value)
+    {
+        forward_statusline_best_effort(paths, observation).await;
+    }
+
+    if let Some(command) = prior {
+        std::io::stdout().write_all(&execute_prior_statusline(&command, &raw).await?)?;
+    }
+    Ok(())
+}
+
+async fn execute_prior_statusline(command: &str, input: &[u8]) -> Result<Vec<u8>> {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", command])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let input = input.to_vec();
+    let writer = child.stdin.take().map(|mut stdin| {
+        tokio::spawn(async move {
+            stdin.write_all(&input).await?;
+            anyhow::Ok(())
+        })
+    });
+    let output = child.wait_with_output().await?;
+    if let Some(writer) = writer {
+        writer.await??;
+    }
+    Ok(output.stdout)
+}
+
+fn claude_statusline_observation(value: &serde_json::Value) -> Option<StatuslineObservation> {
+    let provider_session_id = value
+        .get("session_id")?
+        .as_str()
+        .filter(|value| !value.trim().is_empty())?
+        .to_owned();
+    let transcript_path = value
+        .get("transcript_path")?
+        .as_str()
+        .filter(|value| !value.trim().is_empty())?;
+    let context = value.get("context_window")?;
+    let current = context.get("current_usage")?;
+    let context_tokens = if current.is_null() {
+        None
+    } else {
+        let input = statusline_u64(current, "input_tokens")?;
+        let cache_read = statusline_u64(current, "cache_read_input_tokens")?;
+        let cache_create = statusline_u64(current, "cache_creation_input_tokens")?;
+        Some(input.checked_add(cache_read)?.checked_add(cache_create)?)
+    };
+    let context_window_percent = if current.is_null() {
+        None
+    } else {
+        context
+            .get("used_percentage")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| value.round().clamp(0.0, 100.0) as u8)
+    };
+    Some(StatuslineObservation {
+        provider_session_id,
+        transcript_path: PathBuf::from(transcript_path),
+        context_tokens,
+        context_window_percent,
+    })
+}
+
+fn statusline_u64(value: &serde_json::Value, field: &str) -> Option<u64> {
+    match value.get(field) {
+        None => Some(0),
+        Some(value) => value.as_u64(),
+    }
+}
+
+async fn forward_statusline_best_effort(paths: &AppPaths, observation: StatuslineObservation) {
+    let (Ok(id), Ok(credential), Ok(provider)) = (
+        env::var("SESSIONTAP_INVOCATION_ID"),
+        env::var("SESSIONTAP_CREDENTIAL"),
+        env::var("SESSIONTAP_PROVIDER"),
+    ) else {
+        return;
+    };
+    let Ok(invocation_id) = uuid_parse(&id) else {
+        return;
+    };
+    let config = Config::load(&paths.config_file()).unwrap_or_default();
+    let registry = AdapterRegistry::new(&config);
+    let Some((adapter, _)) = registry.resolve(&provider) else {
+        return;
+    };
+    if adapter.dialect() != "claude" {
+        return;
+    }
+    let future = request(
+        paths,
+        Request::StatuslineIngest {
+            provider,
+            invocation_id,
+            credential,
+            observation,
+        },
+    );
+    let _ = tokio::time::timeout(HOOK_TIMEOUT, future).await;
 }
 
 fn hook_type(value: &serde_json::Value) -> Option<&str> {
@@ -960,6 +1095,57 @@ mod tests {
                 output.status.success(),
                 "{script} failed zsh -n: {}",
                 String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn claude_statusline_parses_authoritative_context_and_null_clear() {
+        let value = serde_json::json!({
+            "session_id": "session-1",
+            "transcript_path": "/home/user/.claude/projects/p/session-1.jsonl",
+            "context_window": {
+                "used_percentage": 12.6,
+                "current_usage": {
+                    "input_tokens": 10,
+                    "cache_read_input_tokens": 20,
+                    "cache_creation_input_tokens": 3
+                }
+            }
+        });
+        let observed = claude_statusline_observation(&value).unwrap();
+        assert_eq!(observed.context_tokens, Some(33));
+        assert_eq!(observed.context_window_percent, Some(13));
+
+        let mut compacted = value;
+        compacted["context_window"]["current_usage"] = serde_json::Value::Null;
+        let observed = claude_statusline_observation(&compacted).unwrap();
+        assert_eq!(observed.context_tokens, None);
+        assert_eq!(observed.context_window_percent, None);
+    }
+
+    #[test]
+    fn claude_statusline_rejects_invalid_usage_values() {
+        let value = serde_json::json!({
+            "session_id": "session-1",
+            "transcript_path": "/tmp/session-1.jsonl",
+            "context_window": {
+                "used_percentage": 10,
+                "current_usage": {"input_tokens": -1}
+            }
+        });
+        assert!(claude_statusline_observation(&value).is_none());
+    }
+
+    #[tokio::test]
+    async fn prior_statusline_receives_exact_invalid_and_oversized_input() {
+        for input in [
+            b"not-json".to_vec(),
+            vec![b'x'; STATUSLINE_MAX_INPUT_BYTES + 1],
+        ] {
+            assert_eq!(
+                execute_prior_statusline("cat", &input).await.unwrap(),
+                input
             );
         }
     }

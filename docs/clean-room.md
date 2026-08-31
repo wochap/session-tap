@@ -29,3 +29,8 @@ paths, credentials, transcripts, tool inputs, or account data.
 Metadata mappings use sanitized independent captures for Codex session/turn
 ordering, Claude prompt/permission/effort, and Qwen top-level usage. Captures
 contain no conversational or raw tool content.
+
+Usage collector fixtures are hand-authored minimal JSONL records derived from
+documented field shapes. They contain synthetic identities and token counts
+only—no real paths, prompts, responses, account data, telemetry bodies, or tool
+arguments. Diagnostics identify only a provider/dialect and failure category.

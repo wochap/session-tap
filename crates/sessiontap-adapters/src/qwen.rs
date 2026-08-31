@@ -1,16 +1,16 @@
 use crate::{
-    AgentAdapter, LaunchPreparation, SetupAction, SetupReport, bounded_field,
-    completed_reason_context, failed_reason_context, is_subagent_payload, merge_hook_config,
-    probe_qwen_dual_output, provider_metadata, qwen_has_user_side_channel, sanitize_bounded,
-    status_reason_context, tool_activity_update,
+    AgentAdapter, LaunchPreparation, SetupAction, SetupReport, artifact_collection_context,
+    bounded_field, completed_reason_context, failed_reason_context, is_subagent_payload,
+    merge_hook_config, probe_qwen_dual_output, provider_metadata, qwen_has_user_side_channel,
+    sanitize_bounded, status_reason_context, tool_activity_update,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use sessiontap_core::domain::{
-    AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent,
-    NormalizedEvent, Usage,
+    AdapterOutcome, CollectorDialect, EventEvidence, EventKind, InvocationId,
+    NormalizedAdapterEvent, NormalizedEvent, Usage,
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -130,6 +130,7 @@ impl AgentAdapter for QwenAdapter {
                 tool_activity: tool_activity_update("qwen", raw),
             },
             status_reason,
+            collection_context: artifact_collection_context(raw, CollectorDialect::Qwen),
         })))
     }
     async fn setup(

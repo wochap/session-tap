@@ -1,14 +1,15 @@
 use crate::{
-    AgentAdapter, SetupAction, SetupReport, bounded_field, completed_reason_context,
-    is_subagent_payload, merge_hook_config, provider_metadata, sanitize_bounded,
-    status_reason_context, tool_activity_update,
+    AgentAdapter, SetupAction, SetupReport, artifact_collection_context, bounded_field,
+    completed_reason_context, is_subagent_payload, merge_hook_config, provider_metadata,
+    sanitize_bounded, status_reason_context, tool_activity_update,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
 use sessiontap_core::domain::{
-    AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent, NormalizedEvent,
+    AdapterOutcome, CollectorDialect, EventEvidence, EventKind, InvocationId,
+    NormalizedAdapterEvent, NormalizedEvent,
 };
 use std::path::Path;
 use uuid::Uuid;
@@ -154,5 +155,6 @@ fn build(
             tool_activity: tool_activity_update("codex", raw),
         },
         status_reason,
+        collection_context: artifact_collection_context(raw, CollectorDialect::Codex),
     }
 }

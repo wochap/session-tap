@@ -18,6 +18,15 @@ components, integrity, logging/privacy, and server-side requests.
   observer contract may select only a control-free, whitespace-collapsed
   100-character question, description, command, final response, or allowlisted
   failure summary as the latest current status reason.
+- Hook-supplied transcript locators travel only over the authenticated local
+  daemon protocol. They never enter normalized events, persisted invocation
+  snapshots, public envelopes, sinks, or hub state. Collection canonicalizes
+  beneath the dialect-owned root, rejects final symlinks and non-regular files,
+  verifies session/file identity, and enforces 64 MiB scan and 1 MiB line
+  limits with checked offsets and token arithmetic.
+- Claude's managed statusline backup is atomically written mode 0600. Removal
+  restores it only while the active stanza exactly matches SessionTap's
+  definition; user replacements are diagnosed and left untouched.
 - Non-empty provider `agent_id` payloads and subagent lifecycle hooks are
   ignored before root activity, metadata, usage, or reason extraction.
 - Configured sinks are trusted by the single operator and can receive bounded
@@ -34,7 +43,8 @@ components, integrity, logging/privacy, and server-side requests.
 - `cargo audit` reported no known RustSec vulnerabilities and
   `cargo deny check licenses` passed for the locked dependency graph.
 
-Known MVP limits: local same-user processes remain inside the OS trust boundary;
+Collection failures emit bounded local diagnostics without artifact paths or
+contents and preserve the last verified usage. Known MVP limits: local same-user processes remain inside the OS trust boundary;
 provider contracts can change; local same-user configuration remains trusted;
 and manual provider/TUI tests remain necessary. The SessionTap name is only
 provisionally acceptable and still requires public-release clearance.

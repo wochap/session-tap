@@ -22,6 +22,9 @@ use tokio::{
     sync::broadcast,
 };
 
+mod usage_coordinator;
+use usage_coordinator::UsageCoordinator;
+
 #[derive(Clone)]
 struct Broker {
     storage: Arc<Storage>,
@@ -79,6 +82,11 @@ async fn main() -> Result<()> {
         source_id: Arc::from(config.source_id.unwrap_or_default()),
         source_name: Arc::new(config.source_name),
     };
+    let usage = UsageCoordinator::new(
+        broker.clone(),
+        std::env::var_os("HOME").map_or_else(|| Path::new("/").to_path_buf(), Into::into),
+        4,
+    );
     storage.reconcile(
         process_alive,
         config.retention_days,
@@ -96,7 +104,7 @@ async fn main() -> Result<()> {
     };
     tokio::pin!(shutdown);
     loop {
-        tokio::select! { biased; ()=&mut shutdown=>break, accepted=listener.accept()=> { let (stream,_)=accepted?; let b=broker.clone(); tokio::spawn(async move { let _=handle(stream,b).await; }); } }
+        tokio::select! { biased; ()=&mut shutdown=>break, accepted=listener.accept()=> { let (stream,_)=accepted?; let b=broker.clone(); let u=usage.clone(); tokio::spawn(async move { let _=handle(stream,b,u).await; }); } }
     }
     let _ = fs::remove_file(&socket);
     drop(lock);
@@ -123,7 +131,7 @@ async fn stale_working_worker(broker: Broker) {
     }
 }
 
-async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
+async fn handle(stream: UnixStream, broker: Broker, usage: UsageCoordinator) -> Result<()> {
     let (read, mut write) = stream.into_split();
     let mut lines = BufReader::new(read).lines();
     let Some(line) = lines.next_line().await? else {
@@ -182,7 +190,7 @@ async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
         }
         return Ok(());
     }
-    let response = match process(request, &broker) {
+    let response = match process(request, &broker, &usage) {
         Ok(r) => r,
         Err(e) => Response::Error(ErrorEnvelope {
             code: "request_failed".into(),
@@ -192,7 +200,7 @@ async fn handle(stream: UnixStream, broker: Broker) -> Result<()> {
     write_json(&mut write, &response).await
 }
 
-fn process(request: Request, broker: &Broker) -> Result<Response> {
+fn process(request: Request, broker: &Broker, usage: &UsageCoordinator) -> Result<Response> {
     match request {
         Request::Health => Ok(Response::Health {
             version: SCHEMA_VERSION,
@@ -218,6 +226,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
                 changed: sessiontap_core::domain::changed_public_fields(None, &view),
                 view,
             });
+            usage.schedule(registered.invocation_id.clone(), None);
             Ok(Response::Ok)
         }
         Request::BindChild {
@@ -236,6 +245,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             )? {
                 let _ = broker.updates.send(update);
             }
+            usage.schedule(invocation_id, None);
             Ok(Response::Ok)
         }
         Request::LifecycleExit {
@@ -254,6 +264,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             )? {
                 let _ = broker.updates.send(update);
             }
+            usage.schedule(invocation_id, None);
             Ok(Response::Ok)
         }
         Request::HookIngest {
@@ -262,6 +273,7 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             credential,
             mut event,
             status_reason,
+            collection_context,
         } => {
             if event.invocation_id != invocation_id
                 || event.provider != provider
@@ -280,6 +292,22 @@ fn process(request: Request, broker: &Broker) -> Result<Response> {
             )? {
                 let _ = broker.updates.send(update);
             }
+            usage.schedule(invocation_id, collection_context);
+            Ok(Response::Ok)
+        }
+        Request::StatuslineIngest {
+            provider,
+            invocation_id,
+            credential,
+            observation,
+        } => {
+            if !broker
+                .storage
+                .credential_matches(&invocation_id, &provider, &credential)?
+            {
+                anyhow::bail!("unknown or invalid statusline context");
+            }
+            usage.observe_statusline(invocation_id, observation);
             Ok(Response::Ok)
         }
         Request::Capture { invocation_id } => {

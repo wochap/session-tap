@@ -18,6 +18,19 @@ beneath `$HOME/.claude/projects`, SessionTap extracts only the
 latest bounded `aiTitle` or `customTitle` value for provider-session metadata;
 the transcript body and path are not normalized or persisted.
 
+The same private locator schedules bounded background usage collection.
+Assistant usage is counted once per non-empty `message.id`, falling back to
+`requestId`; fresh input, cache reads, and cache creation form cumulative
+input, while output is summed once per response. Rows without either identity
+are ignored. Current context comes only from authenticated statusline
+`current_usage` and `used_percentage`; null `current_usage` explicitly clears
+context after compaction while retaining cumulative totals.
+
+`sessiontap setup claude` wraps `statusLine`, atomically backs up its exact
+prior stanza, and continues executing the prior command. Setup is idempotent,
+doctor diagnoses ownership/backup drift, and removal restores only if the
+managed stanza remains active.
+
 Direct `PermissionRequest` carries bounded approval context. `AskUserQuestion`
 and MCP `Elicitation` are ordinary input waits. `agent_needs_input` is an input
 wait, `permission_prompt` asserts approval, and `idle_prompt` is explicit
@@ -27,8 +40,7 @@ available. Approval summaries use a normalized tool label plus the first 100
 sanitized description characters, falling back to the command excerpt.
 
 An independently sanitized capture maps `prompt_id` to current turn and
-allowlisted `permission_mode` (including `dontAsk`) and `effort.level` to provider metadata, but
-establishes no usage fields. At most the first sanitized question is selected
+allowlisted `permission_mode` (including `dontAsk`) and `effort.level` to provider metadata. At most the first sanitized question is selected
 as current input context; options and remaining question content are discarded.
 
 Hooks with a non-empty `agent_id`, plus `SubagentStart` and `SubagentStop`, are

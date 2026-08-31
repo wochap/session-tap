@@ -33,5 +33,10 @@ before root activity, reason, session metadata, or usage extraction. An
 `agent_type` alone does not cause exclusion.
 
 An independently sanitized stop capture establishes top-level `input_tokens`
-and fractional `context_usage`; `0.5` becomes 50 percent. Other usage remains unknown.
+and fractional `context_usage`; `0.5` becomes 50 percent. Private transcript
+collection also sums `promptTokenCount` and `candidatesTokenCount` from
+assistant records only. The latest prompt count is current context and is
+divided by its positive `contextWindowSize`; compaction can lower current
+context while cumulative totals remain monotonic. UI telemetry and
+`totalTokenCount` are not added.
 Unsupported exact event names and notification subtypes are ignored.

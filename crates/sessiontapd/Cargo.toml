@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 sessiontap-core = { path = "../sessiontap-core" }
+sessiontap-adapters = { path = "../sessiontap-adapters" }
 sessiontap-storage = { path = "../sessiontap-storage" }
 anyhow.workspace = true
 chrono.workspace = true

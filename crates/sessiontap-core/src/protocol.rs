@@ -1,6 +1,6 @@
 use crate::domain::{
-    InvocationId, InvocationSnapshot, NormalizedEvent, PublicAgentView, PublicField,
-    StatusReasonContext,
+    ArtifactCollectionContext, InvocationId, InvocationSnapshot, NormalizedEvent, PublicAgentView,
+    PublicField, StatusReasonContext, StatuslineObservation,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -65,6 +65,14 @@ pub enum Request {
         event: Box<NormalizedEvent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         status_reason: Option<StatusReasonContext>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collection_context: Option<ArtifactCollectionContext>,
+    },
+    StatuslineIngest {
+        provider: String,
+        invocation_id: InvocationId,
+        credential: String,
+        observation: StatuslineObservation,
     },
     Status,
     Listen,
@@ -167,6 +175,10 @@ mod tests {
             "event_kind",
             "credential",
             "args",
+            "transcript_path",
+            "collection_context",
+            "byte_offset",
+            "response_ids",
         ] {
             assert!(!json.contains(private));
         }

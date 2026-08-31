@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use sessiontap_core::{
     config::Config,
     domain::{
-        AdapterOutcome, EventEvidence, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
+        AdapterOutcome, ArtifactCollectionContext, ArtifactLocator, CollectorDialect,
+        EventEvidence, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
         STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, StatusReasonContext, StatusReasonSource,
         TOOL_CORRELATION_ID_MAX_CHARS, TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS,
         ToolActivityPhase, ToolActivityUpdate,
@@ -23,6 +24,7 @@ use std::{
 pub mod claude;
 pub mod codex;
 pub mod qwen;
+pub mod usage;
 
 pub const ADAPTER_API_VERSION: u32 = 1;
 const TRUSTED_WORKSPACE_FIELD: &str = "__sessiontap_invocation_workspace";
@@ -347,6 +349,28 @@ pub(crate) fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Op
         .iter()
         .find_map(|name| raw.get(name).and_then(Value::as_str))
         .and_then(|value| sanitize_bounded(value, max_chars))
+}
+
+pub(crate) fn artifact_collection_context(
+    raw: &Value,
+    dialect: CollectorDialect,
+) -> Option<ArtifactCollectionContext> {
+    let provider_session_id = raw
+        .get("session_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())?
+        .to_owned();
+    let transcript_path = raw
+        .get("transcript_path")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())?;
+    Some(ArtifactCollectionContext {
+        locator: ArtifactLocator {
+            dialect,
+            provider_session_id,
+            transcript_path: PathBuf::from(transcript_path),
+        },
+    })
 }
 
 pub(crate) fn tool_activity_update(provider: &str, raw: &Value) -> Option<ToolActivityUpdate> {
@@ -1020,6 +1044,196 @@ fn owned_handler(provider: &str, executable: &Path) -> Result<Value> {
         "timeout": 3,
         "statusMessage": "SessionTap observability"
     }))
+}
+
+const CLAUDE_STATUSLINE_BACKUP: &str = "sessiontap-statusline-backup.json";
+
+fn managed_statusline(executable: &Path) -> Result<Value> {
+    let executable = executable
+        .to_str()
+        .context("SessionTap executable path is not valid UTF-8")?;
+    Ok(json!({
+        "type": "command",
+        "command": format!("{} statusline emit claude", shell_quote(executable)),
+        "padding": 0
+    }))
+}
+
+fn statusline_backup_path(home: &Path) -> PathBuf {
+    home.join(".claude").join(CLAUDE_STATUSLINE_BACKUP)
+}
+
+fn write_private_json(path: &Path, value: &Value) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let parent = path.parent().context("private backup has no parent")?;
+    fs::create_dir_all(parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))?;
+    temp.write_all(&serde_json::to_vec_pretty(value)?)?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|error| error.error)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+pub fn manage_claude_statusline(
+    home: &Path,
+    executable: &Path,
+    action: SetupAction,
+) -> Result<SetupReport> {
+    let settings_path = resolve_config_link("Claude", &home.join(".claude/settings.json"))?;
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(settings_path.with_extension("sessiontap.lock"))?;
+    lock.lock_exclusive()?;
+    let raw = fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".into());
+    let mut settings: Value = serde_json::from_str(&raw)
+        .context("Claude configuration is invalid; refusing to overwrite")?;
+    let object = settings
+        .as_object_mut()
+        .context("Claude settings must be an object")?;
+    let managed = managed_statusline(executable)?;
+    let active = object.get("statusLine").cloned();
+    let backup_path = statusline_backup_path(home);
+    use std::os::unix::fs::PermissionsExt;
+    let backup_private = backup_path.symlink_metadata().is_ok_and(|metadata| {
+        metadata.is_file()
+            && !metadata.file_type().is_symlink()
+            && metadata.permissions().mode() & 0o077 == 0
+    });
+    let backup: Option<Value> = backup_private
+        .then(|| fs::read(&backup_path).ok())
+        .flatten()
+        .and_then(|raw| serde_json::from_slice(&raw).ok());
+    let owned = active.as_ref() == Some(&managed);
+    let backup_healthy = backup.as_ref().is_some_and(|value| {
+        value.get("version").and_then(Value::as_u64) == Some(1)
+            && value.get("managed") == Some(&managed)
+            && value.get("had_prior").and_then(Value::as_bool).is_some()
+            && value.get("prior").is_some()
+    });
+
+    if action == SetupAction::Doctor {
+        let healthy = owned && backup_healthy;
+        return Ok(SetupReport {
+            changed: false,
+            healthy,
+            message: if healthy {
+                "managed Claude statusline healthy".into()
+            } else if !owned && backup.is_some() {
+                "Claude statusline ownership drift detected; user configuration left untouched"
+                    .into()
+            } else if owned {
+                "managed Claude statusline backup is missing or invalid".into()
+            } else {
+                "managed Claude statusline is not installed".into()
+            },
+        });
+    }
+
+    if action == SetupAction::Remove {
+        if !owned {
+            return Ok(SetupReport {
+                changed: false,
+                healthy: backup.is_none(),
+                message: "Claude statusline is not SessionTap-owned; left untouched".into(),
+            });
+        }
+        let backup = backup.context("cannot restore Claude statusline: backup is missing")?;
+        if !backup_healthy {
+            bail!("cannot restore Claude statusline: backup is invalid");
+        }
+        if backup.get("had_prior").and_then(Value::as_bool) == Some(true) {
+            object.insert("statusLine".into(), backup["prior"].clone());
+        } else {
+            object.remove("statusLine");
+        }
+        atomic_json_replace(&settings_path, &settings)?;
+        fs::remove_file(&backup_path)?;
+        return Ok(SetupReport {
+            changed: true,
+            healthy: true,
+            message: "prior Claude statusline restored".into(),
+        });
+    }
+
+    if owned {
+        return Ok(SetupReport {
+            changed: false,
+            healthy: backup_healthy,
+            message: if backup_healthy {
+                "managed Claude statusline already installed".into()
+            } else {
+                "managed Claude statusline backup is missing or invalid".into()
+            },
+        });
+    }
+    if backup.is_some() {
+        return Ok(SetupReport {
+            changed: false,
+            healthy: false,
+            message: "Claude statusline changed after SessionTap setup; refusing to overwrite it"
+                .into(),
+        });
+    }
+    write_private_json(
+        &backup_path,
+        &json!({
+            "version": 1,
+            "managed": managed,
+            "had_prior": active.is_some(),
+            "prior": active.clone().unwrap_or(Value::Null)
+        }),
+    )?;
+    object.insert("statusLine".into(), managed);
+    atomic_json_replace(&settings_path, &settings)?;
+    Ok(SetupReport {
+        changed: true,
+        healthy: true,
+        message: "managed Claude statusline installed".into(),
+    })
+}
+
+fn atomic_json_replace(path: &Path, value: &Value) -> Result<()> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(&serde_json::to_vec_pretty(value)?)?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
+pub fn claude_prior_statusline_command(home: &Path) -> Result<Option<String>> {
+    let path = statusline_backup_path(home);
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(metadata) = path.symlink_metadata() else {
+        return Ok(None);
+    };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        bail!("Claude statusline backup is not a private regular file");
+    }
+    let raw = fs::read(path)?;
+    let backup: Value = serde_json::from_slice(&raw).context("invalid Claude statusline backup")?;
+    if backup.get("had_prior").and_then(Value::as_bool) != Some(true) {
+        return Ok(None);
+    }
+    Ok(backup
+        .get("prior")
+        .and_then(|prior| prior.get("command"))
+        .and_then(Value::as_str)
+        .filter(|command| !command.contains(" statusline emit claude"))
+        .map(str::to_owned))
 }
 /// Follows a symlinked configuration file to its target so managed merges
 /// preserve the link instead of replacing it.
@@ -2026,6 +2240,142 @@ mod tests {
         let serialized = serde_json::to_string(&normalized).unwrap();
         assert!(!serialized.contains("provider_forgery"));
         assert!(!serialized.contains("999"));
+    }
+
+    #[test]
+    fn claude_statusline_setup_is_idempotent_and_exactly_reversible() {
+        let temp = tempfile::tempdir().unwrap();
+        let claude = temp.path().join(".claude");
+        fs::create_dir_all(&claude).unwrap();
+        let settings = claude.join("settings.json");
+        let prior = json!({"type":"command","command":"printf prior","padding":7,"extra":{"x":1}});
+        fs::write(
+            &settings,
+            serde_json::to_vec_pretty(&json!({
+                "theme": "dark",
+                "statusLine": prior
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let executable = Path::new("/opt/session tap/bin/sessiontap");
+
+        let first = manage_claude_statusline(temp.path(), executable, SetupAction::Ensure).unwrap();
+        assert!(first.changed && first.healthy);
+        let installed: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+        assert!(
+            installed["statusLine"]["command"]
+                .as_str()
+                .unwrap()
+                .contains(" statusline emit claude")
+        );
+        assert_eq!(
+            claude_prior_statusline_command(temp.path())
+                .unwrap()
+                .as_deref(),
+            Some("printf prior")
+        );
+        let second =
+            manage_claude_statusline(temp.path(), executable, SetupAction::Ensure).unwrap();
+        assert!(!second.changed && second.healthy);
+        assert!(
+            manage_claude_statusline(temp.path(), executable, SetupAction::Doctor)
+                .unwrap()
+                .healthy
+        );
+
+        let removed =
+            manage_claude_statusline(temp.path(), executable, SetupAction::Remove).unwrap();
+        assert!(removed.changed);
+        let restored: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(restored["statusLine"], prior);
+        assert_eq!(restored["theme"], "dark");
+        assert!(!statusline_backup_path(temp.path()).exists());
+    }
+
+    #[test]
+    fn claude_statusline_removal_preserves_user_replacement_after_setup() {
+        let temp = tempfile::tempdir().unwrap();
+        let claude = temp.path().join(".claude");
+        fs::create_dir_all(&claude).unwrap();
+        let settings = claude.join("settings.json");
+        fs::write(&settings, "{}").unwrap();
+        let executable = Path::new("sessiontap");
+        manage_claude_statusline(temp.path(), executable, SetupAction::Ensure).unwrap();
+        fs::write(
+            &settings,
+            serde_json::to_vec(&json!({
+                "statusLine": {"type":"command","command":"user-new"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let doctor =
+            manage_claude_statusline(temp.path(), executable, SetupAction::Doctor).unwrap();
+        assert!(!doctor.healthy && doctor.message.contains("drift"));
+        let remove =
+            manage_claude_statusline(temp.path(), executable, SetupAction::Remove).unwrap();
+        assert!(!remove.changed);
+        let current: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(current["statusLine"]["command"], "user-new");
+        assert!(statusline_backup_path(temp.path()).exists());
+    }
+
+    #[test]
+    fn root_locators_are_private_and_subagents_never_create_them() {
+        let id = InvocationId::new();
+        for (adapter, dialect) in [
+            (
+                &claude::ClaudeAdapter as &dyn AgentAdapter,
+                CollectorDialect::Claude,
+            ),
+            (
+                &codex::CodexAdapter as &dyn AgentAdapter,
+                CollectorDialect::Codex,
+            ),
+            (
+                &qwen::QwenAdapter as &dyn AgentAdapter,
+                CollectorDialect::Qwen,
+            ),
+        ] {
+            let raw = json!({
+                "hook_event_name": "SessionStart",
+                "session_id": "root-session",
+                "transcript_path": "/private/root-session.jsonl"
+            });
+            let normalized = adapter.normalize(&id, &raw).unwrap().into_event().unwrap();
+            assert_eq!(
+                normalized
+                    .collection_context
+                    .as_ref()
+                    .unwrap()
+                    .locator
+                    .dialect,
+                dialect
+            );
+            let event_json = serde_json::to_string(&normalized.event).unwrap();
+            assert!(!event_json.contains("transcript_path"));
+            assert!(!event_json.contains("/private"));
+
+            let mut child = raw;
+            child["agent_id"] = Value::String("child".into());
+            assert!(matches!(
+                adapter.normalize(&id, &child).unwrap(),
+                AdapterOutcome::Ignored
+            ));
+        }
+
+        let codex_without_locator = json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "root-session",
+            "transcript_path": null
+        });
+        let normalized = AgentAdapter::normalize(&codex::CodexAdapter, &id, &codex_without_locator)
+            .unwrap()
+            .into_event()
+            .unwrap();
+        assert!(normalized.collection_context.is_none());
     }
 
     #[test]

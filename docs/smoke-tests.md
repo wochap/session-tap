@@ -32,6 +32,14 @@ For each of `claude`, `codex`, and `qwen`:
    `listen` fail. If the shell has inherited `SESSIONTAP_INVOCATION_ID`,
    `SESSIONTAP_CREDENTIAL`, or `SESSIONTAP_PROVIDER`, verify the fallback
    provider does not receive them and its managed hooks emit nothing.
+9. For every tracked root session, wait for `usage` and compare cumulative
+   input/output with the documented artifact accounting. Verify direct and
+   child sessions schedule no root collection. Exercise compaction and confirm
+   context can clear or decrease without resetting cumulative totals.
+10. For Claude, configure a visible custom statusline before setup. Verify it
+    is relayed while tracked, untracked, and with the daemon stopped. Run doctor
+    and removal and compare the restored stanza at the JSON-value level. Replace
+    the stanza after setup and verify removal leaves the replacement untouched.
 
 Record provider version, Linux distribution, Wayland compositor, date, and
 pass/fail; never commit account data or raw event payloads.

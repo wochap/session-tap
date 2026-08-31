@@ -82,6 +82,12 @@ hook entries and leaves your other hooks untouched. `sessiontap doctor
 <provider>` checks hook health without writing; `sessiontap hooks remove
 <provider>` strips only SessionTap-owned entries.
 
+Claude setup also installs a managed statusline tap. The exact prior
+`statusLine` stanza is saved in a private backup, is still executed with the
+original JSON input, and is restored on removal only while SessionTap owns the
+active stanza. Doctor reports wrapper drift or a missing backup instead of
+overwriting a user replacement.
+
 Everything after the provider token is forwarded to the provider verbatim, so
 `sessiontap codex --help` shows Codex help.
 
@@ -133,6 +139,14 @@ Snapshot envelopes are non-notifying baselines. Updates contain the complete
 resulting view and a deterministic non-empty set of changed public field paths.
 Observer-facing fields such as cwd, repository paths, session names, and
 bounded reasons can still be sensitive and require appropriate access control.
+
+Usage input/output values are cumulative totals for the current provider
+session. Context tokens are the latest verified active-context occupancy, not
+cumulative input, and percentages are rounded to the nearest whole percent and
+clamped to 0–100. Missing values mean unavailable, never zero or an estimate.
+Provider-session replacement clears prior usage. Artifact scans are
+event-driven and asynchronous, read only complete JSONL lines from a captured
+stable extent, and default to 64 MiB per scan and 1 MiB per line.
 
 ## Provenance
 

@@ -31,5 +31,10 @@ first 100 sanitized command characters. Documented permission modes include
 `SubagentStop` are ignored before root normalization.
 
 Minimum locally tested version: Codex CLI 0.149.1. Unknown fields and
-unsupported exact event names are ignored, and raw hook input is never persisted. Supplied sanitized captures do
-not establish token or context usage, so those fields remain absent.
+unsupported exact event names are ignored, and raw hook input is never persisted.
+When a root hook supplies a transcript locator, SessionTap scans the rollout
+asynchronously and retains only the latest valid non-null `token_count` info
+snapshot. Cumulative input/output come from `total_token_usage`; current
+context comes from `last_token_usage.total_tokens`, with a whole used percent
+only for a positive `model_context_window`. Snapshots are never summed, and a
+missing locator or denominator leaves the corresponding fields absent.
