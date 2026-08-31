@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
+use sessiontap_adapters::AdapterRegistry;
 use sessiontap_core::{
     SCHEMA_VERSION,
     config::{Config, SinkConfig},
@@ -73,6 +74,7 @@ async fn main() -> Result<()> {
     if let Err(e) = config.validate() {
         anyhow::bail!("sessiontapd: invalid configuration: {e}");
     }
+    let registry = Arc::new(AdapterRegistry::new(&config));
     let storage = Arc::new(Storage::open(&paths.database())?);
     let (updates, _) = broadcast::channel(1024);
     let broker = Broker {
@@ -85,6 +87,7 @@ async fn main() -> Result<()> {
     let usage = UsageCoordinator::new(
         broker.clone(),
         std::env::var_os("HOME").map_or_else(|| Path::new("/").to_path_buf(), Into::into),
+        registry,
         4,
     );
     storage.reconcile(
@@ -226,7 +229,6 @@ fn process(request: Request, broker: &Broker, usage: &UsageCoordinator) -> Resul
                 changed: sessiontap_core::domain::changed_public_fields(None, &view),
                 view,
             });
-            usage.schedule(registered.invocation_id.clone(), None);
             Ok(Response::Ok)
         }
         Request::BindChild {
@@ -245,7 +247,6 @@ fn process(request: Request, broker: &Broker, usage: &UsageCoordinator) -> Resul
             )? {
                 let _ = broker.updates.send(update);
             }
-            usage.schedule(invocation_id, None);
             Ok(Response::Ok)
         }
         Request::LifecycleExit {
@@ -264,7 +265,6 @@ fn process(request: Request, broker: &Broker, usage: &UsageCoordinator) -> Resul
             )? {
                 let _ = broker.updates.send(update);
             }
-            usage.schedule(invocation_id, None);
             Ok(Response::Ok)
         }
         Request::HookIngest {
@@ -277,6 +277,10 @@ fn process(request: Request, broker: &Broker, usage: &UsageCoordinator) -> Resul
         } => {
             if event.invocation_id != invocation_id
                 || event.provider != provider
+                || collection_context.as_ref().is_some_and(|context| {
+                    event.provider_session_id.as_deref()
+                        != Some(context.provider_session_id.as_str())
+                })
                 || !broker
                     .storage
                     .credential_matches(&invocation_id, &provider, &credential)?
@@ -292,22 +296,7 @@ fn process(request: Request, broker: &Broker, usage: &UsageCoordinator) -> Resul
             )? {
                 let _ = broker.updates.send(update);
             }
-            usage.schedule(invocation_id, collection_context);
-            Ok(Response::Ok)
-        }
-        Request::StatuslineIngest {
-            provider,
-            invocation_id,
-            credential,
-            observation,
-        } => {
-            if !broker
-                .storage
-                .credential_matches(&invocation_id, &provider, &credential)?
-            {
-                anyhow::bail!("unknown or invalid statusline context");
-            }
-            usage.observe_statusline(invocation_id, observation);
+            usage.schedule(provider, invocation_id, credential, collection_context);
             Ok(Response::Ok)
         }
         Request::Capture { invocation_id } => {

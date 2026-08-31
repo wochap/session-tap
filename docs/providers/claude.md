@@ -13,23 +13,24 @@ mark waiting for approval, input notifications mark waiting for input, and
 transcript paths, and complete assistant messages are discarded; a root Stop
 may select the first 100 sanitized characters of `last_assistant_message` as a
 current `completed` reason.
-When a readable `transcript_path` matching the provider session is supplied
-beneath `$HOME/.claude/projects`, SessionTap extracts only the
-latest bounded `aiTitle` or `customTitle` value for provider-session metadata;
-the transcript body and path are not normalized or persisted.
+When an authenticated root hook supplies a readable `transcript_path` matching
+the provider session beneath `$HOME/.claude/projects`, the Claude adapter
+schedules bounded background collection and returns only the latest bounded
+`aiTitle` or `customTitle` plus normalized usage. The transcript body, path,
+response identities, cursor, cancellation state, and diagnostics are not
+normalized or persisted.
 
-The same private locator schedules bounded background usage collection.
 Assistant usage is counted once per non-empty `message.id`, falling back to
 `requestId`; fresh input, cache reads, and cache creation form cumulative
 input, while output is summed once per response. Rows without either identity
-are ignored. Current context comes only from authenticated statusline
-`current_usage` and `used_percentage`; null `current_usage` explicitly clears
-context after compaction while retaining cumulative totals.
+are ignored. The latest verified response input components supply current
+context tokens. Claude context-window percentage remains absent because the
+supported hook/transcript evidence does not provide an exact denominator.
 
-`sessiontap setup claude` wraps `statusLine`, atomically backs up its exact
-prior stanza, and continues executing the prior command. Setup is idempotent,
-doctor diagnoses ownership/backup drift, and removal restores only if the
-managed stanza remains active.
+`sessiontap setup claude`, doctor, and hook removal manage hooks only and leave
+`statusLine` untouched. SessionTap does not read or execute statusline
+configuration. For a development environment that installed the old managed
+wrapper, follow the one-time manual restoration procedure in the README.
 
 Direct `PermissionRequest` carries bounded approval context. `AskUserQuestion`
 and MCP `Elicitation` are ordinary input waits. `agent_needs_input` is an input

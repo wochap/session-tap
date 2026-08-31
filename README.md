@@ -82,11 +82,19 @@ hook entries and leaves your other hooks untouched. `sessiontap doctor
 <provider>` checks hook health without writing; `sessiontap hooks remove
 <provider>` strips only SessionTap-owned entries.
 
-Claude setup also installs a managed statusline tap. The exact prior
-`statusLine` stanza is saved in a private backup, is still executed with the
-original JSON input, and is restored on removal only while SessionTap owns the
-active stanza. Doctor reports wrapper drift or a missing backup instead of
-overwriting a user replacement.
+Provider setup manages hooks only. SessionTap never reads, installs, wraps,
+executes, or removes a provider statusline command. Provider-owned session
+artifacts are collected asynchronously after authenticated root hooks and are
+debounced by provider-qualified agent-session ID, so hook acknowledgement does
+not wait for artifact I/O.
+
+Development installations that previously installed the superseded Claude
+statusline wrapper require a one-time manual recovery: inspect
+`~/.claude/sessiontap-statusline-backup.json`, restore its `prior` value as the
+`statusLine` value in `~/.claude/settings.json` when `had_prior` is true (or
+remove the managed `statusLine` when false), verify Claude normally, and only
+then delete the backup. Current SessionTap versions deliberately do not inspect
+either value at runtime.
 
 Everything after the provider token is forwarded to the provider verbatim, so
 `sessiontap codex --help` shows Codex help.

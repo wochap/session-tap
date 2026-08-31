@@ -33,4 +33,7 @@ contain no conversational or raw tool content.
 Usage collector fixtures are hand-authored minimal JSONL records derived from
 documented field shapes. They contain synthetic identities and token counts
 only—no real paths, prompts, responses, account data, telemetry bodies, or tool
-arguments. Diagnostics identify only a provider/dialect and failure category.
+arguments. Each provider keeps its fixtures, decoding, identity checks, cursor,
+and accounting in its concrete adapter module. Diagnostics identify only a
+provider and bounded failure category; locators and records never cross the
+normalized boundary.

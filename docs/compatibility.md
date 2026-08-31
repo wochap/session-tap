@@ -2,7 +2,7 @@
 
 | Provider | Minimum tested | Hooks | Usage | Notes |
 | --- | --- | --- | --- | --- |
-| Claude Code | 2.1.241 | Yes | Transcript totals + statusline context | Prior statusline command is preserved |
+| Claude Code | 2.1.241 | Yes | Transcript totals + latest verified context tokens | Context percentage is absent without a verified denominator |
 | Codex CLI | 0.149.1 | Yes, after `/hooks` trust | Latest cumulative rollout snapshot | Nullable locators are harmless |
 | Qwen Code | Not yet established | Contract implemented | Summed assistant usage + latest context | Telemetry is ignored |
 
@@ -25,8 +25,11 @@ permissions, sink authentication, and transport security.
 Stopped `completed`/`failed` reasons are current-state-only. A live completed
 agent stays stopped until a verified idle signal or reliable new work; process
 exit can also produce stopped with no reason. Artifact collection is local,
-bounded, asynchronous, and exact: Claude deduplicates response identities,
-Codex selects the latest cumulative snapshot, and Qwen sums assistant records.
+bounded, asynchronous, and exact. Each provider module owns its locator
+validation, parser, cursor, and accounting: Claude deduplicates response
+identities, Codex selects the latest cumulative snapshot, and Qwen sums
+assistant records. Collection is trailing-edge debounced per provider-qualified
+agent session; equal raw IDs from different providers remain isolated.
 A public lifecycle field and remote control remain deferred. Internal
 lifecycle, activity, normalized event kinds, process identities, and
 multiplexer state remain reducer/control-only data.

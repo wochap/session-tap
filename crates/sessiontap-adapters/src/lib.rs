@@ -1,30 +1,30 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use fs2::FileExt;
 use serde_json::{Value, json};
 use sessiontap_core::{
     config::Config,
     domain::{
-        AdapterOutcome, ArtifactCollectionContext, ArtifactLocator, CollectorDialect,
-        EventEvidence, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
-        STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, StatusReasonContext, StatusReasonSource,
-        TOOL_CORRELATION_ID_MAX_CHARS, TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS,
-        ToolActivityPhase, ToolActivityUpdate,
+        AdapterOutcome, EventEvidence, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
+        StatusReasonContext, StatusReasonSource, TOOL_CORRELATION_ID_MAX_CHARS,
+        TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS, ToolActivityPhase, ToolActivityUpdate, Usage,
     },
 };
 use std::{
+    any::Any,
     collections::HashMap,
-    fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Seek, SeekFrom, Write},
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
-    sync::{Mutex, OnceLock},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 pub mod claude;
 pub mod codex;
 pub mod qwen;
-pub mod usage;
 
 pub const ADAPTER_API_VERSION: u32 = 1;
 const TRUSTED_WORKSPACE_FIELD: &str = "__sessiontap_invocation_workspace";
@@ -63,6 +63,89 @@ pub struct SetupReport {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProviderSessionKey {
+    pub configured_provider: String,
+    pub adapter_identity: String,
+    pub provider_session_id: String,
+}
+
+#[derive(Clone, Default)]
+pub struct CollectionCancellation(Arc<AtomicBool>);
+
+impl CollectionCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+#[derive(Clone)]
+pub struct OpaqueCursor(Arc<dyn Any + Send + Sync>);
+
+impl OpaqueCursor {
+    pub fn new<T: Any + Send + Sync>(value: T) -> Self {
+        Self(Arc::new(value))
+    }
+
+    #[must_use]
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        self.0.downcast_ref()
+    }
+}
+
+#[derive(Clone)]
+pub struct CollectSessionDataRequest {
+    pub home: PathBuf,
+    pub key: ProviderSessionKey,
+    pub locator: PathBuf,
+    pub prior_cursor: Option<OpaqueCursor>,
+    pub cancellation: CollectionCancellation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SessionEnrichment {
+    pub session_name: Option<String>,
+    pub usage: Option<Usage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundedDiagnostic(String);
+
+impl BoundedDiagnostic {
+    #[must_use]
+    pub fn new(message: impl AsRef<str>) -> Self {
+        let clean: String = message
+            .as_ref()
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(240)
+            .collect();
+        Self(clean)
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.0
+    }
+}
+
+pub enum CollectionOutcome {
+    Complete {
+        enrichment: SessionEnrichment,
+        cursor: OpaqueCursor,
+    },
+    Unchanged {
+        cursor: OpaqueCursor,
+    },
+    Cancelled,
+    Failed(BoundedDiagnostic),
+}
+
 #[async_trait]
 pub trait AgentAdapter: Send + Sync {
     fn api_version(&self) -> u32 {
@@ -91,6 +174,7 @@ pub trait AgentAdapter: Send + Sync {
         raw: &Value,
         evidence: EventEvidence,
     ) -> Result<AdapterOutcome>;
+    async fn collect_session_data(&self, request: CollectSessionDataRequest) -> CollectionOutcome;
     async fn setup(
         &self,
         home: &Path,
@@ -163,163 +247,6 @@ pub fn redact_args(args: &[String]) -> Vec<String> {
     out
 }
 
-#[cfg(any())]
-fn normalize_provider(
-    provider: &str,
-    id: &InvocationId,
-    raw: &Value,
-) -> Result<NormalizedAdapterEvent> {
-    let name = raw
-        .get("hook_event_name")
-        .or_else(|| raw.get("event_name"))
-        .or_else(|| raw.get("type"))
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let lower = name.to_ascii_lowercase();
-    let notification = raw
-        .get("notification_type")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let ask_user_question = matches!(provider, "claude" | "qwen")
-        && lower.contains("permission")
-        && raw
-            .get("tool_name")
-            .and_then(Value::as_str)
-            .is_some_and(|name| {
-                name.eq_ignore_ascii_case("AskUserQuestion")
-                    || name.eq_ignore_ascii_case("ask_user_question")
-            });
-    let empty_qwen_prompt = provider == "qwen"
-        && (lower.contains("userprompt") || lower.contains("promptsubmit"))
-        && raw
-            .get("prompt")
-            .and_then(Value::as_str)
-            .is_some_and(|prompt| prompt.trim().is_empty());
-    let kind = if lower.contains("sessionstart") {
-        EventKind::ProviderSessionStarted
-    } else if lower.contains("sessionend") {
-        EventKind::ProviderSessionEnded
-    } else if empty_qwen_prompt {
-        EventKind::Enrichment
-    } else if lower.contains("userprompt")
-        || lower.contains("promptsubmit")
-        || lower.contains("turnstart")
-    {
-        EventKind::NewTurn
-    } else if ask_user_question {
-        EventKind::WaitingInput
-    } else if lower.contains("permission") || notification.contains("permission_prompt") {
-        EventKind::WaitingApproval
-    } else if lower.contains("question")
-        || lower.contains("elicitation")
-        || lower.contains("needs_input")
-        || lower.contains("userinputrequest")
-        || notification.contains("needs_input")
-    {
-        EventKind::WaitingInput
-    } else if lower.contains("pretool")
-        || lower.contains("posttool")
-        || lower.contains("toolstart")
-        || lower.contains("toolend")
-    {
-        EventKind::Working
-    } else if provider != "codex" && lower.contains("failure") {
-        EventKind::Failed
-    } else if lower == "stop" || lower.contains("turnend") {
-        EventKind::Completed
-    } else {
-        EventKind::Enrichment
-    };
-    let usage_source = (provider == "qwen").then_some(raw);
-    let usage = usage_source
-        .map(|u| Usage {
-            input_tokens: u.get("input_tokens").and_then(Value::as_u64),
-            output_tokens: u.get("output_tokens").and_then(Value::as_u64),
-            context_tokens: u.get("context_tokens").and_then(Value::as_u64),
-            context_window_percent: (provider == "qwen")
-                .then(|| {
-                    u.get("context_usage")?
-                        .as_f64()
-                        .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0)
-                        .map(|v| (v * 100.0).round() as u8)
-                })
-                .flatten(),
-        })
-        .filter(|u| {
-            u.input_tokens.is_some()
-                || u.output_tokens.is_some()
-                || u.context_tokens.is_some()
-                || u.context_window_percent.is_some()
-        });
-    let attention = match kind {
-        EventKind::WaitingApproval => attention_context(raw, false),
-        EventKind::WaitingInput => attention_context(raw, true),
-        _ => None,
-    };
-    let failure = (kind == EventKind::Failed).then(|| failure_context(raw));
-    let provider_session_name = (provider == "claude")
-        .then(|| claude_session_name(raw))
-        .flatten();
-    let received_at = Utc::now();
-    let observed_at = (provider == "qwen")
-        .then(|| {
-            raw.get("timestamp")
-                .and_then(Value::as_str)
-                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                .map(|value| value.with_timezone(&Utc))
-        })
-        .flatten()
-        .unwrap_or(received_at);
-    Ok(NormalizedAdapterEvent {
-        event: NormalizedEvent {
-            schema_version: sessiontap_core::SCHEMA_VERSION,
-            event_id: raw
-                .get("event_id")
-                .and_then(Value::as_str)
-                .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned),
-            invocation_id: id.clone(),
-            provider_event_id: raw
-                .get("event_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            provider: provider.into(),
-            observed_at,
-            received_at,
-            evidence: EventEvidence::managed_hook(ADAPTER_API_VERSION.into()),
-            kind: kind.clone(),
-            provider_session_id: raw
-                .get("session_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            provider_session_name,
-            provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
-                .then(|| bounded_field(raw, &["source", "reason", "start_reason"], 32))
-                .flatten()
-                .filter(|value| {
-                    matches!(value.as_str(), "startup" | "clear" | "resume" | "compact")
-                }),
-            provider_metadata: provider_metadata(
-                raw,
-                (provider == "claude").then_some("prompt_id"),
-            ),
-            usage,
-            turn_id: raw
-                .get("turn_id")
-                .or_else(|| {
-                    (provider == "claude")
-                        .then(|| raw.get("prompt_id"))
-                        .flatten()
-                })
-                .and_then(Value::as_str)
-                .and_then(|value| sanitize_bounded(value, 128)),
-            tool_activity: None,
-        },
-        attention,
-        failure,
-    })
-}
-
 pub(crate) fn sanitize_bounded(value: &str, max_chars: usize) -> Option<String> {
     let mut escaped = false;
     let clean = value
@@ -349,28 +276,6 @@ pub(crate) fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Op
         .iter()
         .find_map(|name| raw.get(name).and_then(Value::as_str))
         .and_then(|value| sanitize_bounded(value, max_chars))
-}
-
-pub(crate) fn artifact_collection_context(
-    raw: &Value,
-    dialect: CollectorDialect,
-) -> Option<ArtifactCollectionContext> {
-    let provider_session_id = raw
-        .get("session_id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())?
-        .to_owned();
-    let transcript_path = raw
-        .get("transcript_path")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())?;
-    Some(ArtifactCollectionContext {
-        locator: ArtifactLocator {
-            dialect,
-            provider_session_id,
-            transcript_path: PathBuf::from(transcript_path),
-        },
-    })
 }
 
 pub(crate) fn tool_activity_update(provider: &str, raw: &Value) -> Option<ToolActivityUpdate> {
@@ -525,232 +430,6 @@ pub(crate) fn provider_metadata(
         current_turn_id,
     };
     (metadata != ProviderMetadata::default()).then_some(metadata)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArtifactProvider {
-    Claude,
-}
-
-impl ArtifactProvider {
-    fn data_root(self, home: &Path) -> PathBuf {
-        match self {
-            Self::Claude => home.join(".claude/projects"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArtifactKind {
-    Transcript,
-}
-
-struct ArtifactRequest<'a> {
-    provider: ArtifactProvider,
-    kind: ArtifactKind,
-    invocation_id: &'a InvocationId,
-    session_id: &'a str,
-    candidate: &'a Path,
-}
-
-struct ValidatedArtifact {
-    file: File,
-    identity: (u64, u64),
-    _scope: ArtifactScope,
-}
-
-struct ArtifactScope {
-    _invocation_id: InvocationId,
-    _provider: ArtifactProvider,
-    _kind: ArtifactKind,
-    _session_id: String,
-}
-
-impl ValidatedArtifact {
-    fn identity_unchanged(&self) -> Result<bool> {
-        use std::os::unix::fs::MetadataExt;
-        let metadata = self.file.metadata()?;
-        Ok(metadata.is_file() && (metadata.dev(), metadata.ino()) == self.identity)
-    }
-}
-
-pub(crate) fn claude_session_name(id: &InvocationId, raw: &Value) -> Option<String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    claude_session_name_beneath(id, raw, &ArtifactProvider::Claude.data_root(&home))
-}
-
-fn claude_session_name_beneath(
-    id: &InvocationId,
-    raw: &Value,
-    allowed_root: &Path,
-) -> Option<String> {
-    let session_id = raw.get("session_id")?.as_str()?;
-    let candidate = Path::new(raw.get("transcript_path")?.as_str()?);
-    let artifact = validate_artifact(
-        ArtifactRequest {
-            provider: ArtifactProvider::Claude,
-            kind: ArtifactKind::Transcript,
-            invocation_id: id,
-            session_id,
-            candidate,
-        },
-        allowed_root,
-    )
-    .ok()?;
-    latest_transcript_title(artifact).ok().flatten()
-}
-
-fn validate_artifact(
-    request: ArtifactRequest<'_>,
-    allowed_root: &Path,
-) -> Result<ValidatedArtifact> {
-    const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
-    use std::os::fd::AsRawFd;
-    use std::os::unix::fs::MetadataExt;
-
-    let canonical_root = fs::canonicalize(allowed_root)?;
-    let unresolved = if request.candidate.is_absolute() {
-        request.candidate.to_path_buf()
-    } else {
-        canonical_root.join(request.candidate)
-    };
-    let canonical_candidate = fs::canonicalize(unresolved)?;
-    if !canonical_candidate.starts_with(&canonical_root) {
-        bail!("provider artifact escapes its allowed root");
-    }
-    let expected_stem = sanitize_bounded(request.session_id, 128)
-        .context("provider artifact has no eligible session identity")?;
-    if canonical_candidate
-        .file_stem()
-        .and_then(|value| value.to_str())
-        != Some(&expected_stem)
-    {
-        bail!("provider artifact does not match the authenticated session");
-    }
-    if canonical_candidate
-        .extension()
-        .and_then(|value| value.to_str())
-        != Some("jsonl")
-    {
-        bail!("provider transcript artifact has an unsupported file type");
-    }
-    if !matches!(request.kind, ArtifactKind::Transcript) {
-        bail!("unsupported provider artifact kind");
-    }
-    let _provider_scope = request.provider;
-    let file = File::open(&canonical_candidate)?;
-    let opened_path = fs::canonicalize(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
-    if opened_path != canonical_candidate || !opened_path.starts_with(&canonical_root) {
-        bail!("provider artifact identity changed while opening");
-    }
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_ARTIFACT_BYTES {
-        bail!("provider artifact is not an eligible bounded regular file");
-    }
-    Ok(ValidatedArtifact {
-        file,
-        identity: (metadata.dev(), metadata.ino()),
-        _scope: ArtifactScope {
-            _invocation_id: request.invocation_id.clone(),
-            _provider: request.provider,
-            _kind: request.kind,
-            _session_id: expected_stem,
-        },
-    })
-}
-
-fn latest_transcript_title(mut artifact: ValidatedArtifact) -> Result<Option<String>> {
-    const CHUNK_BYTES: usize = 8 * 1024;
-    const MAX_LINE_BYTES: usize = 64 * 1024;
-    const MAX_SCAN_BYTES: u64 = 256 * 1024;
-
-    let file = &mut artifact.file;
-    let mut cursor = file.metadata()?.len();
-    let scan_start = cursor.saturating_sub(MAX_SCAN_BYTES);
-    let mut reversed_line = Vec::new();
-    let mut line_too_long = false;
-
-    while cursor > scan_start {
-        let amount = usize::try_from((cursor - scan_start).min(CHUNK_BYTES as u64))?;
-        cursor -= amount as u64;
-        file.seek(SeekFrom::Start(cursor))?;
-        let mut chunk = vec![0; amount];
-        std::io::Read::read_exact(&mut *file, &mut chunk)?;
-
-        for byte in chunk.into_iter().rev() {
-            if byte == b'\n' {
-                if !line_too_long {
-                    reversed_line.reverse();
-                    if let Some(title) = title_from_transcript_line(&reversed_line) {
-                        return artifact
-                            .identity_unchanged()?
-                            .then_some(Some(title))
-                            .context("provider artifact identity changed while reading");
-                    }
-                }
-                reversed_line.clear();
-                line_too_long = false;
-            } else if reversed_line.len() < MAX_LINE_BYTES {
-                reversed_line.push(byte);
-            } else {
-                line_too_long = true;
-            }
-        }
-    }
-
-    if !line_too_long {
-        reversed_line.reverse();
-        if let Some(title) = title_from_transcript_line(&reversed_line) {
-            return artifact
-                .identity_unchanged()?
-                .then_some(Some(title))
-                .context("provider artifact identity changed while reading");
-        }
-    }
-    if !artifact.identity_unchanged()? {
-        bail!("provider artifact identity changed while reading");
-    }
-    Ok(None)
-}
-
-fn title_from_transcript_line(line: &[u8]) -> Option<String> {
-    if !line
-        .windows(b"aiTitle".len())
-        .any(|part| part == b"aiTitle")
-        && !line
-            .windows(b"customTitle".len())
-            .any(|part| part == b"customTitle")
-    {
-        return None;
-    }
-    let value: Value = serde_json::from_slice(line).ok()?;
-    ["customTitle", "aiTitle"]
-        .into_iter()
-        .find_map(|key| value.get(key).and_then(Value::as_str))
-        .and_then(bounded_one_line)
-}
-
-fn bounded_one_line(value: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut spaced = false;
-    for ch in value.chars().filter(|ch| !ch.is_control()) {
-        if ch.is_whitespace() {
-            spaced = !out.is_empty();
-            continue;
-        }
-        if spaced && !out.ends_with(' ') {
-            out.push(' ');
-        }
-        spaced = false;
-        if out.chars().count() >= STATUS_REASON_MAX_CHARS
-            || out.len() + ch.len_utf8() > STATUS_REASON_MAX_BYTES
-        {
-            break;
-        }
-        out.push(ch);
-    }
-    let out = out.trim().to_owned();
-    (!out.is_empty()).then_some(out)
 }
 
 fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
@@ -945,87 +624,6 @@ pub(crate) fn failed_reason_context(raw: &Value) -> Option<StatusReasonContext> 
     })
 }
 
-pub fn qwen_has_user_side_channel(args: &[String]) -> bool {
-    args.iter().any(|a| {
-        a == "--json-file"
-            || a == "--json-fd"
-            || a.starts_with("--json-file=")
-            || a.starts_with("--json-fd=")
-    })
-}
-pub fn probe_qwen_dual_output(executable: &str) -> bool {
-    static CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(value) = cache.lock().expect("probe cache poisoned").get(executable) {
-        return *value;
-    }
-    let supported = Command::new(executable)
-        .arg("--help")
-        .output()
-        .ok()
-        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("--json-file"));
-    cache
-        .lock()
-        .expect("probe cache poisoned")
-        .insert(executable.to_owned(), supported);
-    supported
-}
-
-pub struct JsonlTail {
-    path: PathBuf,
-    offset: u64,
-    pending: String,
-    max_line: usize,
-    identity: Option<(u64, u64)>,
-}
-impl JsonlTail {
-    #[must_use]
-    pub fn new(path: PathBuf, max_line: usize) -> Self {
-        Self {
-            path,
-            offset: 0,
-            pending: String::new(),
-            max_line,
-            identity: None,
-        }
-    }
-    pub fn poll(&mut self) -> Result<Vec<Value>> {
-        let file = match File::open(&self.path) {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-            Err(e) => return Err(e.into()),
-        };
-        let metadata = file.metadata()?;
-        let current_identity = {
-            use std::os::unix::fs::MetadataExt;
-            (metadata.dev(), metadata.ino())
-        };
-        let len = metadata.len();
-        if len < self.offset || self.identity.is_some_and(|old| old != current_identity) {
-            self.offset = 0;
-            self.pending.clear();
-        }
-        self.identity = Some(current_identity);
-        let mut reader = BufReader::new(file);
-        reader.seek(SeekFrom::Start(self.offset))?;
-        let mut values = vec![];
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            self.offset = reader.stream_position()?;
-            self.pending.push_str(&line);
-            if self.pending.len() > self.max_line {
-                bail!("side-channel line exceeds limit");
-            }
-            if self.pending.ends_with('\n') {
-                values.push(serde_json::from_str(self.pending.trim_end())?);
-                self.pending.clear();
-            }
-            line.clear();
-        }
-        Ok(values)
-    }
-}
-
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
@@ -1046,195 +644,6 @@ fn owned_handler(provider: &str, executable: &Path) -> Result<Value> {
     }))
 }
 
-const CLAUDE_STATUSLINE_BACKUP: &str = "sessiontap-statusline-backup.json";
-
-fn managed_statusline(executable: &Path) -> Result<Value> {
-    let executable = executable
-        .to_str()
-        .context("SessionTap executable path is not valid UTF-8")?;
-    Ok(json!({
-        "type": "command",
-        "command": format!("{} statusline emit claude", shell_quote(executable)),
-        "padding": 0
-    }))
-}
-
-fn statusline_backup_path(home: &Path) -> PathBuf {
-    home.join(".claude").join(CLAUDE_STATUSLINE_BACKUP)
-}
-
-fn write_private_json(path: &Path, value: &Value) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let parent = path.parent().context("private backup has no parent")?;
-    fs::create_dir_all(parent)?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.as_file()
-        .set_permissions(fs::Permissions::from_mode(0o600))?;
-    temp.write_all(&serde_json::to_vec_pretty(value)?)?;
-    temp.as_file().sync_all()?;
-    temp.persist(path).map_err(|error| error.error)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-pub fn manage_claude_statusline(
-    home: &Path,
-    executable: &Path,
-    action: SetupAction,
-) -> Result<SetupReport> {
-    let settings_path = resolve_config_link("Claude", &home.join(".claude/settings.json"))?;
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(settings_path.with_extension("sessiontap.lock"))?;
-    lock.lock_exclusive()?;
-    let raw = fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".into());
-    let mut settings: Value = serde_json::from_str(&raw)
-        .context("Claude configuration is invalid; refusing to overwrite")?;
-    let object = settings
-        .as_object_mut()
-        .context("Claude settings must be an object")?;
-    let managed = managed_statusline(executable)?;
-    let active = object.get("statusLine").cloned();
-    let backup_path = statusline_backup_path(home);
-    use std::os::unix::fs::PermissionsExt;
-    let backup_private = backup_path.symlink_metadata().is_ok_and(|metadata| {
-        metadata.is_file()
-            && !metadata.file_type().is_symlink()
-            && metadata.permissions().mode() & 0o077 == 0
-    });
-    let backup: Option<Value> = backup_private
-        .then(|| fs::read(&backup_path).ok())
-        .flatten()
-        .and_then(|raw| serde_json::from_slice(&raw).ok());
-    let owned = active.as_ref() == Some(&managed);
-    let backup_healthy = backup.as_ref().is_some_and(|value| {
-        value.get("version").and_then(Value::as_u64) == Some(1)
-            && value.get("managed") == Some(&managed)
-            && value.get("had_prior").and_then(Value::as_bool).is_some()
-            && value.get("prior").is_some()
-    });
-
-    if action == SetupAction::Doctor {
-        let healthy = owned && backup_healthy;
-        return Ok(SetupReport {
-            changed: false,
-            healthy,
-            message: if healthy {
-                "managed Claude statusline healthy".into()
-            } else if !owned && backup.is_some() {
-                "Claude statusline ownership drift detected; user configuration left untouched"
-                    .into()
-            } else if owned {
-                "managed Claude statusline backup is missing or invalid".into()
-            } else {
-                "managed Claude statusline is not installed".into()
-            },
-        });
-    }
-
-    if action == SetupAction::Remove {
-        if !owned {
-            return Ok(SetupReport {
-                changed: false,
-                healthy: backup.is_none(),
-                message: "Claude statusline is not SessionTap-owned; left untouched".into(),
-            });
-        }
-        let backup = backup.context("cannot restore Claude statusline: backup is missing")?;
-        if !backup_healthy {
-            bail!("cannot restore Claude statusline: backup is invalid");
-        }
-        if backup.get("had_prior").and_then(Value::as_bool) == Some(true) {
-            object.insert("statusLine".into(), backup["prior"].clone());
-        } else {
-            object.remove("statusLine");
-        }
-        atomic_json_replace(&settings_path, &settings)?;
-        fs::remove_file(&backup_path)?;
-        return Ok(SetupReport {
-            changed: true,
-            healthy: true,
-            message: "prior Claude statusline restored".into(),
-        });
-    }
-
-    if owned {
-        return Ok(SetupReport {
-            changed: false,
-            healthy: backup_healthy,
-            message: if backup_healthy {
-                "managed Claude statusline already installed".into()
-            } else {
-                "managed Claude statusline backup is missing or invalid".into()
-            },
-        });
-    }
-    if backup.is_some() {
-        return Ok(SetupReport {
-            changed: false,
-            healthy: false,
-            message: "Claude statusline changed after SessionTap setup; refusing to overwrite it"
-                .into(),
-        });
-    }
-    write_private_json(
-        &backup_path,
-        &json!({
-            "version": 1,
-            "managed": managed,
-            "had_prior": active.is_some(),
-            "prior": active.clone().unwrap_or(Value::Null)
-        }),
-    )?;
-    object.insert("statusLine".into(), managed);
-    atomic_json_replace(&settings_path, &settings)?;
-    Ok(SetupReport {
-        changed: true,
-        healthy: true,
-        message: "managed Claude statusline installed".into(),
-    })
-}
-
-fn atomic_json_replace(path: &Path, value: &Value) -> Result<()> {
-    let parent = path.parent().unwrap_or(Path::new("."));
-    fs::create_dir_all(parent)?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.write_all(&serde_json::to_vec_pretty(value)?)?;
-    temp.as_file().sync_all()?;
-    temp.persist(path).map_err(|error| error.error)?;
-    Ok(())
-}
-
-pub fn claude_prior_statusline_command(home: &Path) -> Result<Option<String>> {
-    let path = statusline_backup_path(home);
-    use std::os::unix::fs::PermissionsExt;
-    let Ok(metadata) = path.symlink_metadata() else {
-        return Ok(None);
-    };
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.permissions().mode() & 0o077 != 0
-    {
-        bail!("Claude statusline backup is not a private regular file");
-    }
-    let raw = fs::read(path)?;
-    let backup: Value = serde_json::from_slice(&raw).context("invalid Claude statusline backup")?;
-    if backup.get("had_prior").and_then(Value::as_bool) != Some(true) {
-        return Ok(None);
-    }
-    Ok(backup
-        .get("prior")
-        .and_then(|prior| prior.get("command"))
-        .and_then(Value::as_str)
-        .filter(|command| !command.contains(" statusline emit claude"))
-        .map(str::to_owned))
-}
 /// Follows a symlinked configuration file to its target so managed merges
 /// preserve the link instead of replacing it.
 fn resolve_config_link(label: &str, path: &Path) -> Result<PathBuf> {
@@ -1384,6 +793,27 @@ pub fn merge_owned_toml(path: &Path, table: &str, value: Option<toml::Value>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn common_adapter_module_has_no_provider_artifact_rules() {
+        let production = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        for forbidden in [
+            "cache_read_input_tokens",
+            "usageMetadata",
+            "total_token_usage",
+            "transcript_path",
+            ".claude/projects",
+            ".codex/sessions",
+            ".qwen/projects",
+            "statusLine",
+            "statusline",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "common adapter code contains {forbidden}"
+            );
+        }
+    }
     use sessiontap_core::config::CustomAdapter;
     use sessiontap_core::domain::EventKind;
 
@@ -1427,8 +857,8 @@ mod tests {
     }
     #[test]
     fn qwen_user_side_channel_wins() {
-        assert!(qwen_has_user_side_channel(&["--json-fd=4".into()]));
-        assert!(!qwen_has_user_side_channel(&["--help".into()]));
+        assert!(qwen::qwen_has_user_side_channel(&["--json-fd=4".into()]));
+        assert!(!qwen::qwen_has_user_side_channel(&["--help".into()]));
     }
     #[test]
     fn merge_preserves_user_hooks_and_removes_owned() {
@@ -1549,7 +979,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let p = t.path().join("events");
         fs::write(&p, "{\"session_id\":\"x\"}").unwrap();
-        let mut tail = JsonlTail::new(p.clone(), 1024);
+        let mut tail = qwen::QwenJsonlTail::new(p.clone(), 1024);
         assert!(tail.poll().unwrap().is_empty());
         fs::write(&p, "{\"session_id\":\"x\"}\n").unwrap();
         let got = tail.poll().unwrap();
@@ -1561,7 +991,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let p = t.path().join("events");
         fs::write(&p, "{\"n\":1}\n").unwrap();
-        let mut tail = JsonlTail::new(p.clone(), 1024);
+        let mut tail = qwen::QwenJsonlTail::new(p.clone(), 1024);
         assert_eq!(tail.poll().unwrap()[0]["n"], 1);
         let replacement = t.path().join("replacement");
         fs::write(&replacement, "{\"n\":2}\n").unwrap();
@@ -1915,68 +1345,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_uses_latest_bounded_transcript_title() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join(".claude/projects/project");
-        fs::create_dir_all(&root).unwrap();
-        let transcript = root.join("provider-session.jsonl");
-        fs::write(
-            &transcript,
-            concat!(
-                "{\"aiTitle\":\"Initial title\"}\n",
-                "{\"message\":\"PRIVATE transcript content\"}\n",
-                "{\"customTitle\":\"  Renamed\\n session  \"}\n"
-            ),
-        )
-        .unwrap();
-        let id = InvocationId::new();
-        let raw = json!({
-            "hook_event_name": "Stop",
-            "session_id": "provider-session",
-            "transcript_path": transcript,
-        });
-        let name = claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects"));
-
-        assert_eq!(name.as_deref(), Some("Renamed session"));
-        let normalized = claude::ClaudeAdapter.normalize(&id, &raw).unwrap();
-        let serialized = serde_json::to_string(&normalized).unwrap();
-        assert!(!serialized.contains("PRIVATE"));
-        assert!(!serialized.contains("provider-session.jsonl"));
-    }
-
-    #[test]
-    fn artifact_validator_rejects_escape_wrong_session_and_oversize() {
-        use std::os::unix::fs::symlink;
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join(".claude/projects/project");
-        fs::create_dir_all(&root).unwrap();
-        let outside = temp.path().join("outside.jsonl");
-        fs::write(&outside, "{\"aiTitle\":\"PRIVATE\"}\n").unwrap();
-        let escaped = root.join("session-id.jsonl");
-        symlink(&outside, &escaped).unwrap();
-        let id = InvocationId::new();
-        let raw = json!({"session_id":"session-id","transcript_path":escaped});
-        assert!(
-            claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects")).is_none()
-        );
-
-        let wrong = root.join("different-session.jsonl");
-        fs::write(&wrong, "{\"aiTitle\":\"PRIVATE\"}\n").unwrap();
-        let raw = json!({"session_id":"session-id","transcript_path":wrong});
-        assert!(
-            claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects")).is_none()
-        );
-
-        let oversized = root.join("session-id.jsonl");
-        let file = File::create(&oversized).unwrap();
-        file.set_len(64 * 1024 * 1024 + 1).unwrap();
-        let raw = json!({"session_id":"session-id","transcript_path":oversized});
-        assert!(
-            claude_session_name_beneath(&id, &raw, &temp.path().join(".claude/projects")).is_none()
-        );
-    }
-
-    #[test]
     fn subagent_payloads_are_explicitly_ignored_before_normalization() {
         let id = InvocationId::new();
         let fixtures = [
@@ -2239,105 +1607,17 @@ mod tests {
         assert_eq!(normalized.event.evidence.source_sequence, None);
         let serialized = serde_json::to_string(&normalized).unwrap();
         assert!(!serialized.contains("provider_forgery"));
-        assert!(!serialized.contains("999"));
-    }
-
-    #[test]
-    fn claude_statusline_setup_is_idempotent_and_exactly_reversible() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude = temp.path().join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        let settings = claude.join("settings.json");
-        let prior = json!({"type":"command","command":"printf prior","padding":7,"extra":{"x":1}});
-        fs::write(
-            &settings,
-            serde_json::to_vec_pretty(&json!({
-                "theme": "dark",
-                "statusLine": prior
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let executable = Path::new("/opt/session tap/bin/sessiontap");
-
-        let first = manage_claude_statusline(temp.path(), executable, SetupAction::Ensure).unwrap();
-        assert!(first.changed && first.healthy);
-        let installed: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
-        assert!(
-            installed["statusLine"]["command"]
-                .as_str()
-                .unwrap()
-                .contains(" statusline emit claude")
-        );
-        assert_eq!(
-            claude_prior_statusline_command(temp.path())
-                .unwrap()
-                .as_deref(),
-            Some("printf prior")
-        );
-        let second =
-            manage_claude_statusline(temp.path(), executable, SetupAction::Ensure).unwrap();
-        assert!(!second.changed && second.healthy);
-        assert!(
-            manage_claude_statusline(temp.path(), executable, SetupAction::Doctor)
-                .unwrap()
-                .healthy
-        );
-
-        let removed =
-            manage_claude_statusline(temp.path(), executable, SetupAction::Remove).unwrap();
-        assert!(removed.changed);
-        let restored: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
-        assert_eq!(restored["statusLine"], prior);
-        assert_eq!(restored["theme"], "dark");
-        assert!(!statusline_backup_path(temp.path()).exists());
-    }
-
-    #[test]
-    fn claude_statusline_removal_preserves_user_replacement_after_setup() {
-        let temp = tempfile::tempdir().unwrap();
-        let claude = temp.path().join(".claude");
-        fs::create_dir_all(&claude).unwrap();
-        let settings = claude.join("settings.json");
-        fs::write(&settings, "{}").unwrap();
-        let executable = Path::new("sessiontap");
-        manage_claude_statusline(temp.path(), executable, SetupAction::Ensure).unwrap();
-        fs::write(
-            &settings,
-            serde_json::to_vec(&json!({
-                "statusLine": {"type":"command","command":"user-new"}
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let doctor =
-            manage_claude_statusline(temp.path(), executable, SetupAction::Doctor).unwrap();
-        assert!(!doctor.healthy && doctor.message.contains("drift"));
-        let remove =
-            manage_claude_statusline(temp.path(), executable, SetupAction::Remove).unwrap();
-        assert!(!remove.changed);
-        let current: Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
-        assert_eq!(current["statusLine"]["command"], "user-new");
-        assert!(statusline_backup_path(temp.path()).exists());
+        assert!(!serialized.contains("collectorRevision"));
+        assert!(!serialized.contains("clientRevision"));
     }
 
     #[test]
     fn root_locators_are_private_and_subagents_never_create_them() {
         let id = InvocationId::new();
-        for (adapter, dialect) in [
-            (
-                &claude::ClaudeAdapter as &dyn AgentAdapter,
-                CollectorDialect::Claude,
-            ),
-            (
-                &codex::CodexAdapter as &dyn AgentAdapter,
-                CollectorDialect::Codex,
-            ),
-            (
-                &qwen::QwenAdapter as &dyn AgentAdapter,
-                CollectorDialect::Qwen,
-            ),
+        for (adapter, adapter_identity) in [
+            (&claude::ClaudeAdapter as &dyn AgentAdapter, "claude"),
+            (&codex::CodexAdapter as &dyn AgentAdapter, "codex"),
+            (&qwen::QwenAdapter as &dyn AgentAdapter, "qwen"),
         ] {
             let raw = json!({
                 "hook_event_name": "SessionStart",
@@ -2350,9 +1630,8 @@ mod tests {
                     .collection_context
                     .as_ref()
                     .unwrap()
-                    .locator
-                    .dialect,
-                dialect
+                    .adapter_identity,
+                adapter_identity
             );
             let event_json = serde_json::to_string(&normalized.event).unwrap();
             assert!(!event_json.contains("transcript_path"));

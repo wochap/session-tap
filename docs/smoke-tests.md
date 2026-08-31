@@ -34,12 +34,15 @@ For each of `claude`, `codex`, and `qwen`:
    provider does not receive them and its managed hooks emit nothing.
 9. For every tracked root session, wait for `usage` and compare cumulative
    input/output with the documented artifact accounting. Verify direct and
-   child sessions schedule no root collection. Exercise compaction and confirm
-   context can clear or decrease without resetting cumulative totals.
-10. For Claude, configure a visible custom statusline before setup. Verify it
-    is relayed while tracked, untracked, and with the daemon stopped. Run doctor
-    and removal and compare the restored stanza at the JSON-value level. Replace
-    the stanza after setup and verify removal leaves the replacement untouched.
+   child sessions schedule no root collection. Send a burst of hooks for one
+   provider session and verify one trailing-edge result, then overlap bursts
+   across independent Claude, Codex, and Qwen sessions and verify isolation.
+   Exercise compaction and confirm context can clear or decrease without
+   resetting cumulative totals.
+10. For Claude, configure a visible custom statusline before setup. Run setup,
+    doctor, collection, and hook removal and verify the stanza remains unchanged
+    and is never executed by SessionTap. Confirm context percentage is absent
+    when the transcript supplies no verified denominator.
 
 Record provider version, Linux distribution, Wayland compositor, date, and
 pass/fail; never commit account data or raw event payloads.

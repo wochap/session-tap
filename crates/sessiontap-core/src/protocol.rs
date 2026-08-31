@@ -1,6 +1,6 @@
 use crate::domain::{
     ArtifactCollectionContext, InvocationId, InvocationSnapshot, NormalizedEvent, PublicAgentView,
-    PublicField, StatusReasonContext, StatuslineObservation,
+    PublicField, StatusReasonContext,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -67,12 +67,6 @@ pub enum Request {
         status_reason: Option<StatusReasonContext>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         collection_context: Option<ArtifactCollectionContext>,
-    },
-    StatuslineIngest {
-        provider: String,
-        invocation_id: InvocationId,
-        credential: String,
-        observation: StatuslineObservation,
     },
     Status,
     Listen,

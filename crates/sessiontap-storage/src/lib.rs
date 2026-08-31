@@ -948,8 +948,6 @@ fn event_with_channel_authority(event: &NormalizedEvent) -> NormalizedEvent {
         }
         EvidenceChannel::ProviderArtifact => {
             effective.kind = EventKind::Enrichment;
-            effective.provider_session_id = None;
-            effective.provider_session_name = None;
             effective.provider_session_start_reason = None;
             effective.turn_id = None;
             effective.tool_activity = None;

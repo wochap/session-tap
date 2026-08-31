@@ -367,73 +367,14 @@ pub struct Usage {
     pub context_window_percent: Option<u8>,
 }
 
-/// Provider parsing dialect used only by the authenticated local collector.
-/// This and the following collection types must never be embedded in public
-/// views or persisted invocation snapshots.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CollectorDialect {
-    Claude,
-    Codex,
-    Qwen,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ArtifactLocator {
-    pub dialect: CollectorDialect,
-    pub provider_session_id: String,
-    pub transcript_path: PathBuf,
-}
-
+/// Private provider-owned artifact locator carried only over the authenticated
+/// local control protocol. It is deliberately absent from snapshots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactCollectionContext {
-    pub locator: ArtifactLocator,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StatuslineObservation {
+    pub adapter_identity: String,
     pub provider_session_id: String,
-    pub transcript_path: PathBuf,
-    /// `None` is an explicit context clear (Claude reports null after
-    /// compaction), not an omitted update.
-    pub context_tokens: Option<u64>,
-    pub context_window_percent: Option<u8>,
+    pub locator: PathBuf,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct CollectorGeneration(pub u64);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ArtifactIdentity {
-    pub device: u64,
-    pub inode: u64,
-    pub stable_len: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct CollectorCursor {
-    pub dialect: Option<CollectorDialect>,
-    pub session_bound: bool,
-    pub identity: Option<ArtifactIdentity>,
-    pub byte_offset: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub context_tokens: Option<u64>,
-    pub context_window_percent: Option<u8>,
-    pub response_ids: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct PartialUsageObservation {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub context_tokens: Option<u64>,
-    pub context_window_percent: Option<u8>,
-    pub context_observed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompleteUsageSnapshot(pub Usage);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Repository {
