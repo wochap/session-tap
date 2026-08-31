@@ -234,11 +234,26 @@ A provider adapter SHALL pass only typed provider-neutral events and selected bo
 - **THEN** the Claude adapter normalizes its hook while the daemon records `company-claude`, not `claude`, as the invocation's configured provider identity
 
 ### Requirement: Future provider enrichment shares the normalized boundary
-A future provider-specific collector that reads agent-owned stores, histories, or transcripts SHALL live with that provider integration and SHALL emit sanitized typed metadata through the same normalized internal state path used by hook-derived metadata.
+A provider-specific collector that reads agent-owned stores, histories, or transcripts SHALL live entirely in that provider's concrete adapter module and SHALL expose the same standard asynchronous collection operation as every built-in provider. It SHALL emit only sanitized typed metadata through the normalized internal state path used by hook-derived metadata; common adapter orchestration SHALL delegate without parsing or branching on provider-specific data.
 
 #### Scenario: Provider history contains additional metadata
-- **WHEN** a future collector extracts a verified safe fact unavailable in hook payloads
+- **WHEN** a collector extracts a verified safe fact unavailable in hook payloads
 - **THEN** downstream storage, public projection, sinks, and hub aggregation consume the normalized fact without parsing or identifying the provider's source format
+
+#### Scenario: Provider collection implementation changes
+- **WHEN** Claude, Codex, or Qwen changes its artifact location, JSONL shape, cursor rules, or accounting semantics
+- **THEN** only that concrete provider module and its tests require provider-specific changes
+
+### Requirement: Common adapter code delegates all provider behavior
+The adapter crate's common library module SHALL contain only provider-neutral contracts, registry selection, normalized shared types, and delegation. Claude-, Codex-, and Qwen-specific hook names, setup rules, locators, paths, artifact reads, JSON fields, cursors, deduplication, metadata extraction, and accounting MUST reside in `claude.rs`, `codex.rs`, and `qwen.rs` respectively.
+
+#### Scenario: Registry selects a provider
+- **WHEN** common code resolves a configured provider to a concrete adapter
+- **THEN** all hook normalization and session collection behavior is delegated through the standard API without provider-specific branches in the common module
+
+#### Scenario: Configured alias inherits an adapter
+- **WHEN** a configured provider alias inherits the Qwen adapter
+- **THEN** common code retains the configured identity while the Qwen module exclusively owns Qwen hook and artifact behavior
 
 ### Requirement: Provider event dispatch is exact and fail-closed
 Each built-in adapter SHALL classify event names, notification subtypes, and special tool names using provider-owned exact mappings with explicit accepted spelling variants. An unsupported value SHALL produce `AdapterOutcome::Ignored` unless that exact value is explicitly defined as provider-neutral enrichment.

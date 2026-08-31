@@ -393,3 +393,22 @@ context values SHALL remain absent.
 #### Scenario: Context becomes temporarily unavailable
 - **WHEN** a complete provider result retains cumulative totals but has no verified current context
 - **THEN** SessionTap atomically replaces usage with the supplied totals and absent context fields without changing agent status
+
+### Requirement: Provider artifact enrichment uses complete normalized values
+The broker SHALL apply provider-artifact collection results only as complete typed provider-neutral enrichment for a currently authenticated provider agent-session binding. Cumulative input and output SHALL describe the current provider session, current context SHALL describe the latest verified active occupancy, and unavailable values SHALL remain absent. Provider-artifact evidence SHALL NOT assert lifecycle, activity, attention, turn, or tool state.
+
+#### Scenario: Collected usage changes during work
+- **WHEN** a current authenticated provider-session result changes verified usage while agent activity remains working
+- **THEN** the broker atomically updates usage without changing activity, lifecycle, reason, turn, or tool state
+
+#### Scenario: Context percentage is unavailable
+- **WHEN** a provider collector verifies cumulative totals and context tokens but no exact percentage or denominator
+- **THEN** the public view contains the verified values and leaves context-window percentage absent
+
+#### Scenario: Provider session changes
+- **WHEN** an invocation binds a different provider agent-session ID
+- **THEN** enrichment inherited from the prior session is cleared until verified normalized values for the new session arrive
+
+#### Scenario: Collection result is unchanged
+- **WHEN** a complete normalized collection result projects the same public values already stored
+- **THEN** the broker creates no listener-, sink-, or hub-visible update
