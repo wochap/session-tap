@@ -358,3 +358,38 @@ Internal normalized events, request payloads, reducer state, and persisted snaps
 #### Scenario: Incompatible retained alpha state is encountered
 - **WHEN** retained internal data cannot decode into the target representation
 - **THEN** SessionTap reports the incompatibility without legacy decoding or version negotiation
+
+### Requirement: Public usage has stable cross-provider semantics
+`PublicAgentView.usage.input_tokens` and `output_tokens` SHALL represent cumulative totals for the current provider session, `context_tokens` SHALL represent the provider's latest verified active-context occupancy, and `context_window_percent` SHALL represent the corresponding used percentage rounded to the nearest whole number and clamped to 0 through 100. Unavailable values SHALL remain absent rather than zero, and a new provider session SHALL clear usage inherited from the prior provider session.
+
+#### Scenario: Cumulative totals exceed the context window
+- **WHEN** repeated model calls cause cumulative input to exceed the provider's context capacity
+- **THEN** SessionTap retains the cumulative input total while deriving context fields only from the latest active-context measurement
+
+#### Scenario: Provider session changes
+- **WHEN** a root invocation adopts a different provider session identity after clear, branch, or resume behavior that creates a new identity
+- **THEN** SessionTap clears prior usage until verified values for the new provider session arrive
+
+#### Scenario: Percentage has fractional precision
+- **WHEN** a provider reports or yields a valid used percentage containing a fractional part
+- **THEN** SessionTap publishes the nearest whole percentage within 0 through 100
+
+### Requirement: Complete provider-artifact snapshots reduce atomically
+A provider collector SHALL return one complete normalized enrichment candidate
+from verified hooks and provider artifacts. Applying that candidate SHALL
+replace prior usage atomically, SHALL produce a public update only when the
+projection changes, and SHALL NOT change lifecycle, activity, status reason,
+tool activity, state assertion timing, or live confirmation. Unverifiable
+context values SHALL remain absent.
+
+#### Scenario: Claude has no verified context denominator
+- **WHEN** a Claude transcript verifies current context tokens and cumulative totals without an exact denominator
+- **THEN** the collector emits those verified values with context-window percentage absent
+
+#### Scenario: Collected usage is unchanged
+- **WHEN** an asynchronous refresh yields a usage snapshot equal to normalized current usage
+- **THEN** SessionTap creates no public listener, sink, or hub update for that result
+
+#### Scenario: Context becomes temporarily unavailable
+- **WHEN** a complete provider result retains cumulative totals but has no verified current context
+- **THEN** SessionTap atomically replaces usage with the supplied totals and absent context fields without changing agent status

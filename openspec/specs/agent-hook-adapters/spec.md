@@ -375,3 +375,29 @@ Normalized adapter output SHALL use typed evidence and tool activity directly wi
 #### Scenario: Adapter event is serialized
 - **WHEN** a built-in adapter emits a normalized root event
 - **THEN** its target internal representation contains typed evidence and no legacy source field
+
+### Requirement: Root hooks supply private artifact collection context
+Each built-in adapter SHALL extract an eligible root hook's provider session identity and transcript locator into private authenticated collection context before discarding raw hook input. This collection context SHALL remain separate from `NormalizedEvent`, adapter-selected public metadata, persisted invocation snapshots, and canonical public envelopes. Custom configured providers SHALL inherit the artifact collector and allowed root of their adapter dialect while retaining their configured provider identity.
+
+#### Scenario: Supported root hook has a transcript path
+- **WHEN** a Claude, Codex, or Qwen root hook contains a documented transcript locator and provider session identity
+- **THEN** the adapter supplies them only to the authenticated private usage-collection path
+
+#### Scenario: Child hook has a transcript path
+- **WHEN** a documented child-agent identity or child lifecycle hook contains root and child transcript locators
+- **THEN** the adapter rejects the payload before creating root artifact collection context
+
+#### Scenario: Configured provider inherits a dialect
+- **WHEN** a configured alias inherits the Claude adapter
+- **THEN** its private collector uses Claude artifact semantics while normalized and public state retain the configured alias identity
+
+### Requirement: Hook-derived and artifact-derived usage remain distinct
+Adapters SHALL continue to normalize verified usage supplied directly by supported hook fields, but SHALL NOT copy transcript records or artifact-derived calculations into the managed-hook event. Asynchronous artifact results SHALL use local `ProviderArtifact` evidence and SHALL NOT inherit authenticated-hook authority over lifecycle, activity, attention, turn, or tool state.
+
+#### Scenario: Qwen hook and transcript both expose usage
+- **WHEN** a Qwen hook contains verified top-level usage and the transcript later yields a complete usage snapshot
+- **THEN** the hook usage is applied as managed-hook evidence and the independently collected complete snapshot is applied as provider-artifact evidence
+
+#### Scenario: Artifact parser sees lifecycle-like content
+- **WHEN** a transcript record contains fields resembling hook lifecycle or attention data
+- **THEN** the collector emits no lifecycle, activity, reason, turn, or tool assertion from that content
