@@ -191,6 +191,7 @@ fn collection_context(raw: &Value) -> Option<ArtifactCollectionContext> {
 
 const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
+const SESSION_NAME_MAX_CHARS: usize = 160;
 
 struct CodexCursor {
     _device: u64,
@@ -249,7 +250,7 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cod
             session_name = ["session_name", "title"]
                 .into_iter()
                 .find_map(|field| payload.get(field).and_then(Value::as_str))
-                .and_then(|value| sanitize_bounded(value, 160));
+                .and_then(|value| sanitize_bounded(value, SESSION_NAME_MAX_CHARS));
             continue;
         }
         if record_type != "event_msg"
@@ -294,9 +295,16 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cod
     {
         bail!("Codex artifact changed identity during collection");
     }
+    let index_name = match collect_index_name(&request) {
+        Ok(name) => name,
+        Err(_) => {
+            check_cancelled(&request)?;
+            None
+        }
+    };
     Ok((
         SessionEnrichment {
-            session_name,
+            session_name: index_name.or(session_name),
             usage: latest,
         },
         CodexCursor {
@@ -305,6 +313,72 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cod
             _stable_len: metadata.len(),
         },
     ))
+}
+
+fn collect_index_name(request: &CollectSessionDataRequest) -> Result<Option<String>> {
+    check_cancelled(request)?;
+    let path = request.home.join(".codex/session_index.jsonl");
+    if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+        bail!("Codex session index must not be a symlink");
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_SCAN_BYTES {
+        bail!("Codex session index is not a bounded regular file");
+    }
+
+    let mut latest = None;
+    let mut total = 0_u64;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    loop {
+        check_cancelled(request)?;
+        line.clear();
+        let count = reader.read_until(b'\n', &mut line)?;
+        if count == 0 {
+            break;
+        }
+        total = total
+            .checked_add(u64::try_from(count)?)
+            .context("Codex session index size overflow")?;
+        if total > MAX_SCAN_BYTES {
+            bail!("Codex session index exceeds limit");
+        }
+        if line.len() > MAX_LINE_BYTES {
+            bail!("Codex session index record exceeds limit");
+        }
+        if line.last() != Some(&b'\n') {
+            break;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if value.get("id").and_then(Value::as_str) != Some(request.key.provider_session_id.as_str())
+        {
+            continue;
+        }
+        if let Some(name) = value
+            .get("thread_name")
+            .and_then(Value::as_str)
+            .and_then(|value| sanitize_bounded(value, SESSION_NAME_MAX_CHARS))
+        {
+            latest = Some(name);
+        }
+    }
+
+    check_cancelled(request)?;
+    let after = reader.get_ref().metadata()?;
+    if after.dev() != metadata.dev()
+        || after.ino() != metadata.ino()
+        || after.len() < metadata.len()
+        || after.len() > MAX_SCAN_BYTES
+    {
+        bail!("Codex session index changed identity during collection");
+    }
+    Ok(latest)
 }
 
 fn validate_path(root: &Path, locator: &Path) -> Result<PathBuf> {
@@ -355,6 +429,8 @@ mod collection_tests {
     use crate::{CollectionCancellation, ProviderSessionKey};
     use std::{fs, os::unix::fs::symlink};
 
+    const USAGE_ROW: &str = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":40,"output_tokens":8},"last_token_usage":{"total_tokens":26},"model_context_window":100}}}"#;
+
     fn fixture(session: &str, rows: &[&str]) -> (tempfile::TempDir, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join(".codex/sessions/2026/08/31");
@@ -382,6 +458,24 @@ mod collection_tests {
         }
     }
 
+    fn write_index(temp: &tempfile::TempDir, contents: impl AsRef<[u8]>) -> PathBuf {
+        let path = temp.path().join(".codex/session_index.jsonl");
+        fs::write(&path, contents).unwrap();
+        path
+    }
+
+    fn assert_rollout_usage(enrichment: &SessionEnrichment) {
+        assert_eq!(
+            enrichment.usage,
+            Some(Usage {
+                input_tokens: Some(40),
+                output_tokens: Some(8),
+                context_tokens: Some(26),
+                context_window_percent: Some(26),
+            })
+        );
+    }
+
     #[test]
     fn collector_uses_latest_cumulative_snapshot_and_metadata() {
         let meta = r#"{"type":"session_meta","payload":{"session_id":"s1","title":"Work"}}"#;
@@ -399,6 +493,92 @@ mod collection_tests {
                 context_window_percent: Some(26)
             }
         );
+    }
+
+    #[test]
+    fn collector_uses_last_matching_sanitized_index_name_in_file_order() {
+        let meta =
+            r#"{"type":"session_meta","payload":{"session_id":"s1","title":"Rollout fallback"}}"#;
+        let (temp, path) = fixture("s1", &[meta, USAGE_ROW]);
+        let rows = [
+            serde_json::json!({"id":"s1","thread_name":"Provisional","updated_at":"2099-01-01"}),
+            serde_json::json!({"id":"s10","thread_name":"Prefix mismatch","updated_at":"2100-01-01"}),
+            serde_json::json!({"id":"other","thread_name":"Interleaved","updated_at":"2100-01-01"}),
+            serde_json::json!({"id":"s1","thread_name":"  Latest\nName \u{1b}[31mRed  ","updated_at":"1999-01-01"}),
+        ];
+        write_index(
+            &temp,
+            format!(
+                "{}\n",
+                rows.iter()
+                    .map(Value::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+        );
+
+        let (enrichment, _) = collect(request(&temp, "s1", path)).unwrap();
+        assert_eq!(enrichment.session_name.as_deref(), Some("Latest Name Red"));
+        assert_rollout_usage(&enrichment);
+    }
+
+    #[test]
+    fn collector_falls_back_to_rollout_name_for_unavailable_or_invalid_index() {
+        let assert_fallback = |temp: &tempfile::TempDir, path: PathBuf| {
+            let (enrichment, _) = collect(request(temp, "s1", path)).unwrap();
+            assert_eq!(enrichment.session_name.as_deref(), Some("Rollout fallback"));
+            assert_rollout_usage(&enrichment);
+        };
+        let rollout = [
+            r#"{"type":"session_meta","payload":{"session_id":"s1","title":"Rollout fallback"}}"#,
+            USAGE_ROW,
+        ];
+
+        let (missing_home, missing_rollout) = fixture("s1", &rollout);
+        assert_fallback(&missing_home, missing_rollout);
+
+        let (malformed_home, malformed_rollout) = fixture("s1", &rollout);
+        write_index(&malformed_home, b"not-json\n");
+        assert_fallback(&malformed_home, malformed_rollout);
+
+        let (unsafe_home, unsafe_rollout) = fixture("s1", &rollout);
+        let outside = unsafe_home.path().join("outside.jsonl");
+        fs::write(&outside, b"{}\n").unwrap();
+        symlink(
+            &outside,
+            unsafe_home.path().join(".codex/session_index.jsonl"),
+        )
+        .unwrap();
+        assert_fallback(&unsafe_home, unsafe_rollout);
+
+        let (oversized_home, oversized_rollout) = fixture("s1", &rollout);
+        let oversized = write_index(&oversized_home, b"{}");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(oversized)
+            .unwrap()
+            .set_len(MAX_SCAN_BYTES + 1)
+            .unwrap();
+        assert_fallback(&oversized_home, oversized_rollout);
+
+        let (long_line_home, long_line_rollout) = fixture("s1", &rollout);
+        write_index(&long_line_home, vec![b'x'; MAX_LINE_BYTES + 1]);
+        assert_fallback(&long_line_home, long_line_rollout);
+    }
+
+    #[test]
+    fn collector_ignores_incomplete_index_tail() {
+        let meta =
+            r#"{"type":"session_meta","payload":{"session_id":"s1","title":"Rollout fallback"}}"#;
+        let (temp, path) = fixture("s1", &[meta, USAGE_ROW]);
+        write_index(
+            &temp,
+            b"{\"id\":\"s1\",\"thread_name\":\"Complete\"}\n{\"id\":\"s1\",\"thread_name\":\"Partial",
+        );
+
+        let (enrichment, _) = collect(request(&temp, "s1", path)).unwrap();
+        assert_eq!(enrichment.session_name.as_deref(), Some("Complete"));
+        assert_rollout_usage(&enrichment);
     }
 
     #[test]

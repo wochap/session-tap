@@ -38,3 +38,17 @@ snapshot. Cumulative input/output come from `total_token_usage`; current
 context comes from `last_token_usage.total_tokens`, with a whole used percent
 only for a positive `model_context_window`. Snapshots are never summed, and a
 missing locator or denominator leaves the corresponding fields absent.
+
+During the same collection, SessionTap also scans the provider-owned
+`~/.codex/session_index.jsonl` for records whose `id` exactly matches the
+authenticated Codex session. The sanitized `thread_name` from the last
+complete, valid matching record in file order is used; `updated_at` is not
+interpreted. An index name takes precedence over rollout `session_name` or
+`title`, while the rollout name remains the fallback.
+
+Index collection accepts only a regular, non-symlink file and applies the same
+64 MiB total-scan and 1 MiB line limits as rollout collection. An incomplete
+non-newline-terminated tail is ignored to tolerate concurrent appends.
+Missing, unreadable, malformed, unsafe, oversized, or non-matching index data
+fails open: name enrichment is omitted or falls back to rollout metadata, and
+valid rollout usage remains publishable.

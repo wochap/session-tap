@@ -156,6 +156,17 @@ Provider-session replacement clears prior usage. Artifact scans are
 event-driven and asynchronous, read only complete JSONL lines from a captured
 stable extent, and default to 64 MiB per scan and 1 MiB per line.
 
+## Delete previous Sessiontap data/database
+
+> WARNING: These commands permanently delete all local Sessiontap and Sessiontap Hub state, including their databases.
+
+```sh
+rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/sessiontap"
+rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/sessiontap-hub"
+rm -rf "${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/runtime}/sessiontap"
+rm -rf "${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/runtime}/sessiontap-hub"
+```
+
 ## Provenance
 
 Clean-room MIT implementation based on public provider contracts. See
