@@ -123,3 +123,26 @@ Missing, malformed, oversized, unsupported, cancelled, or temporarily unreadable
 #### Scenario: Superseded scan accumulated partial totals
 - **WHEN** a collector is cancelled after processing part of an artifact
 - **THEN** it publishes none of that generation's partial enrichment
+
+### Requirement: Codex session names come from the latest matching index record
+The Codex collector SHALL inspect the bounded provider-owned `<home>/.codex/session_index.jsonl` artifact during asynchronous session collection, SHALL match records by exact equality between `id` and the authenticated provider agent-session ID, and SHALL publish the sanitized `thread_name` from the last complete, valid matching record in file order as the normalized session name. File order SHALL determine precedence without interpreting `updated_at`, and a verified index name SHALL supersede a rollout-derived name.
+
+#### Scenario: Generated name supersedes provisional name
+- **WHEN** the Codex session index contains multiple complete valid records for the authenticated provider agent-session ID
+- **THEN** the collector publishes the sanitized `thread_name` from the last matching record in file order
+
+#### Scenario: Other sessions are interleaved
+- **WHEN** records for other Codex sessions appear before, between, or after records for the authenticated provider agent-session
+- **THEN** the collector ignores those records and selects the last valid record whose `id` exactly matches the authenticated provider agent-session ID
+
+#### Scenario: Timestamp order differs from file order
+- **WHEN** matching records contain `updated_at` values whose ordering differs from their position in the index
+- **THEN** the collector selects the last matching record in file order and does not use `updated_at` to choose the name
+
+#### Scenario: Concurrent append leaves an incomplete tail
+- **WHEN** the index ends with a JSON fragment that is not newline-terminated
+- **THEN** the collector ignores the incomplete tail and uses the last complete valid matching record
+
+#### Scenario: Index name is unavailable
+- **WHEN** the index is missing, unreadable, unsafe, oversized, malformed, or contains no valid matching name
+- **THEN** the collector omits index-derived name enrichment, retains any verified rollout-derived name fallback, and does not discard valid rollout-derived usage
