@@ -60,7 +60,7 @@ enum Cli {
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
     let Some(first) = args.next() else {
         bail!(
-            "usage: sessiontap <claude|codex|qwen> [args...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
+            "usage: sessiontap <claude|codex|pi|qwen> [args...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
         )
     };
     match first.as_str() {
@@ -84,7 +84,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
         }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
         "--help" | "-h" => bail!(
-            "usage: sessiontap <provider> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
+            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
         ),
         provider => Ok(Cli::Launch {
             provider: provider.into(),
@@ -128,7 +128,7 @@ async fn setup(paths: &AppPaths, provider: Option<String>, action: SetupAction) 
     let config = Config::load(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let providers = provider.map_or_else(
-        || vec!["claude".into(), "codex".into(), "qwen".into()],
+        || vec!["claude".into(), "codex".into(), "pi".into(), "qwen".into()],
         |p| vec![p],
     );
     for p in providers {

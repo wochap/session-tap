@@ -24,6 +24,7 @@ use std::{
 
 pub mod claude;
 pub mod codex;
+pub mod pi;
 pub mod qwen;
 
 pub const ADAPTER_API_VERSION: u32 = 1;
@@ -193,6 +194,7 @@ impl AdapterRegistry {
         let mut adapters: HashMap<String, Box<dyn AgentAdapter>> = HashMap::new();
         adapters.insert("claude".into(), Box::new(claude::ClaudeAdapter));
         adapters.insert("codex".into(), Box::new(codex::CodexAdapter));
+        adapters.insert("pi".into(), Box::new(pi::PiAdapter));
         adapters.insert("qwen".into(), Box::new(qwen::QwenAdapter));
         let aliases = config
             .adapters
@@ -308,7 +310,7 @@ pub(crate) fn tool_activity_update(provider: &str, raw: &Value) -> Option<ToolAc
     })
 }
 
-fn normalized_tool_label(value: &str) -> Option<String> {
+pub(crate) fn normalized_tool_label(value: &str) -> Option<String> {
     let clean = sanitize_bounded(value, TOOL_LABEL_MAX_CHARS)?;
     let mut normalized = String::with_capacity(clean.len());
     for ch in clean.chars() {
@@ -403,8 +405,7 @@ pub(crate) fn provider_metadata(
         .get("effort")
         .and_then(|v| v.get("level").or(Some(v)))
         .and_then(Value::as_str)
-        .filter(|v| matches!(*v, "low" | "medium" | "high" | "max" | "xhigh"))
-        .map(str::to_owned);
+        .and_then(effort_level);
     let permission_mode = bounded_field(raw, &["permission_mode"], 32).filter(|v| {
         matches!(
             v.as_str(),
@@ -430,6 +431,14 @@ pub(crate) fn provider_metadata(
         current_turn_id,
     };
     (metadata != ProviderMetadata::default()).then_some(metadata)
+}
+
+pub(crate) fn effort_level(value: &str) -> Option<String> {
+    matches!(
+        value,
+        "minimal" | "low" | "medium" | "high" | "max" | "xhigh"
+    )
+    .then(|| value.to_owned())
 }
 
 fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
@@ -805,6 +814,12 @@ mod tests {
             ".claude/projects",
             ".codex/sessions",
             ".qwen/projects",
+            ".pi/agent",
+            "pi_event",
+            "settled_status",
+            "agent_settled",
+            "thinking_level",
+            "sessiontap.ts",
             "statusLine",
             "statusline",
         ] {
@@ -1131,11 +1146,15 @@ mod tests {
             ),
             ("claude", json!({"event_name":"Stop"})),
             ("codex", json!({"type":"PermissionRequest"})),
+            ("pi", json!({"pi_event":"agent_settled_soon"})),
+            ("pi", json!({"hook_event_name":"session_start"})),
+            ("pi", json!({"type":"agent_settled"})),
         ];
         for (provider, payload) in cases {
             let outcome = match provider {
                 "claude" => AgentAdapter::normalize(&claude::ClaudeAdapter, &id, &payload),
                 "codex" => AgentAdapter::normalize(&codex::CodexAdapter, &id, &payload),
+                "pi" => AgentAdapter::normalize(&pi::PiAdapter, &id, &payload),
                 "qwen" => AgentAdapter::normalize(&qwen::QwenAdapter, &id, &payload),
                 _ => unreachable!(),
             }

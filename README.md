@@ -1,9 +1,10 @@
 # SessionTap
 
 Local observability for explicitly launched coding-agent terminal sessions
-(Claude Code, Codex, Qwen). It wraps the provider CLI, normalizes its hook and
-side-channel events into a local broker, and exposes machine-readable session
-state. Nothing is captured unless you launch the provider through the wrapper.
+(Claude Code, Codex, Pi, Qwen). It wraps the provider CLI, normalizes its hook
+and side-channel events into a local broker, and exposes machine-readable
+session state. Nothing is captured unless you launch the provider through the
+wrapper.
 
 Target: Linux, Wayland.
 
@@ -39,8 +40,10 @@ state tracking, SQLite writes, event ordering, listeners, and sink retries need
 a persistent owner.
 
 Provider lifecycle hooks are installed into each provider's config file by
-`sessiontap setup`. Each hook runs `sessiontap hook emit <provider>`, which
-reads the hook JSON on stdin and forwards a normalized event to the broker.
+`sessiontap setup`; Pi has no config-file hooks, so setup instead installs one
+SessionTap-managed extension into `~/.pi/agent/extensions/`. Each hook or
+extension handler runs `sessiontap hook emit <provider>`, which reads the hook
+JSON on stdin and forwards a normalized event to the broker.
 
 **Why the wrapper is required:** a hook only reports when the provider process
 carries `SESSIONTAP_INVOCATION_ID` and `SESSIONTAP_CREDENTIAL`, which the
@@ -57,7 +60,7 @@ launching tracked providers or using `status`/`listen`.
 
 ```sh
 # 1. Install managed hooks (writes into each provider's config file)
-sessiontap setup qwen        # or: setup claude / setup codex
+sessiontap setup qwen        # or: setup claude / setup codex / setup pi
 
 # 2. Start the broker in a dedicated terminal or service
 sessiontapd

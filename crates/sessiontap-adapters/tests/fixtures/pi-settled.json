@@ -1,0 +1,14 @@
+{
+  "pi_event": "agent_settled",
+  "session_id": "pi-session-1",
+  "session_name": "adapter work",
+  "model": "anthropic/claude-sonnet-4-5",
+  "thinking_level": "high",
+  "mode": "interactive",
+  "settled_status": "complete",
+  "excerpt": "Refactored the adapter registry and ran the workspace tests.",
+  "input_tokens": 1543,
+  "output_tokens": 402,
+  "context_tokens": 18204,
+  "context_window_percent": 9
+}

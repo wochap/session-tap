@@ -11,7 +11,7 @@ _sessiontap() {
     'inspect-hooks:stream ephemeral raw managed-hook payloads'
     'completions:print shell completions'
   )
-  providers=(claude codex qwen)
+  providers=(claude codex pi qwen)
 
   local cfg=${XDG_CONFIG_HOME:-$HOME/.config}/sessiontap/config.toml
   if [[ -r $cfg ]]; then

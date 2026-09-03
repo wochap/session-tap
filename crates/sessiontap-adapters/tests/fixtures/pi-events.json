@@ -1,0 +1,14 @@
+[
+  {"expected":"provider_session_started","payload":{"pi_event":"session_start","reason":"startup","session_id":"s","mode":"interactive"}},
+  {"expected":"provider_session_ended","payload":{"pi_event":"session_shutdown","reason":"quit","session_id":"s"}},
+  {"expected":"enrichment","payload":{"pi_event":"session_info_changed","session_id":"s","session_name":"Renamed"}},
+  {"expected":"enrichment","payload":{"pi_event":"model_select","session_id":"s","model":"anthropic/claude-sonnet-4-5"}},
+  {"expected":"enrichment","payload":{"pi_event":"thinking_level_select","session_id":"s","thinking_level":"high"}},
+  {"expected":"new_turn","payload":{"pi_event":"before_agent_start","session_id":"s"}},
+  {"expected":"working","payload":{"pi_event":"turn_start","session_id":"s","turn_index":0}},
+  {"expected":"working","payload":{"pi_event":"tool_execution_start","session_id":"s","tool_name":"bash","tool_call_id":"t-1"}},
+  {"expected":"working","payload":{"pi_event":"tool_execution_end","session_id":"s","tool_name":"bash","tool_call_id":"t-1"}},
+  {"expected":"completed","payload":{"pi_event":"agent_settled","session_id":"s","settled_status":"complete","excerpt":"Done","input_tokens":120,"output_tokens":34,"context_tokens":480,"context_window_percent":12}},
+  {"expected":"failed","payload":{"pi_event":"agent_settled","session_id":"s","settled_status":"error","input_tokens":120,"output_tokens":34}},
+  {"expected":"interrupted","payload":{"pi_event":"agent_settled","session_id":"s","settled_status":"aborted"}}
+]
