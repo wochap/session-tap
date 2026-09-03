@@ -7,11 +7,15 @@ Session-gated Claude Code, Codex, and Qwen event ingestion — mapping provider 
 ## Requirements
 
 ### Requirement: Built-in providers are normalized
-SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, and Qwen. Each adapter SHALL own its provider's hook configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported root-agent session, prompt, tool, permission, notification, stop, failure-stop, explicit-idle, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
+SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, Pi, and Qwen. Each adapter SHALL own its provider's hook or extension configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported root-agent session, prompt, tool, permission, notification, stop, failure-stop, explicit-idle, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
 
 #### Scenario: Provider behavior changes independently
 - **WHEN** one provider changes its hook names, payload shape, setup requirements, or launch options
 - **THEN** SessionTap changes that provider's concrete adapter without adding provider conditionals to another provider adapter
+
+#### Scenario: Provider lifecycle arrives through in-process extensions
+- **WHEN** a provider exposes lifecycle through in-process extensions rather than configuration-file hooks
+- **THEN** its adapter owns the managed extension installation and forwards events through the same authenticated hook-emit path used by hook-based providers
 
 #### Scenario: New user turn begins
 - **WHEN** a built-in adapter receives its provider's root-agent user-prompt or turn-start signal
@@ -407,7 +411,7 @@ Each built-in adapter SHALL extract an eligible root hook's provider session ide
 - **THEN** its private collector uses Claude artifact semantics while normalized and public state retain the configured alias identity
 
 ### Requirement: Hook-derived and artifact-derived usage remain distinct
-Adapters SHALL continue to normalize verified usage supplied directly by supported hook fields, but SHALL NOT copy transcript records or artifact-derived calculations into the managed-hook event. Asynchronous artifact results SHALL use local `ProviderArtifact` evidence and SHALL NOT inherit authenticated-hook authority over lifecycle, activity, attention, turn, or tool state.
+Adapters SHALL normalize verified usage supplied directly by supported hook fields, including cumulative usage computed by SessionTap-owned provider-side extensions from live hook events or the provider's own session API. Raw transcript records and conversational content SHALL NOT enter managed-hook events. Asynchronous Rust-side artifact results SHALL use local `ProviderArtifact` evidence and SHALL NOT inherit authenticated-hook authority over lifecycle, activity, attention, turn, or tool state.
 
 #### Scenario: Qwen hook and transcript both expose usage
 - **WHEN** a Qwen hook contains verified top-level usage and the transcript later yields a complete usage snapshot
@@ -416,3 +420,79 @@ Adapters SHALL continue to normalize verified usage supplied directly by support
 #### Scenario: Artifact parser sees lifecycle-like content
 - **WHEN** a transcript record contains fields resembling hook lifecycle or attention data
 - **THEN** the collector emits no lifecycle, activity, reason, turn, or tool assertion from that content
+
+#### Scenario: Owned extension accumulates cumulative usage
+- **WHEN** a SessionTap-owned provider extension accumulates usage from live hook events and seeds totals from the provider's own session API for a session with existing entries
+- **THEN** the adapter normalizes the cumulative totals as managed-hook usage and no transcript record or conversational content enters the hook event
+
+### Requirement: Pi hooks are installed as one managed extension file
+Pi hook installation SHALL manage exactly one SessionTap-owned TypeScript extension file inside pi's user extension directory, identified by a SessionTap ownership marker and embedding the resolved SessionTap executable path. Setup SHALL be idempotent and SHALL refresh the managed file when its content or executable path drifts. Doctor SHALL verify presence, marker, and executable path without modifying anything. Removal SHALL delete only the marked SessionTap file. Installation SHALL NOT create, modify, or remove any other extension in that directory, and the managed extension SHALL load without project trust in every pi run mode.
+
+#### Scenario: User-authored extensions coexist
+- **WHEN** setup runs against a pi extension directory containing user-authored extensions
+- **THEN** only the SessionTap-managed file is written or refreshed and the user extensions remain byte-identical
+
+#### Scenario: Doctor detects drift
+- **WHEN** the managed file is missing, edited, or embeds a stale executable path
+- **THEN** doctor reports degraded Pi observability without modifying the directory
+
+#### Scenario: Removal is ownership-scoped
+- **WHEN** hook removal runs for pi
+- **THEN** only the marked SessionTap file is deleted and every other extension remains in place
+
+#### Scenario: Unwrapped pi launches stay untracked
+- **WHEN** pi runs directly without SessionTap invocation context
+- **THEN** the managed extension's emit path exits silently and no event is attributed to any invocation
+
+### Requirement: Pi event forwarding never delays or alters pi
+Managed pi extension handlers SHALL return synchronously without handing pi an awaited delivery promise, SHALL forward each bounded payload by spawning a detached `sessiontap hook emit pi` child process carrying JSON on stdin, and SHALL treat every delivery failure as a silent no-op. The extension SHALL NOT write to stdout or stderr. Pi startup latency, turn latency, exit behavior, and protocol streams SHALL be identical with and without the broker.
+
+#### Scenario: Broker unavailable
+- **WHEN** sessiontapd is not running and pi emits lifecycle events
+- **THEN** pi startup, turns, and exit proceed unchanged and every failed delivery stays silent
+
+#### Scenario: Protocol modes keep stdout clean
+- **WHEN** pi runs in json or rpc mode with the managed extension loaded
+- **THEN** the extension writes nothing to stdout or stderr and the protocol stream is unaltered
+
+#### Scenario: Concurrent tool events forward independently
+- **WHEN** pi emits interleaved tool execution events
+- **THEN** each forwarding is independent and fire-and-forget, and no handler waits on another delivery
+
+### Requirement: Pi attention signals are absent by contract
+Pi exposes no permission or approval gate and no built-in elicitation tool, so the Pi adapter SHALL NOT emit waiting_approval or waiting_input for any pi event. Pi's `agent_settled` event SHALL be the only authoritative terminal boundary: it SHALL be classified into completed, failed, or interrupted using the settled message state, and `agent_end` SHALL NOT be treated as terminal. Completed pi turns SHALL carry a bounded last-assistant excerpt captured from the immediately preceding turn end through the existing synchronous reason path.
+
+#### Scenario: Tools run without approval
+- **WHEN** pi executes tools during a turn
+- **THEN** the adapter emits working and tool activity only and never emits waiting_approval
+
+#### Scenario: Settled after normal completion
+- **WHEN** `agent_settled` arrives with a completed terminal message state
+- **THEN** the adapter emits completed with the bounded assistant excerpt as the status reason
+
+#### Scenario: Settled after error or abort
+- **WHEN** `agent_settled` arrives with an error or aborted terminal message state
+- **THEN** the adapter emits failed or interrupted respectively without a completed reason
+
+#### Scenario: Attempt end is not terminal
+- **WHEN** `agent_end` arrives while retry, compaction, or queued follow-up may continue
+- **THEN** the adapter emits no terminal event and no status reason
+
+### Requirement: Pi usage is hook-derived and cumulative
+The Pi adapter SHALL normalize cumulative usage computed by the managed extension: token totals accumulated from per-turn usage in live turn-end payloads, seeded at session start from pi's own session API whenever the opened session already contains entries, plus context tokens and context-window percentage from live context usage at settled time. Input totals SHALL include cached read and write tokens. Model and thinking-level metadata SHALL remain hook-derived enrichment. The adapter SHALL NOT read pi session artifacts from Rust, and usage fields the extension cannot verify SHALL remain absent.
+
+#### Scenario: New session accumulates from live turns
+- **WHEN** pi starts a new session and completes turns
+- **THEN** each settled event carries cumulative input and output totals accumulated from turn-end usage
+
+#### Scenario: Continued session seeds from the session API
+- **WHEN** pi is launched with an explicit continue or resume selection into a session with existing entries
+- **THEN** the extension seeds totals from pi's session API at session start and later settled events carry totals including the prior history
+
+#### Scenario: Context usage at settled
+- **WHEN** a settled event forwards a live context token estimate and window percentage
+- **THEN** the adapter emits bounded normalized context usage fields alongside the cumulative totals
+
+#### Scenario: Metadata changes mid-session
+- **WHEN** pi reports a model or thinking-level change
+- **THEN** the adapter emits enrichment with the sanitized model and effort values and no usage synthesis
