@@ -1,4 +1,4 @@
-use crate::Broker;
+use anyhow::Result;
 use sessiontap_adapters::{
     AdapterRegistry, BoundedDiagnostic, CollectSessionDataRequest, CollectionCancellation,
     CollectionOutcome, OpaqueCursor, ProviderSessionKey, SessionEnrichment,
@@ -18,13 +18,25 @@ use tokio::sync::{Notify, Semaphore};
 const DEBOUNCE_QUIET: Duration = Duration::from_millis(150);
 const MAX_DEFERRAL: Duration = Duration::from_secs(2);
 
+/// Applies a collected enrichment event for one bound invocation. The
+/// implementation re-checks the credential and provider session before
+/// committing, so stale bindings are ignored.
+pub trait EnrichmentApplier: Send + Sync {
+    fn apply_enrichment(
+        &self,
+        invocation: &InvocationId,
+        credential: &str,
+        event: NormalizedEvent,
+    ) -> Result<()>;
+}
+
 #[derive(Clone)]
-pub(crate) struct UsageCoordinator {
+pub struct UsageCoordinator {
     inner: Arc<Inner>,
 }
 
 struct Inner {
-    broker: Broker,
+    applier: Arc<dyn EnrichmentApplier>,
     home: PathBuf,
     registry: Arc<AdapterRegistry>,
     states: Mutex<CoordinatorState>,
@@ -62,15 +74,15 @@ struct Binding {
 }
 
 impl UsageCoordinator {
-    pub(crate) fn new(
-        broker: Broker,
+    pub fn new(
+        applier: Arc<dyn EnrichmentApplier>,
         home: PathBuf,
         registry: Arc<AdapterRegistry>,
         worker_limit: usize,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
-                broker,
+                applier,
                 home,
                 registry,
                 states: Mutex::new(CoordinatorState::default()),
@@ -79,7 +91,7 @@ impl UsageCoordinator {
         }
     }
 
-    pub(crate) fn schedule(
+    pub fn schedule(
         &self,
         configured_provider: String,
         invocation_id: InvocationId,
@@ -328,31 +340,6 @@ impl UsageCoordinator {
             state.bindings.clone()
         };
         for (invocation_id, binding) in bindings {
-            if !self
-                .inner
-                .broker
-                .storage
-                .credential_matches(
-                    &invocation_id,
-                    &key.configured_provider,
-                    &binding.credential,
-                )
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let Ok(snapshot) = self.inner.broker.storage.invocation(&invocation_id) else {
-                continue;
-            };
-            if snapshot.provider != key.configured_provider
-                || snapshot
-                    .provider_session
-                    .as_ref()
-                    .map(|session| session.id.as_str())
-                    != Some(key.provider_session_id.as_str())
-            {
-                continue;
-            }
             let now = chrono::Utc::now();
             let event = NormalizedEvent {
                 schema_version: sessiontap_core::SCHEMA_VERSION,
@@ -372,20 +359,12 @@ impl UsageCoordinator {
                 turn_id: None,
                 tool_activity: None,
             };
-            let publish = self.inner.broker.publish();
-            match self
-                .inner
-                .broker
-                .storage
-                .apply_event_with_context(&event, None, Some(&publish))
+            if let Err(error) =
+                self.inner
+                    .applier
+                    .apply_enrichment(&invocation_id, &binding.credential, event)
             {
-                Ok(Some(update)) => {
-                    let _ = self.inner.broker.updates.send(update);
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    eprintln!("sessiontapd: collected enrichment was not applied: {error}")
-                }
+                eprintln!("sessiontapd: collected enrichment was not applied: {error}");
             }
         }
     }
@@ -396,26 +375,37 @@ mod tests {
     use super::*;
     use sessiontap_adapters::artifact::ArtifactCursor;
     use sessiontap_core::{config::Config, domain::Usage};
-    use sessiontap_storage::Storage;
-    use std::collections::BTreeMap;
-    use tokio::sync::broadcast;
 
-    fn coordinator(temp: &tempfile::TempDir) -> UsageCoordinator {
-        let storage = Arc::new(Storage::open(&temp.path().join("state.db")).unwrap());
-        let (updates, _) = broadcast::channel(16);
-        let broker = Broker {
-            storage,
-            updates,
-            sinks: Arc::new(BTreeMap::new()),
-            source_id: Arc::from("test"),
-            source_name: Arc::new(None),
-        };
-        UsageCoordinator::new(
-            broker,
+    /// Records every applied enrichment instead of committing it.
+    #[derive(Default)]
+    struct RecordingApplier {
+        applied: Mutex<Vec<(InvocationId, String, NormalizedEvent)>>,
+    }
+
+    impl EnrichmentApplier for RecordingApplier {
+        fn apply_enrichment(
+            &self,
+            invocation: &InvocationId,
+            credential: &str,
+            event: NormalizedEvent,
+        ) -> Result<()> {
+            self.applied
+                .lock()
+                .unwrap()
+                .push((invocation.clone(), credential.to_owned(), event));
+            Ok(())
+        }
+    }
+
+    fn coordinator(temp: &tempfile::TempDir) -> (UsageCoordinator, Arc<RecordingApplier>) {
+        let applier = Arc::new(RecordingApplier::default());
+        let coordinator = UsageCoordinator::new(
+            applier.clone(),
             temp.path().to_path_buf(),
             Arc::new(AdapterRegistry::new(&Config::default())),
             2,
-        )
+        );
+        (coordinator, applier)
     }
 
     fn context(adapter: &str, session: &str) -> ArtifactCollectionContext {
@@ -429,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn bindings_share_provider_qualified_state_and_providers_stay_isolated() {
         let temp = tempfile::tempdir().unwrap();
-        let coordinator = coordinator(&temp);
+        let (coordinator, _) = coordinator(&temp);
         let first = InvocationId::new();
         let second = InvocationId::new();
         coordinator.schedule(
@@ -465,7 +455,7 @@ mod tests {
     #[tokio::test]
     async fn newer_event_cancels_running_generation_and_missing_session_does_not_schedule() {
         let temp = tempfile::tempdir().unwrap();
-        let coordinator = coordinator(&temp);
+        let (coordinator, _) = coordinator(&temp);
         let invocation = InvocationId::new();
         coordinator.schedule("qwen".into(), invocation.clone(), "a".into(), None);
         assert!(coordinator.inner.states.lock().unwrap().sessions.is_empty());
@@ -508,50 +498,7 @@ mod tests {
         provider: &str,
         session: &str,
     ) -> (ProviderSessionKey, InvocationId, u64) {
-        use sessiontap_core::domain::{
-            Activity, ActivityConfirmation, Capabilities, InvocationSnapshot, Lifecycle,
-            ProcessMetadata, ProviderSession, derive_status,
-        };
-        let now = chrono::Utc::now();
         let invocation = InvocationId::new();
-        let snapshot = InvocationSnapshot {
-            schema_version: sessiontap_core::SCHEMA_VERSION,
-            revision: 0,
-            invocation_id: invocation.clone(),
-            provider: provider.into(),
-            executable: provider.into(),
-            args: vec![],
-            cwd: "/tmp".into(),
-            process: ProcessMetadata::default(),
-            created_at: now,
-            updated_at: now,
-            lifecycle: Lifecycle::Alive,
-            activity: Activity::Idle,
-            state_started_at: now,
-            last_state_asserted_at: None,
-            activity_confirmation: ActivityConfirmation::Live,
-            last_evidence: None,
-            source_ordering: vec![],
-            current_tool_activity: None,
-            status: derive_status(Lifecycle::Alive, Activity::Idle),
-            provider_session: Some(ProviderSession {
-                id: session.into(),
-                ..ProviderSession::default()
-            }),
-            provider_metadata: None,
-            usage: None,
-            repository: None,
-            multiplexer: None,
-            capabilities: Capabilities::default(),
-            turn_generation: 0,
-            completed_generation: None,
-        };
-        coordinator
-            .inner
-            .broker
-            .storage
-            .register(&snapshot, "credential", None)
-            .unwrap();
         // Scheduling without awaiting keeps the spawned worker parked, so the
         // test drives `settle` directly for the generation it created.
         coordinator.schedule(
@@ -578,9 +525,8 @@ mod tests {
     #[tokio::test]
     async fn unchanged_collection_applies_no_enrichment_and_keeps_cursor() {
         let temp = tempfile::tempdir().unwrap();
-        let coordinator = coordinator(&temp);
+        let (coordinator, applier) = coordinator(&temp);
         let (key, invocation, generation) = register_bound_invocation(&coordinator, "claude", "s1");
-        let storage = coordinator.inner.broker.storage.clone();
         let cursor = ArtifactCursor {
             device: 1,
             inode: 2,
@@ -606,14 +552,19 @@ mod tests {
             ),
             Settled::Done(None)
         ));
-        assert_eq!(
-            storage.invocation(&invocation).unwrap().usage,
-            Some(usage.clone())
-        );
+        {
+            let applied = applier.applied.lock().unwrap();
+            assert_eq!(applied.len(), 1);
+            let (id, credential, event) = &applied[0];
+            assert_eq!(id, &invocation);
+            assert_eq!(credential, "credential");
+            assert_eq!(event.kind, EventKind::Enrichment);
+            assert_eq!(event.provider, "claude");
+            assert_eq!(event.provider_session_id.as_deref(), Some("s1"));
+            assert_eq!(event.usage, Some(usage));
+        }
         assert_eq!(stored_cursor(&coordinator, &key), Some(cursor));
 
-        let revision = storage.revision().unwrap();
-        let mut updates = coordinator.inner.broker.updates.subscribe();
         assert!(matches!(
             coordinator.settle(
                 &key,
@@ -624,25 +575,29 @@ mod tests {
             ),
             Settled::Done(None)
         ));
-        assert_eq!(storage.revision().unwrap(), revision);
-        assert!(updates.try_recv().is_err());
-        assert_eq!(storage.invocation(&invocation).unwrap().usage, Some(usage));
+        assert_eq!(applier.applied.lock().unwrap().len(), 1);
         assert_eq!(stored_cursor(&coordinator, &key), Some(cursor));
+    }
+
+    #[tokio::test]
+    async fn stale_generation_applies_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let (coordinator, applier) = coordinator(&temp);
+        let (key, _, generation) = register_bound_invocation(&coordinator, "claude", "s1");
+        coordinator.apply_if_current(&key, generation + 1, SessionEnrichment::default());
+        assert!(applier.applied.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn unsupported_collection_is_a_silent_no_op() {
         let temp = tempfile::tempdir().unwrap();
-        let coordinator = coordinator(&temp);
-        let (key, invocation, generation) = register_bound_invocation(&coordinator, "pi", "s1");
-        let storage = coordinator.inner.broker.storage.clone();
-        let revision = storage.revision().unwrap();
+        let (coordinator, applier) = coordinator(&temp);
+        let (key, _, generation) = register_bound_invocation(&coordinator, "pi", "s1");
         assert!(matches!(
             coordinator.settle(&key, generation, CollectionOutcome::Unsupported),
             Settled::Done(None)
         ));
-        assert_eq!(storage.revision().unwrap(), revision);
-        assert!(storage.invocation(&invocation).unwrap().usage.is_none());
+        assert!(applier.applied.lock().unwrap().is_empty());
         assert!(stored_cursor(&coordinator, &key).is_none());
         assert!(matches!(
             coordinator.settle(

@@ -1179,11 +1179,13 @@ name = "sessiontapd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "fs2",
  "libc",
  "nix",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "sessiontap-adapters",
@@ -1191,6 +1193,7 @@ dependencies = [
  "sessiontap-storage",
  "tempfile",
  "tokio",
+ "toml",
 ]
 
 [[package]]

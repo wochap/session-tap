@@ -1,6 +1,11 @@
-use crate::ProviderId;
+use crate::{ProviderId, domain::PublicField};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs, io,
+    path::Path,
+    time::Duration,
+};
 
 fn default_version() -> u32 {
     1
@@ -26,6 +31,8 @@ pub struct Config {
     pub adapters: BTreeMap<String, CustomAdapter>,
     #[serde(default)]
     pub sinks: BTreeMap<String, SinkConfig>,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
 }
 
 impl Default for Config {
@@ -37,7 +44,74 @@ impl Default for Config {
             source_name: None,
             adapters: BTreeMap::new(),
             sinks: BTreeMap::new(),
+            daemon: DaemonConfig::default(),
         }
+    }
+}
+
+/// Daemon tuning knobs. Defaults match the values the daemon has always used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DaemonConfig {
+    /// Concurrent provider artifact collections.
+    pub collection_workers: usize,
+    /// Outbox poll interval in milliseconds.
+    pub sink_poll_ms: u64,
+    /// Outbox records delivered per poll.
+    pub outbox_batch: usize,
+    /// Stale-working sweep interval in seconds.
+    pub stale_sweep_secs: u64,
+    /// Local update broadcast capacity before listeners lag.
+    pub update_buffer: usize,
+    /// Attempts after which a permanently rejected delivery is dropped.
+    pub max_rejected_attempts: u32,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            collection_workers: 4,
+            sink_poll_ms: 250,
+            outbox_batch: 100,
+            stale_sweep_secs: 60,
+            update_buffer: 1024,
+            max_rejected_attempts: 16,
+        }
+    }
+}
+
+impl DaemonConfig {
+    #[must_use]
+    pub const fn sink_poll(&self) -> Duration {
+        Duration::from_millis(self.sink_poll_ms)
+    }
+
+    #[must_use]
+    pub const fn stale_sweep(&self) -> Duration {
+        Duration::from_secs(self.stale_sweep_secs)
+    }
+
+    /// Rejects zero values and a poll interval above one minute.
+    pub fn validate(&self) -> Result<(), String> {
+        for (key, value) in [
+            ("collection_workers", self.collection_workers as u64),
+            ("sink_poll_ms", self.sink_poll_ms),
+            ("outbox_batch", self.outbox_batch as u64),
+            ("stale_sweep_secs", self.stale_sweep_secs),
+            ("update_buffer", self.update_buffer as u64),
+            (
+                "max_rejected_attempts",
+                u64::from(self.max_rejected_attempts),
+            ),
+        ] {
+            if value == 0 {
+                return Err(format!("daemon.{key} must be at least 1"));
+            }
+        }
+        if self.sink_poll_ms > 60_000 {
+            return Err("daemon.sink_poll_ms must be at most 60000".into());
+        }
+        Ok(())
     }
 }
 
@@ -71,8 +145,8 @@ pub enum SinkConfig {
         fields: Vec<String>,
     },
     /// Canonical hub sink delivering versioned source snapshots and updates.
-    /// Hub sinks always deliver the complete normalized envelope and ignore
-    /// field selection.
+    /// Hub sinks always deliver the complete normalized envelope; a non-empty
+    /// `fields` list is rejected by validation.
     Hub {
         #[serde(default)]
         enabled: bool,
@@ -89,6 +163,9 @@ pub enum SinkConfig {
         /// explicitly trusted for cleartext HTTP delivery.
         #[serde(default)]
         trusted_addresses: Vec<String>,
+        /// Accepted only so validation can name the sink; must stay empty.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fields: Vec<String>,
     },
 }
 fn default_timeout_ms() -> u64 {
@@ -123,6 +200,18 @@ impl SinkConfig {
             Self::Stdout { fields, .. } | Self::Http { fields, .. } => fields,
             Self::Hub { .. } => &[],
         }
+    }
+
+    /// Resolves the configured field selection. An empty set means the
+    /// complete public view.
+    pub fn public_fields(&self) -> Result<BTreeSet<PublicField>, String> {
+        self.fields()
+            .iter()
+            .map(|name| {
+                serde_json::from_value::<PublicField>(serde_json::Value::String(name.clone()))
+                    .map_err(|_| format!("unknown public field '{name}'"))
+            })
+            .collect()
     }
 
     #[must_use]
@@ -218,15 +307,24 @@ impl Config {
                 ));
             }
         }
+        self.daemon.validate()?;
         for (name, sink) in &self.sinks {
+            sink.public_fields()
+                .map_err(|error| format!("sink '{name}': {error}"))?;
             match sink {
                 SinkConfig::Http { url, .. } => validate_sink_url(url, &[])?,
                 SinkConfig::Hub {
                     enabled,
                     url,
                     trusted_addresses,
+                    fields,
                     ..
                 } => {
+                    if !fields.is_empty() {
+                        return Err(format!(
+                            "sink '{name}' is a hub sink and does not accept fields; hub envelopes are always complete"
+                        ));
+                    }
                     validate_sink_url(url, trusted_addresses)?;
                     if *enabled && self.source_id.as_deref().is_none_or(str::is_empty) {
                         return Err(format!(
@@ -384,10 +482,19 @@ trusted_addresses = ["192.168.100.1"]
     }
 
     #[test]
-    fn hub_sink_rejects_unknown_fields_and_remote_http() {
+    fn hub_sink_rejects_field_selection_and_remote_http() {
+        let with_fields: Config = toml::from_str(
+            "version=1\nsource_id='host'\n[sinks.hub]\ntype='hub'\nurl='http://127.0.0.1:9/x'\nfields=['cwd']\n",
+        )
+        .unwrap();
+        let error = with_fields.validate().unwrap_err();
+        assert!(
+            error.contains("'hub'") && error.contains("fields"),
+            "{error}"
+        );
         assert!(
             toml::from_str::<Config>(
-                "version=1\nsource_id='host'\n[sinks.hub]\ntype='hub'\nurl='http://127.0.0.1:9/x'\nfields=['cwd']\n"
+                "version=1\nsource_id='host'\n[sinks.hub]\ntype='hub'\nurl='http://127.0.0.1:9/x'\nbogus=1\n"
             )
             .is_err()
         );
@@ -430,5 +537,93 @@ fields = ["cwd"]
         assert!(!c.sinks["debug"].is_hub());
         assert_eq!(c.sinks["archive"].fields(), &["cwd".to_owned()]);
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn unknown_sink_field_is_rejected_with_sink_and_field_names() {
+        let c: Config = toml::from_str(
+            "version=1\n[sinks.archive]\ntype='http'\nurl='http://127.0.0.1:9/x'\nfields=['status','transcript']\n",
+        )
+        .unwrap();
+        let error = c.validate().unwrap_err();
+        assert!(error.contains("'archive'"), "{error}");
+        assert!(error.contains("'transcript'"), "{error}");
+        assert_eq!(
+            c.sinks["archive"].public_fields().unwrap_err(),
+            "unknown public field 'transcript'"
+        );
+        let ok: Config =
+            toml::from_str("version=1\n[sinks.debug]\ntype='stdout'\nfields=['status','usage']\n")
+                .unwrap();
+        assert_eq!(
+            ok.sinks["debug"].public_fields().unwrap(),
+            BTreeSet::from([PublicField::Status, PublicField::Usage])
+        );
+    }
+
+    #[test]
+    fn daemon_section_defaults_to_historical_values() {
+        let c: Config = toml::from_str("version=1\n").unwrap();
+        assert_eq!(c.daemon, DaemonConfig::default());
+        assert_eq!(c.daemon.collection_workers, 4);
+        assert_eq!(c.daemon.sink_poll(), Duration::from_millis(250));
+        assert_eq!(c.daemon.outbox_batch, 100);
+        assert_eq!(c.daemon.stale_sweep(), Duration::from_secs(60));
+        assert_eq!(c.daemon.update_buffer, 1024);
+        assert_eq!(c.daemon.max_rejected_attempts, 16);
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn daemon_section_overrides_and_keeps_other_defaults() {
+        let c: Config =
+            toml::from_str("version=1\n[daemon]\nsink_poll_ms=1000\ncollection_workers=2\n")
+                .unwrap();
+        assert_eq!(c.daemon.sink_poll_ms, 1000);
+        assert_eq!(c.daemon.collection_workers, 2);
+        assert_eq!(c.daemon.outbox_batch, 100);
+        c.validate().unwrap();
+        assert!(toml::from_str::<Config>("version=1\n[daemon]\nbogus=1\n").is_err());
+    }
+
+    #[test]
+    fn daemon_section_rejects_zero_and_slow_poll() {
+        for key in [
+            "collection_workers",
+            "sink_poll_ms",
+            "outbox_batch",
+            "stale_sweep_secs",
+            "update_buffer",
+            "max_rejected_attempts",
+        ] {
+            let c: Config = toml::from_str(&format!("version=1\n[daemon]\n{key}=0\n")).unwrap();
+            let error = c.validate().unwrap_err();
+            assert!(error.contains(key), "{error}");
+        }
+        let c: Config = toml::from_str("version=1\n[daemon]\nsink_poll_ms=60001\n").unwrap();
+        assert!(c.validate().unwrap_err().contains("sink_poll_ms"));
+    }
+
+    #[test]
+    fn cli_doc_config_examples_parse_and_validate() {
+        let doc = include_str!("../../../docs/cli.md");
+        let examples: Vec<&str> = doc
+            .split("```toml\n")
+            .skip(1)
+            .map(|block| block.split("```").next().unwrap())
+            .collect();
+        assert!(examples.len() >= 4);
+        for example in examples {
+            let source = if example.contains("version") {
+                example.to_owned()
+            } else {
+                format!("version = 1\n{example}")
+            };
+            let config: Config =
+                toml::from_str(&source).unwrap_or_else(|error| panic!("{error}\n{example}"));
+            config
+                .validate()
+                .unwrap_or_else(|error| panic!("{error}\n{example}"));
+        }
     }
 }

@@ -223,6 +223,7 @@ fn fixture_replay_matches_snapshot() {
                 timeout_ms: 100,
                 max_payload_bytes: 64 * 1024,
                 trusted_addresses: vec![],
+                fields: vec![],
             },
         ),
         (

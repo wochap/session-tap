@@ -1724,6 +1724,7 @@ mod tests {
                 timeout_ms: 100,
                 max_payload_bytes,
                 trusted_addresses: vec![],
+                fields: vec![],
             },
         )])
     }

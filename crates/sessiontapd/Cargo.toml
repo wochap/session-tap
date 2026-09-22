@@ -5,11 +5,19 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "sessiontapd"
+path = "src/main.rs"
+
 [dependencies]
 sessiontap-core = { path = "../sessiontap-core" }
 sessiontap-adapters = { path = "../sessiontap-adapters" }
 sessiontap-storage = { path = "../sessiontap-storage" }
 anyhow.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 fs2.workspace = true
 libc.workspace = true
@@ -21,6 +29,8 @@ tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+toml.workspace = true
+rusqlite.workspace = true
 
 [lints]
 workspace = true

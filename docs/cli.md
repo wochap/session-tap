@@ -117,6 +117,23 @@ timeout_ms = 3000
 max_payload_bytes = 262144
 ```
 
+Stdout and HTTP sinks may set `fields` to a list of public field names
+(`invocation_id`, `provider`, `status`, `reason`, `cwd`, `created_at`,
+`updated_at`, `session`, `metadata`, `usage`, `repository`). Each delivered
+update then carries only those view fields plus `invocation_id`, and its
+`changed` list is filtered to the same set. An empty or absent list delivers
+the complete public view. An unknown name fails configuration validation with
+a message naming the sink and the field. `timeout_ms` bounds every HTTP and hub
+delivery; a receiver that does not answer in time is retried with backoff.
+
+```toml
+[sinks.status]
+type = "http"
+enabled = true
+url = "http://127.0.0.1:8787/status"
+fields = ["status", "usage"]
+```
+
 Hub sinks deliver the canonical versioned source stream (snapshots and
 updates) to a `sessiontap-hub` service and require a stable `source_id`; see
 `docs/hub.md`. Cleartext HTTP is limited to loopback or the sink's explicitly
@@ -133,6 +150,13 @@ url = "http://127.0.0.1:8931/ingest"
 token_file = "/run/keys/sessiontap-hub-token"
 ```
 
+Hub sinks always deliver complete envelopes, so `fields` on a hub sink is a
+configuration error (`sink '<name>' is a hub sink and does not accept fields`)
+and the daemon refuses to start. A hub `409` whose body is
+`{"error":"snapshot_required"}` makes the daemon resend a source snapshot and
+then the held update; any other `409` or `4xx` is a permanent rejection that is
+retried a bounded number of times and then dropped.
+
 Failures are retried from the durable outbox. Each sink backlog is capped at
 1,024 records so a persistently unavailable receiver cannot grow broker storage
 without bound; local normalized state continues to commit after the cap is
@@ -144,6 +168,20 @@ provider fields never enter stdout or HTTP sink payloads. Configured sinks are
 trusted by the single operator and may receive explicitly selected bounded
 status summaries. Public cwd, repository paths, session names, metadata, usage,
 and bounded reasons remain potentially sensitive observer data.
+
+Daemon tuning lives in an optional `[daemon]` section. Every key defaults to
+the value shown, so omitting the section keeps the previous behavior. Values
+must be at least 1, and `sink_poll_ms` must be at most 60000:
+
+```toml
+[daemon]
+collection_workers = 4      # concurrent provider artifact collections
+sink_poll_ms = 250          # outbox poll interval
+outbox_batch = 100          # outbox records delivered per poll
+stale_sweep_secs = 60       # stale-working sweep interval
+update_buffer = 1024        # listen broadcast capacity before a listener lags
+max_rejected_attempts = 16  # attempts before a rejected delivery is dropped
+```
 
 ## Shell completions
 
