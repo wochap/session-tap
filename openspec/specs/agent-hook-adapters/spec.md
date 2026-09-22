@@ -190,7 +190,7 @@ The Codex adapter SHALL satisfy the installed Codex version's hook trust require
 - **THEN** it reports degraded Codex observability without modifying unrelated trust entries
 
 ### Requirement: Qwen remains an interactive TUI
-The Qwen adapter SHALL use hooks as its baseline and MAY add Qwen's dedicated dual-output side channel for richer events, but SHALL NOT select headless stream-json output for an interactive launch.
+The Qwen adapter SHALL use hooks as its baseline and MAY add Qwen's dedicated dual-output side channel for richer events, but SHALL NOT select headless stream-json output for an interactive launch. When probing for side-channel support, the adapter SHALL run the executable resolved for the launched provider or alias, not a fixed command name. A side channel prepared by an adapter SHALL be consumed by the launcher through the adapter contract rather than a provider-specific type.
 
 #### Scenario: Qwen supports dual output
 - **WHEN** the installed Qwen version supports a non-TUI JSON side channel and the user did not supply a conflicting side-channel option
@@ -200,8 +200,12 @@ The Qwen adapter SHALL use hooks as its baseline and MAY add Qwen's dedicated du
 - **WHEN** Qwen arguments already select a JSON side-channel destination
 - **THEN** SessionTap preserves the user's argument and uses hook-only observation rather than overriding it
 
+#### Scenario: Alias inherits the Qwen adapter
+- **WHEN** a configured alias with a different executable inherits the Qwen adapter
+- **THEN** the dual-output probe runs that alias's executable and the launcher tails whatever side channel the adapter returns
+
 ### Requirement: Adapter behavior is versioned and extensible
-The core SHALL depend on the adapter trait rather than provider conditionals. The registry SHALL instantiate separate built-in Claude, Codex, and Qwen adapter types, and configuration SHALL allow a custom executable name to inherit one built-in adapter's complete behavior and redaction policy.
+The core SHALL depend on the adapter trait rather than provider conditionals. The registry SHALL expose a distinct built-in adapter for each of Claude, Codex, Qwen, and Pi, keyed by a typed provider identity, and SHALL expose the list of built-in identities so callers do not hardcode it. Each built-in adapter MAY be composed from provider-owned hook-dialect and session-collector components through one shared driver, provided every provider still resolves to its own distinct adapter type. Configuration SHALL allow a custom executable name to inherit one built-in adapter's complete behavior and redaction policy, and SHALL reject an `inherits` value that names no built-in adapter at configuration load.
 
 #### Scenario: Claude-compatible wrapper
 - **WHEN** the user configures `company-claude` to inherit the Claude adapter
@@ -209,7 +213,15 @@ The core SHALL depend on the adapter trait rather than provider conditionals. Th
 
 #### Scenario: Built-in adapter registration
 - **WHEN** the adapter registry is initialized
-- **THEN** each built-in provider resolves to its own concrete adapter implementation rather than a dialect-parameterized generic implementation
+- **THEN** each of Claude, Codex, Qwen, and Pi resolves to its own distinct adapter type whose provider-specific behavior lives in that provider's module
+
+#### Scenario: Alias inherits an unknown adapter
+- **WHEN** configuration declares an alias whose `inherits` value is not a built-in provider identity
+- **THEN** configuration loading fails with a diagnostic naming the alias and the accepted identities
+
+#### Scenario: CLI lists supported providers
+- **WHEN** the CLI validates or documents the provider argument
+- **THEN** the accepted values come from the registry's built-in identities and configured aliases, not from a literal list in the CLI
 
 ### Requirement: Implementation is clean-room MIT work
 The project SHALL NOT copy or mechanically transform external non-MIT source, tests, generated hook scripts, or implementation-specific trust algorithms and SHALL document the public or independently captured basis for each provider mapping.
@@ -249,15 +261,19 @@ A provider-specific collector that reads agent-owned stores, histories, or trans
 - **THEN** only that concrete provider module and its tests require provider-specific changes
 
 ### Requirement: Common adapter code delegates all provider behavior
-The adapter crate's common library module SHALL contain only provider-neutral contracts, registry selection, normalized shared types, and delegation. Claude-, Codex-, and Qwen-specific hook names, setup rules, locators, paths, artifact reads, JSON fields, cursors, deduplication, metadata extraction, and accounting MUST reside in `claude.rs`, `codex.rs`, and `qwen.rs` respectively.
+The adapter crate's common library module SHALL contain only provider-neutral contracts, registry selection, normalized shared types, the shared driver, optional provider-neutral file and cursor helper functions, and delegation. It SHALL NOT branch on provider identity or dialect. Claude-, Codex-, Qwen-, and Pi-specific hook names, setup rules, locators, paths, record decoding, JSON fields, cursor semantics, deduplication, metadata extraction, tool-activity mappings, and accounting MUST reside in `claude.rs`, `codex.rs`, `qwen.rs`, and `pi.rs` respectively, expressed through the provider-owned dialect and collector components. Shared helpers MUST NOT own a provider's read loop or decode its records.
 
 #### Scenario: Registry selects a provider
 - **WHEN** common code resolves a configured provider to a concrete adapter
-- **THEN** all hook normalization and session collection behavior is delegated through the standard API without provider-specific branches in the common module
+- **THEN** all hook normalization, tool-activity mapping, and session collection behavior is delegated through the standard API without provider-specific branches in the common module
 
 #### Scenario: Configured alias inherits an adapter
 - **WHEN** a configured provider alias inherits the Qwen adapter
 - **THEN** common code retains the configured identity while the Qwen module exclusively owns Qwen hook and artifact behavior
+
+#### Scenario: Common module guard
+- **WHEN** the adapter crate test suite runs
+- **THEN** a guard test fails if the common module matches on provider identity or dialect values, or contains provider artifact paths, record field names, or hook event names
 
 ### Requirement: Provider event dispatch is exact and fail-closed
 Each built-in adapter SHALL classify event names, notification subtypes, and special tool names using provider-owned exact mappings with explicit accepted spelling variants. An unsupported value SHALL produce `AdapterOutcome::Ignored` unless that exact value is explicitly defined as provider-neutral enrichment.
@@ -362,7 +378,7 @@ Every normalized adapter event SHALL carry typed evidence identifying its observ
 - **THEN** it omits source ordering and the normalized event remains valid
 
 ### Requirement: Adapters emit bounded root tool activity
-A built-in adapter SHALL convert supported root-agent tool lifecycle payloads into provider-neutral tool activity updates containing only phase, a bounded normalized tool label, an optional bounded correlation ID, and optional allowlisted safe detail. It SHALL discard arbitrary tool input, commands, URLs, results, errors, and provider-specific objects.
+A built-in adapter SHALL convert supported root-agent tool lifecycle payloads into provider-neutral tool activity updates containing only phase, a bounded normalized tool label, an optional bounded correlation ID, and optional allowlisted safe detail. It SHALL discard arbitrary tool input, commands, URLs, results, errors, and provider-specific objects. The workspace used to bind file targets SHALL come from the authenticated launch context supplied to normalization, never from a field in the hook payload.
 
 #### Scenario: Root tool starts
 - **WHEN** a supported root pre-tool event contains a valid tool name and correlation ID
@@ -379,6 +395,10 @@ A built-in adapter SHALL convert supported root-agent tool lifecycle payloads in
 #### Scenario: Tool targets a workspace file
 - **WHEN** an exact provider/tool mapping permits a file target that canonicalizes beneath the invocation workspace
 - **THEN** the adapter may emit a bounded workspace-relative target as safe activity detail
+
+#### Scenario: Payload claims a workspace
+- **WHEN** a hook payload contains a field naming a workspace directory
+- **THEN** the adapter ignores that field and binds file targets only to the workspace supplied by the authenticated launch context
 
 #### Scenario: Tool input contains a command or URL
 - **WHEN** arbitrary tool input contains a shell command, URL, credential, nested object, or unapproved scalar

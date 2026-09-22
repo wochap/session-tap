@@ -66,7 +66,7 @@ The coordinator SHALL key debounce state by provider-qualified agent-session ID.
 - **THEN** each session maintains independent debounce and collection state
 
 ### Requirement: Provider collectors support cooperative cancellation
-Every provider collector SHALL observe cancellation before file access and at bounded checkpoints during reading and parsing. A cancelled or superseded generation MUST NOT publish enrichment, and no two collectors for one provider-qualified agent-session SHALL run concurrently.
+Every provider collector SHALL observe cancellation before file access and at bounded checkpoints during reading and parsing. Cancellation SHALL surface as a typed outcome distinct from collection failure, not as an error message that callers compare by text. A cancelled or superseded generation MUST NOT publish enrichment, and no two collectors for one provider-qualified agent-session SHALL run concurrently.
 
 #### Scenario: Cancellation occurs during a file read
 - **WHEN** a newer event cancels collection while a non-cancellable filesystem operation is executing
@@ -75,6 +75,10 @@ Every provider collector SHALL observe cancellation before file access and at bo
 #### Scenario: Cancellation occurs between records
 - **WHEN** a provider collector observes cancellation at a record boundary
 - **THEN** it stops without returning a publishable partial snapshot
+
+#### Scenario: Cancellation is reported
+- **WHEN** a collector stops because its generation was cancelled
+- **THEN** the collection outcome is the cancelled variant, no failure diagnostic is recorded, and the last verified enrichment is preserved
 
 ### Requirement: Artifact access remains authenticated, private, and bounded
 Each provider implementation SHALL bind its locator to an authenticated configured provider, concrete adapter, provider agent-session, and eligible invocation. It SHALL enforce its own allowed provider storage roots, file identity requirements, read limits, and session-agreement checks. Paths, raw records, cursor internals, and diagnostics MUST NOT enter normalized snapshots, public output, sinks, or hub envelopes.
@@ -114,7 +118,7 @@ Each provider module SHALL calculate session totals and current context accordin
 - **THEN** the Qwen collector calculates totals only from its verified assistant records
 
 ### Requirement: Collection failures preserve verified state
-Missing, malformed, oversized, unsupported, cancelled, or temporarily unreadable provider artifacts SHALL NOT fail hooks, lifecycle events, or provider execution. SessionTap SHALL preserve the last verified enrichment, emit no estimated or partial replacement, and expose only bounded local diagnostics.
+Missing, malformed, oversized, unsupported, cancelled, or temporarily unreadable provider artifacts SHALL NOT fail hooks, lifecycle events, or provider execution. SessionTap SHALL preserve the last verified enrichment, emit no estimated or partial replacement, and expose only bounded local diagnostics. A provider that does not collect artifacts SHALL report an unsupported outcome rather than a failure diagnostic. An artifact whose identity and stable length match the prior cursor SHALL report an unchanged outcome and SHALL NOT re-publish enrichment.
 
 #### Scenario: Provider record is malformed
 - **WHEN** a provider-specific parser cannot produce an exact normalized result
@@ -123,6 +127,18 @@ Missing, malformed, oversized, unsupported, cancelled, or temporarily unreadable
 #### Scenario: Superseded scan accumulated partial totals
 - **WHEN** a collector is cancelled after processing part of an artifact
 - **THEN** it publishes none of that generation's partial enrichment
+
+#### Scenario: Provider has no artifact collector
+- **WHEN** collection is scheduled for a provider whose usage arrives only through managed hooks
+- **THEN** the collector returns the unsupported outcome, records no diagnostic, and hook-derived enrichment remains untouched
+
+#### Scenario: Artifact is unchanged since the prior collection
+- **WHEN** a collector receives the prior cursor and the artifact's device, inode, and stable length still match it
+- **THEN** the collector returns the unchanged outcome without reading records and SessionTap publishes no new enrichment
+
+#### Scenario: Artifact was rotated or truncated
+- **WHEN** the prior cursor exists but the artifact identity or stable length differs
+- **THEN** the collector rescans from the beginning and returns a fresh cursor with the result
 
 ### Requirement: Codex session names come from the latest matching index record
 The Codex collector SHALL inspect the bounded provider-owned `<home>/.codex/session_index.jsonl` artifact during asynchronous session collection, SHALL match records by exact equality between `id` and the authenticated provider agent-session ID, and SHALL publish the sanitized `thread_name` from the last complete, valid matching record in file order as the normalized session name. File order SHALL determine precedence without interpreting `updated_at`, and a verified index name SHALL supersede a rollout-derived name.
