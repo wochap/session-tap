@@ -1,0 +1,35 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_input",
+      "observed_at": "2026-08-28T15:08:40.299Z",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "permission_mode": "yolo"
+      },
+      "provider_session_id": "qwen-session",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "label": "ask_user_question",
+        "phase": "attention"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "generic_input",
+      "summary": "Input requested"
+    }
+  }
+]

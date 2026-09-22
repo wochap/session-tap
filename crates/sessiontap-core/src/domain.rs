@@ -371,7 +371,7 @@ pub struct Usage {
 /// local control protocol. It is deliberately absent from snapshots.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactCollectionContext {
-    pub adapter_identity: String,
+    pub adapter_identity: crate::ProviderId,
     pub provider_session_id: String,
     pub locator: PathBuf,
 }

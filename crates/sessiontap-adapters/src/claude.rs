@@ -1,25 +1,27 @@
 use crate::{
-    AgentAdapter, BoundedDiagnostic, CollectSessionDataRequest, CollectionOutcome, OpaqueCursor,
-    SessionEnrichment, SetupAction, SetupReport, bounded_field, completed_reason_context,
-    failed_reason_context, is_subagent_payload, merge_hook_config, provider_metadata,
-    sanitize_bounded, status_reason_context, tool_activity_update,
+    CollectSessionDataRequest, NormalizeContext, OpaqueCursor, SessionEnrichment, SetupAction,
+    SetupReport, ToolDetailPolicy,
+    artifact::{
+        ArtifactCursor, CollectError, Collected, SessionCollector, check_cancelled,
+        cursor_unchanged, open_bounded_nofollow, optional_u64, validate_under_root,
+    },
+    bounded_field,
+    dialect::HookDialect,
+    driver::HookAdapter,
+    merge_hook_config, provider_metadata, sanitize_bounded, tool_activity,
 };
 use anyhow::{Context, Result, bail};
-use async_trait::async_trait;
-use chrono::Utc;
 use serde_json::Value;
+use sessiontap_core::ProviderId;
 use sessiontap_core::domain::{
-    AdapterOutcome, ArtifactCollectionContext, EventEvidence, EventKind, InvocationId,
-    NormalizedAdapterEvent, NormalizedEvent, Usage,
+    ArtifactCollectionContext, EventKind, ProviderMetadata, TOOL_CORRELATION_ID_MAX_CHARS,
+    ToolActivityPhase, ToolActivityUpdate, Usage,
 };
 use std::{
     collections::BTreeSet,
-    fs::{self, OpenOptions},
     io::{BufRead, BufReader},
-    os::unix::{fs::MetadataExt, fs::OpenOptionsExt},
     path::{Path, PathBuf},
 };
-use uuid::Uuid;
 
 pub const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
@@ -36,147 +38,112 @@ pub const HOOK_EVENTS: &[&str] = &[
     "StopFailure",
     "SessionEnd",
 ];
-pub struct ClaudeAdapter;
 
-#[cfg(test)]
-impl ClaudeAdapter {
-    /// Test helper for cases that expect a normalized root event.
-    pub fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
-        match <Self as AgentAdapter>::normalize(self, id, raw)? {
-            AdapterOutcome::Event(event) => Ok(*event),
-            AdapterOutcome::Ignored => anyhow::bail!("ignored subagent hook"),
-        }
-    }
+pub type ClaudeAdapter = HookAdapter<ClaudeDialect, ClaudeCollector>;
+
+#[allow(non_upper_case_globals)]
+pub const ClaudeAdapter: ClaudeAdapter = HookAdapter::new(ClaudeDialect, ClaudeCollector, setup);
+
+fn setup(home: &Path, executable: &Path, action: SetupAction) -> Result<SetupReport> {
+    merge_hook_config(
+        &home.join(".claude/settings.json"),
+        "claude",
+        HOOK_EVENTS,
+        executable,
+        action,
+    )
 }
 
-#[async_trait]
-impl AgentAdapter for ClaudeAdapter {
-    fn dialect(&self) -> &'static str {
-        "claude"
+const TOOL_CORRELATION_FIELDS: &[&str] = &["tool_use_id"];
+const TOOL_DETAIL: ToolDetailPolicy = ToolDetailPolicy {
+    described_tools: &["Bash", "bash"],
+    path_tools: &["Read", "Write", "Edit"],
+    path_fields: &["file_path"],
+};
+
+pub struct ClaudeDialect;
+
+impl HookDialect for ClaudeDialect {
+    fn id(&self) -> ProviderId {
+        ProviderId::Claude
     }
-    fn normalize_with_evidence(
-        &self,
-        id: &InvocationId,
-        raw: &Value,
-        evidence: EventEvidence,
-    ) -> Result<AdapterOutcome> {
-        if is_subagent_payload(raw) {
-            return Ok(AdapterOutcome::Ignored);
-        }
-        let Some(kind) = classify(raw) else {
-            return Ok(AdapterOutcome::Ignored);
-        };
-        let now = Utc::now();
-        let status_reason = match kind {
-            EventKind::WaitingApproval => status_reason_context(raw, false),
-            EventKind::WaitingInput => status_reason_context(raw, true),
-            EventKind::Completed => completed_reason_context(raw),
-            EventKind::Failed => failed_reason_context(raw),
-            _ => None,
-        };
-        let turn_id = raw
-            .get("turn_id")
+    fn classify(&self, raw: &Value) -> Option<EventKind> {
+        classify(raw)
+    }
+    fn start_reason(&self, raw: &Value) -> Option<String> {
+        bounded_field(raw, &["source", "reason", "start_reason"], 32)
+            .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact"))
+    }
+    fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
+        provider_metadata(raw, Some("prompt_id"))
+    }
+    fn turn_id(&self, raw: &Value) -> Option<String> {
+        raw.get("turn_id")
             .or_else(|| raw.get("prompt_id"))
             .and_then(Value::as_str)
-            .and_then(|v| sanitize_bounded(v, 128));
-        Ok(AdapterOutcome::Event(Box::new(NormalizedAdapterEvent {
-            event: NormalizedEvent {
-                schema_version: sessiontap_core::SCHEMA_VERSION,
-                event_id: raw
-                    .get("event_id")
-                    .and_then(Value::as_str)
-                    .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned),
-                invocation_id: id.clone(),
-                provider_event_id: raw
-                    .get("event_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                provider: "claude".into(),
-                observed_at: now,
-                received_at: now,
-                evidence,
-                kind: kind.clone(),
-                provider_session_id: raw
-                    .get("session_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                provider_session_name: None,
-                provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
-                    .then(|| bounded_field(raw, &["source", "reason", "start_reason"], 32))
-                    .flatten()
-                    .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact")),
-                provider_metadata: provider_metadata(raw, Some("prompt_id")),
-                usage: None,
-                turn_id,
-                tool_activity: tool_activity_update("claude", raw),
-            },
-            status_reason,
-            collection_context: collection_context(raw),
-        })))
+            .and_then(|v| sanitize_bounded(v, 128))
     }
-    async fn collect_session_data(&self, request: CollectSessionDataRequest) -> CollectionOutcome {
-        match tokio::task::spawn_blocking(move || collect(request)).await {
-            Ok(Ok((enrichment, cursor))) => CollectionOutcome::Complete {
-                enrichment,
-                cursor: OpaqueCursor::new(cursor),
-            },
-            Ok(Err(error)) if error.to_string() == "collection cancelled" => {
-                CollectionOutcome::Cancelled
-            }
-            Ok(Err(error)) => CollectionOutcome::Failed(BoundedDiagnostic::new(error.to_string())),
-            Err(error) => CollectionOutcome::Failed(BoundedDiagnostic::new(error.to_string())),
-        }
-    }
-    async fn setup(
+    fn tool_activity(
         &self,
-        home: &Path,
-        executable: &Path,
-        action: SetupAction,
-    ) -> Result<SetupReport> {
-        merge_hook_config(
-            &home.join(".claude/settings.json"),
-            "claude",
-            HOOK_EVENTS,
-            executable,
-            action,
+        raw: &Value,
+        context: &NormalizeContext<'_>,
+    ) -> Option<ToolActivityUpdate> {
+        let phase = match raw.get("hook_event_name")?.as_str()? {
+            "PreToolUse" => ToolActivityPhase::Start,
+            "ToolProgress" => ToolActivityPhase::Progress,
+            "PostToolUse" => ToolActivityPhase::Finish,
+            "PostToolUseFailure" => ToolActivityPhase::Failure,
+            "PermissionRequest" => ToolActivityPhase::Attention,
+            _ => return None,
+        };
+        tool_activity(
+            phase,
+            raw.get("tool_name")?.as_str()?,
+            bounded_field(raw, TOOL_CORRELATION_FIELDS, TOOL_CORRELATION_ID_MAX_CHARS),
+            raw.get("tool_input"),
+            &TOOL_DETAIL,
+            context.workspace,
         )
     }
-}
-
-fn collection_context(raw: &Value) -> Option<ArtifactCollectionContext> {
-    Some(ArtifactCollectionContext {
-        adapter_identity: "claude".into(),
-        provider_session_id: raw.get("session_id")?.as_str()?.trim().to_owned(),
-        locator: PathBuf::from(raw.get("transcript_path")?.as_str()?),
-    })
-    .filter(|context| {
-        !context.provider_session_id.is_empty() && !context.locator.as_os_str().is_empty()
-    })
+    fn collection_context(&self, raw: &Value) -> Option<ArtifactCollectionContext> {
+        Some(ArtifactCollectionContext {
+            adapter_identity: ProviderId::Claude,
+            provider_session_id: raw.get("session_id")?.as_str()?.trim().to_owned(),
+            locator: PathBuf::from(raw.get("transcript_path")?.as_str()?),
+        })
+        .filter(|context| {
+            !context.provider_session_id.is_empty() && !context.locator.as_os_str().is_empty()
+        })
+    }
 }
 
 const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 
-#[derive(Clone)]
-struct ClaudeCursor {
-    _device: u64,
-    _inode: u64,
-    _stable_len: u64,
+#[derive(Clone, Copy)]
+pub struct ClaudeCollector;
+
+impl SessionCollector for ClaudeCollector {
+    fn collect(&self, request: &CollectSessionDataRequest) -> Result<Collected, CollectError> {
+        Ok(scan(request).context("Claude collection")?)
+    }
 }
 
-fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, ClaudeCursor)> {
-    check_cancelled(&request)?;
-    let root = fs::canonicalize(request.home.join(".claude/projects"))
-        .context("Claude artifact root is unavailable")?;
-    let canonical = validate_path(&root, &request.locator, &request.key.provider_session_id)?;
-    check_cancelled(&request)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&canonical)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_SCAN_BYTES {
-        bail!("Claude artifact is not a bounded regular file");
+fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
+    check_cancelled(request)?;
+    let canonical = validate_under_root(
+        &request.home.join(".claude/projects"),
+        &request.locator,
+        Some(&request.key.provider_session_id),
+        "jsonl",
+    )?;
+    check_cancelled(request)?;
+    let (file, metadata) = open_bounded_nofollow(&canonical, MAX_SCAN_BYTES)?;
+    let cursor = ArtifactCursor::from(&metadata);
+    if cursor_unchanged(request.prior_cursor.as_ref(), &cursor) {
+        return Ok(Collected::Unchanged {
+            cursor: OpaqueCursor::new(cursor),
+        });
     }
     let mut input = 0_u64;
     let mut output = 0_u64;
@@ -187,7 +154,7 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cla
     let mut reader = BufReader::new(file);
     let mut line = Vec::new();
     loop {
-        check_cancelled(&request)?;
+        check_cancelled(request)?;
         line.clear();
         let count = reader.read_until(b'\n', &mut line)?;
         if count == 0 {
@@ -250,16 +217,10 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cla
             .context("Claude cumulative output overflow")?;
         context = Some(current);
     }
-    check_cancelled(&request)?;
-    let after = reader.get_ref().metadata()?;
-    if after.dev() != metadata.dev()
-        || after.ino() != metadata.ino()
-        || after.len() < metadata.len()
-    {
-        bail!("Claude artifact changed identity during collection");
-    }
-    Ok((
-        SessionEnrichment {
+    check_cancelled(request)?;
+    cursor.ensure_stable(reader.get_ref())?;
+    Ok(Collected::Complete {
+        enrichment: SessionEnrichment {
             session_name,
             usage: usage_observed.then_some(Usage {
                 input_tokens: Some(input),
@@ -268,47 +229,8 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cla
                 context_window_percent: None,
             }),
         },
-        ClaudeCursor {
-            _device: metadata.dev(),
-            _inode: metadata.ino(),
-            _stable_len: metadata.len(),
-        },
-    ))
-}
-
-fn validate_path(root: &Path, locator: &Path, session: &str) -> Result<PathBuf> {
-    let unresolved = if locator.is_absolute() {
-        locator.to_path_buf()
-    } else {
-        root.join(locator)
-    };
-    if fs::symlink_metadata(&unresolved)?.file_type().is_symlink() {
-        bail!("Claude artifact must not be a symlink");
-    }
-    let canonical = fs::canonicalize(unresolved)?;
-    if !canonical.starts_with(root) {
-        bail!("Claude artifact escapes allowed root");
-    }
-    if canonical.extension().and_then(|value| value.to_str()) != Some("jsonl")
-        || canonical.file_stem().and_then(|value| value.to_str()) != Some(session)
-    {
-        bail!("Claude artifact identity mismatch");
-    }
-    Ok(canonical)
-}
-
-fn optional_u64(value: &Value, field: &str) -> Result<Option<u64>> {
-    value
-        .get(field)
-        .map(|value| value.as_u64().context("invalid Claude usage value"))
-        .transpose()
-}
-
-fn check_cancelled(request: &CollectSessionDataRequest) -> Result<()> {
-    if request.cancellation.is_cancelled() {
-        bail!("collection cancelled");
-    }
-    Ok(())
+        cursor: OpaqueCursor::new(cursor),
+    })
 }
 
 fn classify(raw: &Value) -> Option<EventKind> {
@@ -346,9 +268,18 @@ fn classify(raw: &Value) -> Option<EventKind> {
 #[cfg(test)]
 mod collection_tests {
     use super::*;
-    use crate::{CollectionCancellation, ProviderSessionKey};
+    use crate::{AgentAdapter, CollectionCancellation, CollectionOutcome, ProviderSessionKey};
     use serde_json::json;
     use std::{fs, os::unix::fs::symlink};
+
+    fn collect(
+        request: CollectSessionDataRequest,
+    ) -> Result<(SessionEnrichment, OpaqueCursor), CollectError> {
+        match ClaudeCollector.collect(&request)? {
+            Collected::Complete { enrichment, cursor } => Ok((enrichment, cursor)),
+            Collected::Unchanged { .. } => panic!("unexpected unchanged outcome"),
+        }
+    }
 
     fn request(
         temp: &tempfile::TempDir,
@@ -359,7 +290,7 @@ mod collection_tests {
             home: temp.path().to_path_buf(),
             key: ProviderSessionKey {
                 configured_provider: "claude".into(),
-                adapter_identity: "claude".into(),
+                adapter_identity: ProviderId::Claude,
                 provider_session_id: session.into(),
             },
             locator,
@@ -438,7 +369,49 @@ mod collection_tests {
         let (cancel_home, cancel_path) = fixture("s4", &["{}"]);
         let cancelled = request(&cancel_home, "s4", cancel_path);
         cancelled.cancellation.cancel();
-        assert!(collect(cancelled).is_err());
+        assert!(matches!(collect(cancelled), Err(CollectError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn unchanged_cursor_skips_scan_and_changes_force_rescan() {
+        let row = r#"{"sessionId":"s1","message":{"id":"m1","usage":{"input_tokens":1,"output_tokens":1}}}"#;
+        let (temp, path) = fixture("s1", &[row]);
+        let collect_with = |prior: Option<OpaqueCursor>| {
+            let mut request = request(&temp, "s1", path.clone());
+            request.prior_cursor = prior;
+            ClaudeAdapter.collect_session_data(request)
+        };
+        let CollectionOutcome::Complete { cursor, .. } = collect_with(None).await else {
+            panic!("expected complete outcome");
+        };
+        let CollectionOutcome::Unchanged { cursor: same } =
+            collect_with(Some(cursor.clone())).await
+        else {
+            panic!("expected unchanged outcome");
+        };
+        assert_eq!(
+            same.downcast_ref::<ArtifactCursor>(),
+            cursor.downcast_ref::<ArtifactCursor>()
+        );
+
+        let appended = r#"{"sessionId":"s1","message":{"id":"m2","usage":{"input_tokens":2,"output_tokens":2}}}"#;
+        fs::write(&path, format!("{row}\n{appended}\n")).unwrap();
+        let CollectionOutcome::Complete {
+            enrichment,
+            cursor: grown,
+        } = collect_with(Some(cursor.clone())).await
+        else {
+            panic!("appended artifact must be rescanned");
+        };
+        assert_eq!(enrichment.usage.unwrap().input_tokens, Some(3));
+
+        let replacement = path.with_extension("tmp");
+        fs::write(&replacement, format!("{row}\n")).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        let CollectionOutcome::Complete { enrichment, .. } = collect_with(Some(grown)).await else {
+            panic!("replaced artifact must be rescanned from the start");
+        };
+        assert_eq!(enrichment.usage.unwrap().input_tokens, Some(1));
     }
 
     #[tokio::test]
@@ -471,5 +444,189 @@ mod collection_tests {
                 .join(".claude/sessiontap-statusline-backup.json")
                 .exists()
         );
+    }
+}
+
+#[cfg(test)]
+mod tool_activity_tests {
+    use super::*;
+    use crate::AgentAdapter;
+    use serde_json::json;
+    use sessiontap_core::domain::{EventEvidence, InvocationId};
+    use std::fs;
+
+    #[test]
+    fn tool_activity_selects_only_allowlisted_safe_detail() {
+        use sessiontap_core::domain::ToolActivityPhase;
+        let id = InvocationId::new();
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("src.rs");
+        fs::write(&file, "fn main() {}\n").unwrap();
+        let cwd = temp.path().to_string_lossy();
+
+        let shell = ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({
+                    "hook_event_name":"PreToolUse",
+                    "tool_name":"Bash",
+                    "tool_use_id":"tool-1",
+                    "cwd":cwd,
+                    "tool_input":{"command":"PRIVATE_COMMAND", "description":"Run unit tests"}
+                }),
+            )
+            .unwrap();
+        let tool = shell.event.tool_activity.as_ref().unwrap();
+        assert_eq!(tool.phase, ToolActivityPhase::Start);
+        assert_eq!(tool.label, "shell");
+        assert_eq!(tool.correlation_id.as_deref(), Some("tool-1"));
+        assert_eq!(tool.detail.as_deref(), Some("Run unit tests"));
+        assert!(
+            !serde_json::to_string(&shell.event)
+                .unwrap()
+                .contains("PRIVATE_COMMAND")
+        );
+
+        let bound = |raw: &Value| {
+            AgentAdapter::normalize_with_evidence(
+                &ClaudeAdapter,
+                &id,
+                raw,
+                EventEvidence::managed_hook(1),
+                &NormalizeContext {
+                    workspace: Some(temp.path()),
+                },
+            )
+            .unwrap()
+            .into_event()
+            .unwrap()
+        };
+        let read = bound(&json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Read",
+            "tool_use_id":"tool-2",
+            "cwd":"/",
+            "tool_input":{"file_path":file}
+        }));
+        assert_eq!(
+            read.event.tool_activity.unwrap().detail.as_deref(),
+            Some("src.rs")
+        );
+
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let outside_payload = json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Read",
+            "tool_use_id":"tool-outside",
+            "tool_input":{"file_path":outside.path()}
+        });
+        assert!(
+            bound(&outside_payload)
+                .event
+                .tool_activity
+                .unwrap()
+                .detail
+                .is_none()
+        );
+
+        // Without a trusted workspace no file target is ever bound.
+        assert!(
+            ClaudeAdapter
+                .normalize(
+                    &id,
+                    &json!({
+                        "hook_event_name":"PreToolUse",
+                        "tool_name":"Read",
+                        "tool_use_id":"tool-4",
+                        "cwd":cwd,
+                        "tool_input":{"file_path":file}
+                    }),
+                )
+                .unwrap()
+                .event
+                .tool_activity
+                .unwrap()
+                .detail
+                .is_none()
+        );
+
+        let unsafe_detail = ClaudeAdapter
+            .normalize(
+                &id,
+                &json!({
+                    "hook_event_name":"PreToolUse",
+                    "tool_name":"Bash",
+                    "tool_use_id":"tool-3",
+                    "cwd":cwd,
+                    "tool_input":{"description":"Open https://example.invalid/?token=secret"}
+                }),
+            )
+            .unwrap();
+        assert!(unsafe_detail.event.tool_activity.unwrap().detail.is_none());
+    }
+
+    #[test]
+    fn payload_supplied_workspace_is_ignored() {
+        let id = InvocationId::new();
+        let claimed = tempfile::tempdir().unwrap();
+        let trusted = tempfile::tempdir().unwrap();
+        let file = claimed.path().join("secret.rs");
+        fs::write(&file, "").unwrap();
+        let claimed_path = claimed.path().to_string_lossy().into_owned();
+        let raw = json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Read",
+            "tool_use_id":"tool-1",
+            "cwd":claimed_path,
+            "workspace":claimed_path,
+            "__sessiontap_invocation_workspace":claimed_path,
+            "tool_input":{"file_path":file}
+        });
+        for context in [
+            NormalizeContext::default(),
+            NormalizeContext {
+                workspace: Some(trusted.path()),
+            },
+        ] {
+            let normalized = AgentAdapter::normalize_with_evidence(
+                &ClaudeAdapter,
+                &id,
+                &raw,
+                EventEvidence::managed_hook(1),
+                &context,
+            )
+            .unwrap()
+            .into_event()
+            .unwrap();
+            assert!(normalized.event.tool_activity.unwrap().detail.is_none());
+        }
+        let normalized = AgentAdapter::normalize_with_evidence(
+            &ClaudeAdapter,
+            &id,
+            &raw,
+            EventEvidence::managed_hook(1),
+            &NormalizeContext {
+                workspace: Some(claimed.path()),
+            },
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+        assert_eq!(
+            normalized.event.tool_activity.unwrap().detail.as_deref(),
+            Some("secret.rs")
+        );
+    }
+
+    #[test]
+    fn supported_tool_phase_is_exact_and_result_free() {
+        let id = InvocationId::new();
+        let (payload, phase) = (
+            json!({"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_use_id":"a","error":"PRIVATE"}),
+            ToolActivityPhase::Failure,
+        );
+        let event = ClaudeAdapter.normalize(&id, &payload).unwrap().event;
+        assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
+        assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
     }
 }

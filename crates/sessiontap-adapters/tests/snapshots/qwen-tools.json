@@ -1,0 +1,176 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "q1",
+        "detail": "Build",
+        "label": "shell",
+        "phase": "start"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "q2",
+        "detail": "Cargo.toml",
+        "label": "read_file",
+        "phase": "start"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "q3",
+        "detail": "src/lib.rs",
+        "label": "edit_file",
+        "phase": "finish"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "q4",
+        "label": "write_file",
+        "phase": "failure"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_approval",
+      "observed_at": "<received_at>",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "q5",
+        "label": "shell",
+        "phase": "attention"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "description",
+      "summary": "bash Not allowlisted for qwen"
+    }
+  },
+  {
+    "collection_context": {
+      "adapter_identity": "qwen",
+      "locator": "/private/s.jsonl",
+      "provider_session_id": "s"
+    },
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "provider_session_started",
+      "observed_at": "2026-08-28T15:08:40.299Z",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "provider_session_start_reason": "resume",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  }
+]

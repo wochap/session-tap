@@ -1,0 +1,333 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "provider_session_started",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "new_turn",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "label": "shell",
+        "phase": "start"
+      },
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_input",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "label": "request_user_input",
+        "phase": "start"
+      },
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "generic_input",
+      "summary": "Input requested"
+    }
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "label": "functions_request_user_input",
+        "phase": "finish"
+      },
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_approval",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "label": "shell",
+        "phase": "attention"
+      },
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "tool_name",
+      "summary": "bash"
+    }
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_input",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "generic_input",
+      "summary": "Input requested"
+    }
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "enrichment",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "interrupted",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "completed",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "t"
+      },
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "t",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "provider_session_ended",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_session_id": "s",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  }
+]

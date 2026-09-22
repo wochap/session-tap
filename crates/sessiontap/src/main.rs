@@ -3,7 +3,7 @@ use chrono::Utc;
 use fs2::FileExt;
 use rand::RngCore;
 use sessiontap_adapters::{
-    ADAPTER_API_VERSION, AdapterRegistry, SetupAction, stamp_invocation_workspace,
+    ADAPTER_API_VERSION, AdapterRegistry, NormalizeContext, SetupAction, SideChannelSource,
 };
 use sessiontap_core::{
     SCHEMA_VERSION,
@@ -21,7 +21,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
     os::unix::fs::PermissionsExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
@@ -59,9 +59,7 @@ enum Cli {
 }
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
     let Some(first) = args.next() else {
-        bail!(
-            "usage: sessiontap <claude|codex|pi|qwen> [args...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
-        )
+        bail!("{}", usage("args..."))
     };
     match first.as_str() {
         "--status" | "status" => Ok(Cli::Status),
@@ -83,14 +81,31 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
             provider: args.next().context("missing provider")?,
         }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
-        "--help" | "-h" => bail!(
-            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
-        ),
+        "--help" | "-h" => bail!("{}", usage("provider arguments...")),
         provider => Ok(Cli::Launch {
             provider: provider.into(),
             args: args.collect(),
         }),
     }
+}
+
+/// Usage text; the provider list comes from the adapter registry.
+fn usage(provider_args: &str) -> String {
+    let providers = AdapterRegistry::builtin_ids()
+        .iter()
+        .map(|id| id.as_str())
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "usage: sessiontap <{providers}> [{provider_args}] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
+    )
+}
+
+fn unknown_provider(registry: &AdapterRegistry, provider: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "unknown provider '{provider}'; expected one of {}",
+        registry.provider_names().join(", ")
+    )
 }
 
 #[tokio::main]
@@ -128,11 +143,18 @@ async fn setup(paths: &AppPaths, provider: Option<String>, action: SetupAction) 
     let config = Config::load(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let providers = provider.map_or_else(
-        || vec!["claude".into(), "codex".into(), "pi".into(), "qwen".into()],
+        || {
+            AdapterRegistry::builtin_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        },
         |p| vec![p],
     );
     for p in providers {
-        let (adapter, _) = registry.resolve(&p).context("unknown provider")?;
+        let (adapter, _) = registry
+            .resolve(&p)
+            .ok_or_else(|| unknown_provider(&registry, &p))?;
         let report = adapter.setup(&home, &executable, action).await?;
         eprintln!("{p}: {}", report.message);
     }
@@ -233,9 +255,10 @@ async fn inspect_hooks(paths: &AppPaths) -> Result<()> {
 async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<()> {
     let config = Config::load(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
-    let (adapter, executable) = registry
-        .resolve(provider)
-        .context("unknown provider; configure a custom inherited adapter")?;
+    let (adapter, executable) = registry.resolve(provider).ok_or_else(|| {
+        unknown_provider(&registry, provider)
+            .context("configure a custom adapter that inherits a built-in provider")
+    })?;
     let daemon_ready = daemon_is_healthy(paths).await;
     if !daemon_ready {
         eprintln!(
@@ -269,7 +292,11 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     let mut prep = sessiontap_adapters::LaunchPreparation::default();
     if tracked {
         AppPaths::prepare_private(&paths.runtime_dir.join(id.to_string()))?;
-        prep = adapter.prepare_launch(&args, &paths.runtime_dir.join(id.to_string()))?;
+        prep = adapter.prepare_launch(
+            &args,
+            &paths.runtime_dir.join(id.to_string()),
+            Path::new(&executable),
+        )?;
         let snapshot = InvocationSnapshot {
             schema_version: SCHEMA_VERSION,
             revision: 0,
@@ -428,7 +455,7 @@ async fn tail_provider_side_channel(
     provider: String,
     invocation_id: InvocationId,
     credential: String,
-    path: PathBuf,
+    mut source: Box<dyn SideChannelSource>,
     workspace: PathBuf,
 ) {
     let config = Config::load(&paths.config_file()).unwrap_or_default();
@@ -436,13 +463,11 @@ async fn tail_provider_side_channel(
     let Some((adapter, _)) = registry.resolve(&provider) else {
         return;
     };
-    let mut tail = sessiontap_adapters::qwen::QwenJsonlTail::new(path, 64 * 1024);
     let mut source_sequence = 0_u64;
     loop {
-        match tail.poll() {
+        match source.poll() {
             Ok(values) => {
-                for mut value in values {
-                    stamp_invocation_workspace(&mut value, Some(&workspace));
+                for value in values {
                     source_sequence = source_sequence.saturating_add(1);
                     let evidence = EventEvidence {
                         channel: EvidenceChannel::SideChannel,
@@ -451,8 +476,11 @@ async fn tail_provider_side_channel(
                         collector_instance_id: Some(invocation_id.to_string()),
                         source_sequence: Some(source_sequence),
                     };
+                    let context = NormalizeContext {
+                        workspace: Some(&workspace),
+                    };
                     if let Ok(Some(mut normalized)) = adapter
-                        .normalize_with_evidence(&invocation_id, &value, evidence)
+                        .normalize_with_evidence(&invocation_id, &value, evidence, &context)
                         .map(|outcome| outcome.into_event())
                     {
                         normalized.event.provider = provider.clone();
@@ -526,16 +554,18 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
         return Ok(());
     };
     inspect_hook_best_effort(paths, provider, &raw).await;
-    let Ok(mut value) = serde_json::from_slice(&raw) else {
+    let Ok(value) = serde_json::from_slice(&raw) else {
         return Ok(());
     };
     let workspace = env::var_os("SESSIONTAP_WORKSPACE").map(PathBuf::from);
-    stamp_invocation_workspace(&mut value, workspace.as_deref());
     let Ok(Some(mut normalized)) = adapter
         .normalize_with_evidence(
             &uuid,
             &value,
             EventEvidence::managed_hook(ADAPTER_API_VERSION.into()),
+            &NormalizeContext {
+                workspace: workspace.as_deref(),
+            },
         )
         .map(|outcome| outcome.into_event())
     else {
@@ -730,6 +760,21 @@ mod tests {
                 provider: "codex".into(),
                 args: vec!["--help".into(), "a b".into(), "$HOME".into()]
             }
+        );
+    }
+
+    #[test]
+    fn usage_lists_registry_providers() {
+        let help = parse(vec!["--help".into()].into_iter()).unwrap_err();
+        assert_eq!(
+            help.to_string(),
+            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
+        );
+        let empty = parse(std::iter::empty()).unwrap_err();
+        assert!(
+            empty
+                .to_string()
+                .starts_with("usage: sessiontap <claude|codex|pi|qwen> [args...] |")
         );
     }
 

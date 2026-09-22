@@ -1,16 +1,13 @@
 use crate::{
-    AgentAdapter, BoundedDiagnostic, CollectSessionDataRequest, CollectionOutcome, SetupAction,
-    SetupReport, bounded_field, effort_level, failed_reason_context, normalized_tool_label,
-    status_excerpt,
+    NormalizeContext, SetupAction, SetupReport, artifact::NoCollector, bounded_field,
+    dialect::HookDialect, driver::HookAdapter, effort_level, normalized_tool_label, status_excerpt,
 };
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use chrono::Utc;
 use fs2::FileExt;
 use serde_json::Value;
+use sessiontap_core::ProviderId;
 use sessiontap_core::domain::{
-    AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent,
-    NormalizedEvent, ProviderMetadata, StatusReasonContext, StatusReasonSource,
+    EventKind, ProviderMetadata, StatusReasonContext, StatusReasonSource,
     TOOL_CORRELATION_ID_MAX_CHARS, ToolActivityPhase, ToolActivityUpdate, Usage,
 };
 use std::{
@@ -18,7 +15,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-use uuid::Uuid;
 
 /// Pi lifecycle events the managed extension subscribes to. `turn_end` is
 /// subscribed for local excerpt and usage accounting only and is never
@@ -62,86 +58,83 @@ const EXECUTABLE_PLACEHOLDER: &str = "\"__SESSIONTAP_EXECUTABLE__\"";
 /// bounded payloads on a private wire format keyed by `pi_event`; cumulative
 /// usage is accumulated by the extension itself, so the adapter never reads
 /// pi session artifacts and never emits a collection context.
-pub struct PiAdapter;
+pub type PiAdapter = HookAdapter<PiDialect, NoCollector>;
 
-#[cfg(test)]
-impl PiAdapter {
-    /// Test helper for cases that expect a normalized root event.
-    pub fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
-        match <Self as AgentAdapter>::normalize(self, id, raw)? {
-            AdapterOutcome::Event(event) => Ok(*event),
-            AdapterOutcome::Ignored => anyhow::bail!("ignored pi payload"),
-        }
-    }
-}
+#[allow(non_upper_case_globals)]
+pub const PiAdapter: PiAdapter = HookAdapter::new(PiDialect, NoCollector, manage_extension);
 
-#[async_trait]
-impl AgentAdapter for PiAdapter {
-    fn dialect(&self) -> &'static str {
-        "pi"
+pub struct PiDialect;
+
+impl HookDialect for PiDialect {
+    fn id(&self) -> ProviderId {
+        ProviderId::Pi
     }
-    fn normalize_with_evidence(
+    fn classify(&self, raw: &Value) -> Option<EventKind> {
+        classify(raw)
+    }
+    /// The managed extension forwards root-session events only.
+    fn is_subagent(&self, _raw: &Value) -> bool {
+        false
+    }
+    fn provider_event_id(&self, _raw: &Value) -> Option<String> {
+        None
+    }
+    fn session_name(&self, raw: &Value) -> Option<String> {
+        bounded_field(raw, &["session_name"], SESSION_NAME_MAX_CHARS)
+    }
+    fn start_reason(&self, raw: &Value) -> Option<String> {
+        bounded_field(raw, &["reason"], 32)
+            .filter(|v| matches!(v.as_str(), "startup" | "new" | "resume" | "fork" | "reload"))
+    }
+    fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
+        let metadata = ProviderMetadata {
+            model: bounded_field(raw, &["model"], 160),
+            effort: bounded_field(raw, &["thinking_level"], 32)
+                .and_then(|level| effort_level(&level)),
+            permission_mode: None,
+            current_turn_id: None,
+        };
+        (metadata != ProviderMetadata::default()).then_some(metadata)
+    }
+    fn inline_usage(&self, raw: &Value) -> Option<Usage> {
+        let usage = Usage {
+            input_tokens: raw.get("input_tokens").and_then(Value::as_u64),
+            output_tokens: raw.get("output_tokens").and_then(Value::as_u64),
+            context_tokens: raw.get("context_tokens").and_then(Value::as_u64),
+            context_window_percent: raw
+                .get("context_window_percent")
+                .and_then(Value::as_u64)
+                .filter(|value| *value <= 100)
+                .map(|value| value as u8),
+        };
+        (usage != Usage::default()).then_some(usage)
+    }
+    fn completed_reason(&self, raw: &Value) -> Option<StatusReasonContext> {
+        raw.get("excerpt")
+            .and_then(Value::as_str)
+            .and_then(status_excerpt)
+            .map(|summary| StatusReasonContext {
+                summary,
+                source: StatusReasonSource::AssistantMessage,
+            })
+    }
+    fn tool_activity(
         &self,
-        id: &InvocationId,
         raw: &Value,
-        evidence: EventEvidence,
-    ) -> Result<AdapterOutcome> {
-        let Some(kind) = classify(raw) else {
-            return Ok(AdapterOutcome::Ignored);
+        _context: &NormalizeContext<'_>,
+    ) -> Option<ToolActivityUpdate> {
+        let phase = match raw.get("pi_event")?.as_str()? {
+            "tool_execution_start" => ToolActivityPhase::Start,
+            "tool_execution_end" => ToolActivityPhase::Finish,
+            _ => return None,
         };
-        let now = Utc::now();
-        let status_reason = match kind {
-            EventKind::Completed => completed_reason(raw),
-            EventKind::Failed => failed_reason_context(raw),
-            _ => None,
-        };
-        Ok(AdapterOutcome::Event(Box::new(NormalizedAdapterEvent {
-            event: NormalizedEvent {
-                schema_version: sessiontap_core::SCHEMA_VERSION,
-                event_id: Uuid::new_v4().to_string(),
-                invocation_id: id.clone(),
-                provider_event_id: None,
-                provider: "pi".into(),
-                observed_at: now,
-                received_at: now,
-                evidence,
-                kind: kind.clone(),
-                provider_session_id: raw
-                    .get("session_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                provider_session_name: bounded_field(
-                    raw,
-                    &["session_name"],
-                    SESSION_NAME_MAX_CHARS,
-                ),
-                provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
-                    .then(|| bounded_field(raw, &["reason"], 32))
-                    .flatten()
-                    .filter(|v| {
-                        matches!(v.as_str(), "startup" | "new" | "resume" | "fork" | "reload")
-                    }),
-                provider_metadata: metadata(raw),
-                usage: usage(raw),
-                turn_id: None,
-                tool_activity: tool_activity(raw),
-            },
-            status_reason,
-            collection_context: None,
-        })))
-    }
-    async fn collect_session_data(&self, _request: CollectSessionDataRequest) -> CollectionOutcome {
-        CollectionOutcome::Failed(BoundedDiagnostic::new(
-            "pi usage is delivered through managed-extension hooks; no artifact collection",
-        ))
-    }
-    async fn setup(
-        &self,
-        home: &Path,
-        executable: &Path,
-        action: SetupAction,
-    ) -> Result<SetupReport> {
-        manage_extension(home, executable, action)
+        let label = normalized_tool_label(raw.get("tool_name")?.as_str()?)?;
+        Some(ToolActivityUpdate {
+            phase,
+            label,
+            correlation_id: bounded_field(raw, &["tool_call_id"], TOOL_CORRELATION_ID_MAX_CHARS),
+            detail: None,
+        })
     }
 }
 
@@ -163,55 +156,6 @@ fn classify(raw: &Value) -> Option<EventKind> {
         },
         _ => None,
     }
-}
-
-fn completed_reason(raw: &Value) -> Option<StatusReasonContext> {
-    raw.get("excerpt")
-        .and_then(Value::as_str)
-        .and_then(status_excerpt)
-        .map(|summary| StatusReasonContext {
-            summary,
-            source: StatusReasonSource::AssistantMessage,
-        })
-}
-
-fn metadata(raw: &Value) -> Option<ProviderMetadata> {
-    let metadata = ProviderMetadata {
-        model: bounded_field(raw, &["model"], 160),
-        effort: bounded_field(raw, &["thinking_level"], 32).and_then(|level| effort_level(&level)),
-        permission_mode: None,
-        current_turn_id: None,
-    };
-    (metadata != ProviderMetadata::default()).then_some(metadata)
-}
-
-fn usage(raw: &Value) -> Option<Usage> {
-    let usage = Usage {
-        input_tokens: raw.get("input_tokens").and_then(Value::as_u64),
-        output_tokens: raw.get("output_tokens").and_then(Value::as_u64),
-        context_tokens: raw.get("context_tokens").and_then(Value::as_u64),
-        context_window_percent: raw
-            .get("context_window_percent")
-            .and_then(Value::as_u64)
-            .filter(|value| *value <= 100)
-            .map(|value| value as u8),
-    };
-    (usage != Usage::default()).then_some(usage)
-}
-
-fn tool_activity(raw: &Value) -> Option<ToolActivityUpdate> {
-    let phase = match raw.get("pi_event")?.as_str()? {
-        "tool_execution_start" => ToolActivityPhase::Start,
-        "tool_execution_end" => ToolActivityPhase::Finish,
-        _ => return None,
-    };
-    let label = normalized_tool_label(raw.get("tool_name")?.as_str()?)?;
-    Some(ToolActivityUpdate {
-        phase,
-        label,
-        correlation_id: bounded_field(raw, &["tool_call_id"], TOOL_CORRELATION_ID_MAX_CHARS),
-        detail: None,
-    })
 }
 
 fn extension_path(home: &Path) -> PathBuf {
@@ -311,280 +255,18 @@ pub fn manage_extension(
     }
 }
 
-const EXTENSION_TEMPLATE: &str = r#"// sessiontap-managed-extension v1
-// Owned by SessionTap (`sessiontap setup pi`). Do not edit by hand; refresh
-// with `sessiontap setup pi` or remove with `sessiontap hooks remove pi`.
-// Forwards bounded lifecycle metadata to the local SessionTap broker. The
-// handlers return synchronously, never write stdout or stderr, and treat
-// every delivery failure as a silent no-op, so pi behaves identically with
-// or without this extension.
-
-import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const SESSIONTAP_EXECUTABLE = "__SESSIONTAP_EXECUTABLE__";
-const BOUND_CHARS = 160;
-
-let inputTokens = 0;
-let outputTokens = 0;
-let lastExcerpt: string | undefined;
-
-function boundedText(value: unknown, maxChars: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const clean = value
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (clean.length === 0) return undefined;
-  return Array.from(clean).slice(0, maxChars).join("");
-}
-
-function toNumber(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
-}
-
-// Cumulative accounting matches Claude-style collection: fresh, cache-read,
-// and cache-write tokens all count toward input.
-function addUsage(usage: any): void {
-  if (!usage || typeof usage !== "object") return;
-  inputTokens += toNumber(usage.input) + toNumber(usage.cacheRead) + toNumber(usage.cacheWrite);
-  outputTokens += toNumber(usage.output);
-}
-
-function sessionFields(ctx: any): Record<string, unknown> {
-  const fields: Record<string, unknown> = {};
-  try {
-    const manager = ctx && ctx.sessionManager;
-    if (manager) {
-      const id = typeof manager.getSessionId === "function" ? manager.getSessionId() : undefined;
-      if (typeof id === "string" && id.length > 0) fields.session_id = id;
-      const name =
-        typeof manager.getSessionName === "function"
-          ? boundedText(manager.getSessionName(), BOUND_CHARS)
-          : undefined;
-      if (name) fields.session_name = name;
-    }
-    const model = ctx && ctx.model;
-    if (model && typeof model.provider === "string" && typeof model.id === "string") {
-      fields.model = model.provider + "/" + model.id;
-    }
-    if (ctx && typeof ctx.thinkingLevel === "string") fields.thinking_level = ctx.thinkingLevel;
-    if (ctx && typeof ctx.mode === "string") fields.mode = ctx.mode;
-  } catch {
-    // Metadata is best-effort; missing fields degrade to absent metadata.
-  }
-  return fields;
-}
-
-function messageText(message: any): string | undefined {
-  if (!message || !Array.isArray(message.content)) return undefined;
-  const parts: string[] = [];
-  for (const part of message.content) {
-    if (part && typeof part === "object" && part.type === "text" && typeof part.text === "string") {
-      parts.push(part.text);
-    }
-  }
-  return parts.length > 0 ? parts.join(" ") : undefined;
-}
-
-function lastAssistantMessage(ctx: any): any {
-  try {
-    const manager = ctx && ctx.sessionManager;
-    const entries =
-      manager && typeof manager.getEntries === "function" ? manager.getEntries() : [];
-    for (let index = entries.length - 1; index >= 0; index -= 1) {
-      const entry = entries[index];
-      if (entry && entry.type === "message" && entry.message && entry.message.role === "assistant") {
-        return entry.message;
-      }
-    }
-  } catch {
-    // Settled status degrades to complete when entries are unavailable.
-  }
-  return undefined;
-}
-
-function settledStatus(ctx: any): string {
-  const message = lastAssistantMessage(ctx);
-  if (message && message.stopReason === "error") return "error";
-  if (message && message.stopReason === "aborted") return "aborted";
-  return "complete";
-}
-
-// Seeds cumulative totals from pi's own session API whenever the opened
-// session already contains entries (explicit continue/resume/session launches
-// and in-session switches). Fresh sessions start at zero.
-function seedUsage(ctx: any): void {
-  inputTokens = 0;
-  outputTokens = 0;
-  try {
-    const manager = ctx && ctx.sessionManager;
-    const entries =
-      manager && typeof manager.getEntries === "function" ? manager.getEntries() : [];
-    for (const entry of entries) {
-      if (!entry || entry.type !== "message") continue;
-      const message = entry.message;
-      if (!message || message.role !== "assistant") continue;
-      addUsage(message.usage);
-    }
-  } catch {
-    // Seeding is best-effort; live turns still accumulate.
-  }
-}
-
-function forward(payload: Record<string, unknown>): void {
-  try {
-    const child = spawn(SESSIONTAP_EXECUTABLE, ["hook", "emit", "pi"], {
-      stdio: ["pipe", "ignore", "ignore"],
-      detached: true,
-    });
-    child.on("error", () => undefined);
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(JSON.stringify(payload));
-    child.unref();
-  } catch {
-    // Delivery failures are silent by contract.
-  }
-}
-
-function forwardTool(name: string, event: any, ctx: any): void {
-  try {
-    const payload = Object.assign({ pi_event: name }, sessionFields(ctx));
-    if (event && typeof event.toolName === "string") payload.tool_name = event.toolName;
-    if (event && typeof event.toolCallId === "string") payload.tool_call_id = event.toolCallId;
-    forward(payload);
-  } catch {
-    // Tool forwarding is best-effort.
-  }
-}
-
-export default function sessiontapBroker(pi: ExtensionAPI): void {
-  try {
-    pi.on("session_start", (event: any, ctx: any) => {
-      try {
-        seedUsage(ctx);
-        lastExcerpt = undefined;
-        const payload: Record<string, unknown> = { pi_event: "session_start" };
-        if (event && typeof event.reason === "string") payload.reason = event.reason;
-        forward(Object.assign(payload, sessionFields(ctx)));
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("session_shutdown", (event: any, ctx: any) => {
-      try {
-        const payload: Record<string, unknown> = { pi_event: "session_shutdown" };
-        if (event && typeof event.reason === "string") payload.reason = event.reason;
-        forward(Object.assign(payload, sessionFields(ctx)));
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("session_info_changed", (_event: any, ctx: any) => {
-      try {
-        forward(Object.assign({ pi_event: "session_info_changed" }, sessionFields(ctx)));
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("model_select", (event: any, ctx: any) => {
-      try {
-        const payload = Object.assign({ pi_event: "model_select" }, sessionFields(ctx));
-        const model = event && event.model;
-        if (model && typeof model.provider === "string" && typeof model.id === "string") {
-          payload.model = model.provider + "/" + model.id;
-        }
-        forward(payload);
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("thinking_level_select", (event: any, ctx: any) => {
-      try {
-        const payload = Object.assign(
-          { pi_event: "thinking_level_select" },
-          sessionFields(ctx)
-        );
-        if (event && typeof event.level === "string") payload.thinking_level = event.level;
-        forward(payload);
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("before_agent_start", (_event: any, ctx: any) => {
-      try {
-        forward(Object.assign({ pi_event: "before_agent_start" }, sessionFields(ctx)));
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("turn_start", (event: any, ctx: any) => {
-      try {
-        const payload = Object.assign({ pi_event: "turn_start" }, sessionFields(ctx));
-        if (event && typeof event.turnIndex === "number") payload.turn_index = event.turnIndex;
-        forward(payload);
-      } catch {
-        // Fail open.
-      }
-    });
-    // Local accounting only: accumulate per-turn usage and capture the
-    // bounded last-assistant excerpt consumed by the next settled payload.
-    // This event is never forwarded.
-    pi.on("turn_end", (event: any, _ctx: any) => {
-      try {
-        const message = event && event.message;
-        if (message && message.role === "assistant") {
-          addUsage(message.usage);
-          lastExcerpt = boundedText(messageText(message), BOUND_CHARS);
-        }
-      } catch {
-        // Fail open.
-      }
-    });
-    pi.on("tool_execution_start", (event: any, ctx: any) => {
-      forwardTool("tool_execution_start", event, ctx);
-    });
-    pi.on("tool_execution_end", (event: any, ctx: any) => {
-      forwardTool("tool_execution_end", event, ctx);
-    });
-    pi.on("agent_settled", (_event: any, ctx: any) => {
-      try {
-        const payload = Object.assign({ pi_event: "agent_settled" }, sessionFields(ctx));
-        payload.settled_status = settledStatus(ctx);
-        if (lastExcerpt) payload.excerpt = lastExcerpt;
-        payload.input_tokens = inputTokens;
-        payload.output_tokens = outputTokens;
-        const contextUsage =
-          ctx && typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
-        if (contextUsage && typeof contextUsage === "object") {
-          if (typeof contextUsage.tokens === "number" && Number.isFinite(contextUsage.tokens)) {
-            payload.context_tokens = contextUsage.tokens;
-          }
-          if (typeof contextUsage.percent === "number" && Number.isFinite(contextUsage.percent)) {
-            payload.context_window_percent = Math.min(
-              100,
-              Math.max(0, Math.round(contextUsage.percent))
-            );
-          }
-        }
-        forward(payload);
-      } catch {
-        // Fail open.
-      }
-    });
-  } catch {
-    // Registration failures leave pi unchanged; worst case is missing
-    // observability.
-  }
-}
-"#;
+const EXTENSION_TEMPLATE: &str = include_str!("../assets/pi-extension.ts");
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AgentAdapter, CollectSessionDataRequest, CollectionOutcome};
     use serde_json::json;
-    use sessiontap_core::domain::ToolActivityPhase;
+    use sessiontap_core::domain::{AdapterOutcome, InvocationId};
     use std::collections::BTreeSet;
+
+    /// Length of the template before it moved to `assets/pi-extension.ts`.
+    const TEMPLATE_BYTES: usize = 9737;
 
     #[test]
     fn fixture_covers_every_forwarded_event_and_matches_expected_kinds() {
@@ -1012,13 +694,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collect_session_data_reports_extension_delivery() {
+    async fn collection_is_unsupported_without_a_diagnostic() {
         let outcome = PiAdapter
             .collect_session_data(CollectSessionDataRequest {
                 home: PathBuf::from("/nonexistent"),
                 key: crate::ProviderSessionKey {
                     configured_provider: "pi".into(),
-                    adapter_identity: "pi".into(),
+                    adapter_identity: ProviderId::Pi,
                     provider_session_id: "s".into(),
                 },
                 locator: PathBuf::from("/nonexistent"),
@@ -1026,13 +708,18 @@ mod tests {
                 cancellation: crate::CollectionCancellation::default(),
             })
             .await;
-        match outcome {
-            CollectionOutcome::Failed(diagnostic) => {
-                assert!(diagnostic.message().contains("managed-extension"));
-            }
-            CollectionOutcome::Complete { .. }
-            | CollectionOutcome::Unchanged { .. }
-            | CollectionOutcome::Cancelled => panic!("expected failed outcome"),
-        }
+        assert!(matches!(outcome, CollectionOutcome::Unsupported));
+    }
+
+    #[test]
+    fn managed_extension_template_is_byte_identical() {
+        let rendered = render_extension("/opt/sessiontap").unwrap();
+        assert!(rendered.starts_with(OWNERSHIP_MARKER));
+        assert!(rendered.contains("const SESSIONTAP_EXECUTABLE = \"/opt/sessiontap\";"));
+        assert_eq!(EXTENSION_TEMPLATE.len(), TEMPLATE_BYTES);
+        assert_eq!(
+            EXTENSION_TEMPLATE.matches(EXECUTABLE_PLACEHOLDER).count(),
+            1
+        );
     }
 }

@@ -3,16 +3,17 @@ use async_trait::async_trait;
 use fs2::FileExt;
 use serde_json::{Value, json};
 use sessiontap_core::{
+    ProviderId,
     config::Config,
     domain::{
         AdapterOutcome, EventEvidence, InvocationId, ProviderMetadata, STATUS_EXCERPT_MAX_CHARS,
-        StatusReasonContext, StatusReasonSource, TOOL_CORRELATION_ID_MAX_CHARS,
-        TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS, ToolActivityPhase, ToolActivityUpdate, Usage,
+        StatusReasonContext, StatusReasonSource, TOOL_DETAIL_MAX_CHARS, TOOL_LABEL_MAX_CHARS,
+        ToolActivityPhase, ToolActivityUpdate, Usage,
     },
 };
 use std::{
     any::Any,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -22,32 +23,30 @@ use std::{
     },
 };
 
+pub mod artifact;
 pub mod claude;
 pub mod codex;
+pub mod dialect;
+pub mod driver;
 pub mod pi;
 pub mod qwen;
 
 pub const ADAPTER_API_VERSION: u32 = 1;
-const TRUSTED_WORKSPACE_FIELD: &str = "__sessiontap_invocation_workspace";
 
-pub fn stamp_invocation_workspace(raw: &mut Value, workspace: Option<&Path>) {
-    let Some(object) = raw.as_object_mut() else {
-        return;
-    };
-    object.remove(TRUSTED_WORKSPACE_FIELD);
-    if let Some(workspace) = workspace.and_then(Path::to_str) {
-        object.insert(
-            TRUSTED_WORKSPACE_FIELD.to_owned(),
-            Value::String(workspace.to_owned()),
-        );
-    }
+pub use dialect::NormalizeContext;
+
+/// A provider-owned stream of raw events observed beside hooks. The launcher
+/// polls it and normalizes each value through the same adapter.
+pub trait SideChannelSource: Send {
+    /// Returns the complete records that arrived since the previous poll.
+    fn poll(&mut self) -> Result<Vec<Value>>;
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct LaunchPreparation {
     pub extra_args: Vec<String>,
     pub environment: Vec<(String, String)>,
-    pub side_channel: Option<PathBuf>,
+    pub side_channel: Option<Box<dyn SideChannelSource>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,7 +66,7 @@ pub struct SetupReport {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProviderSessionKey {
     pub configured_provider: String,
-    pub adapter_identity: String,
+    pub adapter_identity: ProviderId,
     pub provider_session_id: String,
 }
 
@@ -144,6 +143,8 @@ pub enum CollectionOutcome {
         cursor: OpaqueCursor,
     },
     Cancelled,
+    /// The provider collects no artifacts; hook-derived state is authoritative.
+    Unsupported,
     Failed(BoundedDiagnostic),
 }
 
@@ -152,14 +153,24 @@ pub trait AgentAdapter: Send + Sync {
     fn api_version(&self) -> u32 {
         ADAPTER_API_VERSION
     }
-    fn dialect(&self) -> &'static str;
+    fn provider_id(&self) -> ProviderId;
+    fn dialect(&self) -> &'static str {
+        self.provider_id().as_str()
+    }
     fn matches(&self, provider: &str) -> bool {
         provider == self.dialect()
     }
     fn redact_args(&self, args: &[String]) -> Vec<String> {
         redact_args(args)
     }
-    fn prepare_launch(&self, _args: &[String], _private_dir: &Path) -> Result<LaunchPreparation> {
+    /// Prepares a launch of `executable`, the binary resolved for the
+    /// configured provider or alias.
+    fn prepare_launch(
+        &self,
+        _args: &[String],
+        _private_dir: &Path,
+        _executable: &Path,
+    ) -> Result<LaunchPreparation> {
         Ok(LaunchPreparation::default())
     }
     fn normalize(&self, invocation_id: &InvocationId, raw: &Value) -> Result<AdapterOutcome> {
@@ -167,6 +178,7 @@ pub trait AgentAdapter: Send + Sync {
             invocation_id,
             raw,
             EventEvidence::managed_hook(ADAPTER_API_VERSION.into()),
+            &NormalizeContext::default(),
         )
     }
     fn normalize_with_evidence(
@@ -174,6 +186,7 @@ pub trait AgentAdapter: Send + Sync {
         invocation_id: &InvocationId,
         raw: &Value,
         evidence: EventEvidence,
+        context: &NormalizeContext<'_>,
     ) -> Result<AdapterOutcome>;
     async fn collect_session_data(&self, request: CollectSessionDataRequest) -> CollectionOutcome;
     async fn setup(
@@ -185,30 +198,66 @@ pub trait AgentAdapter: Send + Sync {
 }
 
 pub struct AdapterRegistry {
-    adapters: HashMap<String, Box<dyn AgentAdapter>>,
-    aliases: HashMap<String, (String, String)>,
+    adapters: HashMap<ProviderId, Box<dyn AgentAdapter>>,
+    aliases: BTreeMap<String, (ProviderId, String)>,
 }
 impl AdapterRegistry {
     #[must_use]
     pub fn new(config: &Config) -> Self {
-        let mut adapters: HashMap<String, Box<dyn AgentAdapter>> = HashMap::new();
-        adapters.insert("claude".into(), Box::new(claude::ClaudeAdapter));
-        adapters.insert("codex".into(), Box::new(codex::CodexAdapter));
-        adapters.insert("pi".into(), Box::new(pi::PiAdapter));
-        adapters.insert("qwen".into(), Box::new(qwen::QwenAdapter));
+        let mut adapters: HashMap<ProviderId, Box<dyn AgentAdapter>> = HashMap::new();
+        adapters.insert(ProviderId::Claude, Box::new(claude::ClaudeAdapter));
+        adapters.insert(ProviderId::Codex, Box::new(codex::CodexAdapter));
+        adapters.insert(ProviderId::Pi, Box::new(pi::PiAdapter));
+        adapters.insert(ProviderId::Qwen, Box::new(qwen::QwenAdapter));
+        // Aliases naming no built-in are rejected by `Config::validate`; the
+        // registry skips them so an unvalidated configuration resolves nothing.
         let aliases = config
             .adapters
             .iter()
-            .map(|(name, c)| (name.clone(), (c.inherits.clone(), c.executable.clone())))
+            .filter_map(|(name, c)| {
+                let id = c.inherits.parse().ok()?;
+                Some((name.clone(), (id, c.executable.clone())))
+            })
             .collect();
         Self { adapters, aliases }
     }
+
+    /// Resolves a built-in or configured provider name to its adapter and the
+    /// executable to launch.
     pub fn resolve(&self, provider: &str) -> Option<(&dyn AgentAdapter, String)> {
-        if let Some(adapter) = self.adapters.get(provider) {
-            return Some((adapter.as_ref(), provider.into()));
+        if let Ok(id) = provider.parse::<ProviderId>() {
+            return Some((self.get(id), provider.into()));
         }
-        let (dialect, executable) = self.aliases.get(provider)?;
-        Some((self.adapters.get(dialect)?.as_ref(), executable.clone()))
+        let (id, executable) = self.aliases.get(provider)?;
+        Some((self.get(*id), executable.clone()))
+    }
+
+    #[must_use]
+    pub fn get(&self, id: ProviderId) -> &dyn AgentAdapter {
+        self.adapters
+            .get(&id)
+            .expect("every built-in provider is registered")
+            .as_ref()
+    }
+
+    #[must_use]
+    pub fn builtin_ids() -> &'static [ProviderId] {
+        ProviderId::ALL
+    }
+
+    /// Built-in provider names followed by configured aliases, sorted.
+    #[must_use]
+    pub fn provider_names(&self) -> Vec<String> {
+        Self::builtin_ids()
+            .iter()
+            .map(ToString::to_string)
+            .chain(
+                self.aliases
+                    .keys()
+                    .filter(|name| name.parse::<ProviderId>().is_err())
+                    .cloned(),
+            )
+            .collect()
     }
 }
 
@@ -280,28 +329,27 @@ pub(crate) fn bounded_field(raw: &Value, names: &[&str], max_chars: usize) -> Op
         .and_then(|value| sanitize_bounded(value, max_chars))
 }
 
-pub(crate) fn tool_activity_update(provider: &str, raw: &Value) -> Option<ToolActivityUpdate> {
-    let event = raw.get("hook_event_name")?.as_str()?;
-    let phase = match event {
-        "PreToolUse" => ToolActivityPhase::Start,
-        "ToolProgress" => ToolActivityPhase::Progress,
-        "PostToolUse" => ToolActivityPhase::Finish,
-        "PostToolUseFailure" => ToolActivityPhase::Failure,
-        "PermissionRequest" => ToolActivityPhase::Attention,
-        _ => return None,
-    };
-    let raw_label = raw.get("tool_name")?.as_str()?;
+/// Which tool inputs a provider exposes as safe activity detail. Only exact
+/// tool names listed here may contribute a description or a file target.
+pub(crate) struct ToolDetailPolicy {
+    pub described_tools: &'static [&'static str],
+    pub path_tools: &'static [&'static str],
+    pub path_fields: &'static [&'static str],
+}
+
+/// Builds a bounded tool activity update from fields the provider extracted.
+pub(crate) fn tool_activity(
+    phase: ToolActivityPhase,
+    raw_label: &str,
+    correlation_id: Option<String>,
+    input: Option<&Value>,
+    policy: &ToolDetailPolicy,
+    workspace: Option<&Path>,
+) -> Option<ToolActivityUpdate> {
     let label = normalized_tool_label(raw_label)?;
-    let correlation_id = match provider {
-        "qwen" => bounded_field(
-            raw,
-            &["tool_use_id", "tool_call_id"],
-            TOOL_CORRELATION_ID_MAX_CHARS,
-        ),
-        "claude" | "codex" => bounded_field(raw, &["tool_use_id"], TOOL_CORRELATION_ID_MAX_CHARS),
-        _ => None,
-    };
-    let detail = activity_detail(provider, raw_label, raw);
+    let detail = input
+        .and_then(Value::as_object)
+        .and_then(|input| activity_detail(raw_label, input, policy, workspace));
     Some(ToolActivityUpdate {
         phase,
         label,
@@ -332,31 +380,26 @@ pub(crate) fn normalized_tool_label(value: &str) -> Option<String> {
     })
 }
 
-fn activity_detail(provider: &str, tool: &str, raw: &Value) -> Option<String> {
-    let input = raw.get("tool_input")?.as_object()?;
-    let description_allowed = matches!(
-        (provider, tool),
-        ("claude" | "codex", "Bash" | "bash") | ("qwen", "run_shell_command" | "shell_command")
-    );
-    if description_allowed
+fn activity_detail(
+    tool: &str,
+    input: &serde_json::Map<String, Value>,
+    policy: &ToolDetailPolicy,
+    workspace: Option<&Path>,
+) -> Option<String> {
+    if policy.described_tools.contains(&tool)
         && let Some(value) = input.get("description").and_then(Value::as_str)
         && let Some(value) = safe_scalar_detail(value)
     {
         return Some(value);
     }
-    let path_fields: &[&str] = match (provider, tool) {
-        ("claude", "Read" | "Write" | "Edit") => &["file_path"],
-        ("codex", "Read" | "Write" | "Edit" | "read_file" | "write_file" | "edit_file") => {
-            &["file_path", "path"]
-        }
-        ("qwen", "read_file" | "write_file" | "replace") => &["file_path", "path"],
-        _ => &[],
-    };
-    let target = path_fields
+    if !policy.path_tools.contains(&tool) {
+        return None;
+    }
+    let target = policy
+        .path_fields
         .iter()
         .find_map(|field| input.get(*field).and_then(Value::as_str))?;
-    let cwd = raw.get(TRUSTED_WORKSPACE_FIELD)?.as_str()?;
-    workspace_relative_target(Path::new(cwd), Path::new(target))
+    workspace_relative_target(workspace?, Path::new(target))
 }
 
 fn safe_scalar_detail(value: &str) -> Option<String> {
@@ -803,32 +846,131 @@ pub fn merge_owned_toml(path: &Path, table: &str, value: Option<toml::Value>) ->
 mod tests {
     use super::*;
 
+    /// Provider-neutral modules and the one function allowed to name
+    /// built-in providers (the registry constructor in `lib.rs`).
+    const COMMON_MODULES: &[(&str, &str, Option<&str>)] = &[
+        (
+            "lib.rs",
+            include_str!("lib.rs"),
+            Some("pub fn new(config: &Config) -> Self {"),
+        ),
+        ("driver.rs", include_str!("driver.rs"), None),
+        ("dialect.rs", include_str!("dialect.rs"), None),
+        ("artifact.rs", include_str!("artifact.rs"), None),
+    ];
+
+    /// Removes the brace-delimited body that starts at `signature`.
+    fn without_function(source: &str, signature: &str) -> String {
+        let Some(start) = source.find(signature) else {
+            return source.to_owned();
+        };
+        let mut depth = 0_usize;
+        for (offset, ch) in source[start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let end = start + offset + 1;
+                        return format!("{}{}", &source[..start], &source[end..]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        source.to_owned()
+    }
+
+    /// Lines of production code that name a built-in provider identity.
+    fn provider_identity_violations(source: &str, allowed: Option<&str>) -> Vec<String> {
+        let production = source.split("#[cfg(test)]").next().unwrap_or_default();
+        let production = allowed.map_or_else(
+            || production.to_owned(),
+            |signature| without_function(production, signature),
+        );
+        let literals = ["\"claude\"", "\"codex\"", "\"qwen\"", "\"pi\""];
+        let variants = [
+            "ProviderId::Claude",
+            "ProviderId::Codex",
+            "ProviderId::Qwen",
+            "ProviderId::Pi",
+        ];
+        production
+            .lines()
+            .filter(|line| {
+                literals
+                    .iter()
+                    .chain(variants.iter())
+                    .any(|needle| line.contains(needle))
+            })
+            .map(|line| line.trim().to_owned())
+            .collect()
+    }
+
     #[test]
-    fn common_adapter_module_has_no_provider_artifact_rules() {
-        let production = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
-        for forbidden in [
-            "cache_read_input_tokens",
-            "usageMetadata",
-            "total_token_usage",
-            "transcript_path",
-            ".claude/projects",
-            ".codex/sessions",
-            ".qwen/projects",
-            ".pi/agent",
-            "pi_event",
-            "settled_status",
-            "agent_settled",
-            "thinking_level",
-            "sessiontap.ts",
-            "statusLine",
-            "statusline",
-        ] {
+    fn common_adapter_modules_do_not_branch_on_provider_identity() {
+        for (name, source, allowed) in COMMON_MODULES {
+            let violations = provider_identity_violations(source, *allowed);
             assert!(
-                !production.contains(forbidden),
-                "common adapter code contains {forbidden}"
+                violations.is_empty(),
+                "{name} names a provider outside the registry constructor: {violations:?}"
             );
         }
     }
+
+    #[test]
+    fn provider_identity_guard_detects_reintroduced_branches() {
+        let branch = "fn detail(provider: &str) -> bool {\n    matches!(provider, \"qwen\")\n}\n";
+        assert_eq!(provider_identity_violations(branch, None).len(), 1);
+        let arm = "fn f(id: ProviderId) {\n    match id {\n        ProviderId::Codex => {}\n        _ => {}\n    }\n}\n";
+        assert_eq!(provider_identity_violations(arm, None).len(), 1);
+        let registry = "pub fn new(config: &Config) -> Self {\n    insert(ProviderId::Pi, \"pi\");\n}\nfn other() {}\n";
+        assert!(
+            provider_identity_violations(registry, Some("pub fn new(config: &Config) -> Self {"))
+                .is_empty()
+        );
+        assert_eq!(provider_identity_violations(registry, None).len(), 1);
+        let test_only = "fn ok() {}\n#[cfg(test)]\nmod tests { const P: &str = \"claude\"; }\n";
+        assert!(provider_identity_violations(test_only, None).is_empty());
+    }
+
+    #[test]
+    fn common_adapter_modules_have_no_provider_artifact_rules() {
+        for (name, source, _) in COMMON_MODULES {
+            let production = source.split("#[cfg(test)]").next().unwrap();
+            for forbidden in [
+                "cache_read_input_tokens",
+                "usageMetadata",
+                "total_token_usage",
+                "transcript_path",
+                ".claude/projects",
+                ".codex/sessions",
+                ".qwen/projects",
+                ".pi/agent",
+                "pi_event",
+                "settled_status",
+                "agent_settled",
+                "thinking_level",
+                "sessiontap.ts",
+                "statusLine",
+                "statusline",
+                "PreToolUse",
+                "PostToolUse",
+                "PermissionRequest",
+                "ToolProgress",
+                "tool_execution_start",
+                "tool_use_id",
+                "tool_call_id",
+                "__sessiontap_invocation_workspace",
+            ] {
+                assert!(
+                    !production.contains(forbidden),
+                    "{name} contains {forbidden}"
+                );
+            }
+        }
+    }
+
     use sessiontap_core::config::CustomAdapter;
     use sessiontap_core::domain::EventKind;
 
@@ -853,8 +995,34 @@ mod tests {
         );
         let registry = AdapterRegistry::new(&config);
         let (adapter, executable) = registry.resolve("company-claude").unwrap();
-        assert_eq!(adapter.dialect(), "claude");
+        assert_eq!(adapter.provider_id(), ProviderId::Claude);
         assert_eq!(executable, "company-claude");
+    }
+
+    #[test]
+    fn registry_lists_builtins_then_configured_aliases() {
+        let mut config = Config::default();
+        for (name, inherits) in [("zeta", "qwen"), ("acme", "codex"), ("broken", "gemini")] {
+            config.adapters.insert(
+                name.into(),
+                CustomAdapter {
+                    executable: name.into(),
+                    inherits: inherits.into(),
+                },
+            );
+        }
+        let registry = AdapterRegistry::new(&config);
+        assert_eq!(
+            registry.provider_names(),
+            vec!["claude", "codex", "pi", "qwen", "acme", "zeta"]
+        );
+        assert_eq!(AdapterRegistry::builtin_ids().len(), 4);
+        for id in AdapterRegistry::builtin_ids() {
+            assert_eq!(registry.get(*id).provider_id(), *id);
+            assert_eq!(registry.resolve(id.as_str()).unwrap().1, id.as_str());
+        }
+        assert!(registry.resolve("broken").is_none());
+        assert!(registry.resolve("gemini").is_none());
     }
     #[test]
     fn redaction_preserves_boundaries() {
@@ -1614,6 +1782,7 @@ mod tests {
                 collector_instance_id: None,
                 source_sequence: None,
             },
+            &NormalizeContext::default(),
         )
         .unwrap()
         .into_event()
@@ -1634,9 +1803,12 @@ mod tests {
     fn root_locators_are_private_and_subagents_never_create_them() {
         let id = InvocationId::new();
         for (adapter, adapter_identity) in [
-            (&claude::ClaudeAdapter as &dyn AgentAdapter, "claude"),
-            (&codex::CodexAdapter as &dyn AgentAdapter, "codex"),
-            (&qwen::QwenAdapter as &dyn AgentAdapter, "qwen"),
+            (
+                &claude::ClaudeAdapter as &dyn AgentAdapter,
+                ProviderId::Claude,
+            ),
+            (&codex::CodexAdapter as &dyn AgentAdapter, ProviderId::Codex),
+            (&qwen::QwenAdapter as &dyn AgentAdapter, ProviderId::Qwen),
         ] {
             let raw = json!({
                 "hook_event_name": "SessionStart",
@@ -1674,120 +1846,5 @@ mod tests {
             .into_event()
             .unwrap();
         assert!(normalized.collection_context.is_none());
-    }
-
-    #[test]
-    fn tool_activity_selects_only_allowlisted_safe_detail() {
-        use sessiontap_core::domain::ToolActivityPhase;
-        let id = InvocationId::new();
-        let temp = tempfile::tempdir().unwrap();
-        let file = temp.path().join("src.rs");
-        fs::write(&file, "fn main() {}\n").unwrap();
-        let cwd = temp.path().to_string_lossy();
-
-        let shell = claude::ClaudeAdapter
-            .normalize(
-                &id,
-                &json!({
-                    "hook_event_name":"PreToolUse",
-                    "tool_name":"Bash",
-                    "tool_use_id":"tool-1",
-                    "cwd":cwd,
-                    "tool_input":{"command":"PRIVATE_COMMAND", "description":"Run unit tests"}
-                }),
-            )
-            .unwrap();
-        let tool = shell.event.tool_activity.as_ref().unwrap();
-        assert_eq!(tool.phase, ToolActivityPhase::Start);
-        assert_eq!(tool.label, "shell");
-        assert_eq!(tool.correlation_id.as_deref(), Some("tool-1"));
-        assert_eq!(tool.detail.as_deref(), Some("Run unit tests"));
-        assert!(
-            !serde_json::to_string(&shell.event)
-                .unwrap()
-                .contains("PRIVATE_COMMAND")
-        );
-
-        let mut read_payload = json!({
-            "hook_event_name":"PreToolUse",
-            "tool_name":"Read",
-            "tool_use_id":"tool-2",
-            "cwd":"/",
-            "__sessiontap_invocation_workspace":"/",
-            "tool_input":{"file_path":file}
-        });
-        stamp_invocation_workspace(&mut read_payload, Some(temp.path()));
-        let read = claude::ClaudeAdapter.normalize(&id, &read_payload).unwrap();
-        assert_eq!(
-            read.event.tool_activity.unwrap().detail.as_deref(),
-            Some("src.rs")
-        );
-
-        let outside = tempfile::NamedTempFile::new().unwrap();
-        let mut outside_payload = json!({
-            "hook_event_name":"PreToolUse",
-            "tool_name":"Read",
-            "tool_use_id":"tool-outside",
-            "tool_input":{"file_path":outside.path()}
-        });
-        stamp_invocation_workspace(&mut outside_payload, Some(temp.path()));
-        assert!(
-            claude::ClaudeAdapter
-                .normalize(&id, &outside_payload)
-                .unwrap()
-                .event
-                .tool_activity
-                .unwrap()
-                .detail
-                .is_none()
-        );
-
-        let unsafe_detail = claude::ClaudeAdapter
-            .normalize(
-                &id,
-                &json!({
-                    "hook_event_name":"PreToolUse",
-                    "tool_name":"Bash",
-                    "tool_use_id":"tool-3",
-                    "cwd":cwd,
-                    "tool_input":{"description":"Open https://example.invalid/?token=secret"}
-                }),
-            )
-            .unwrap();
-        assert!(unsafe_detail.event.tool_activity.unwrap().detail.is_none());
-    }
-
-    #[test]
-    fn supported_provider_tool_phases_are_exact_and_result_free() {
-        use sessiontap_core::domain::ToolActivityPhase;
-        let id = InvocationId::new();
-        for (provider, payload, phase) in [
-            (
-                "claude",
-                json!({"hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_use_id":"a","error":"PRIVATE"}),
-                ToolActivityPhase::Failure,
-            ),
-            (
-                "codex",
-                json!({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"b","tool_response":"PRIVATE"}),
-                ToolActivityPhase::Finish,
-            ),
-            (
-                "qwen",
-                json!({"hook_event_name":"PermissionRequest","tool_name":"run_shell_command","tool_call_id":"c","tool_input":{"command":"PRIVATE"}}),
-                ToolActivityPhase::Attention,
-            ),
-        ] {
-            let event = match provider {
-                "claude" => claude::ClaudeAdapter.normalize(&id, &payload),
-                "codex" => codex::CodexAdapter.normalize(&id, &payload),
-                "qwen" => qwen::QwenAdapter.normalize(&id, &payload),
-                _ => unreachable!(),
-            }
-            .unwrap()
-            .event;
-            assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
-            assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
-        }
     }
 }

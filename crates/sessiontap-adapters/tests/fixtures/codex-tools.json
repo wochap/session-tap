@@ -1,0 +1,7 @@
+[
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","turn_id":"t","tool_name":"Bash","tool_use_id":"c1","tool_input":{"command":"PRIVATE","description":"List files"}}},
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","turn_id":"t","tool_name":"read_file","tool_use_id":"c2","tool_input":{"path":"Cargo.toml"}}},
+  {"payload":{"hook_event_name":"PostToolUse","session_id":"s","turn_id":"t","tool_name":"Edit","tool_use_id":"c3","tool_input":{"file_path":"src/lib.rs"}}},
+  {"payload":{"hook_event_name":"PermissionRequest","session_id":"s","turn_id":"t","tool_name":"apply_patch","tool_use_id":"c4","tool_input":{"patch":"PRIVATE"}}},
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","turn_id":"t","tool_name":"Read","tool_call_id":"c5","tool_input":{"file_path":"/etc/hosts"}}}
+]

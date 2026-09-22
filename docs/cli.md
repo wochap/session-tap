@@ -35,6 +35,10 @@ executable = "company-claude"
 inherits = "claude"
 ```
 
+`inherits` must name a built-in provider (`claude`, `codex`, `pi`, or `qwen`);
+`sessiontapd` refuses to start with a configuration whose alias names any other
+value, and the launcher reports such an alias as an unknown provider.
+
 The daemon uses a private Unix socket under `$XDG_RUNTIME_DIR/sessiontap` and a
 SQLite database under `$XDG_STATE_HOME/sessiontap`. If it is unavailable or
 tracking initialization fails, the provider launches untracked and inherited

@@ -1,7 +1,7 @@
 use crate::Broker;
 use sessiontap_adapters::{
-    AdapterRegistry, CollectSessionDataRequest, CollectionCancellation, CollectionOutcome,
-    OpaqueCursor, ProviderSessionKey, SessionEnrichment,
+    AdapterRegistry, BoundedDiagnostic, CollectSessionDataRequest, CollectionCancellation,
+    CollectionOutcome, OpaqueCursor, ProviderSessionKey, SessionEnrichment,
 };
 use sessiontap_core::domain::{
     ArtifactCollectionContext, EventEvidence, EventKind, EvidenceChannel, InvocationId,
@@ -49,6 +49,13 @@ struct SessionState {
     last_event_at: Instant,
 }
 
+enum Settled {
+    /// The generation was cancelled; wait for the newer one.
+    Retry,
+    /// The generation finished, with a diagnostic to log on failure.
+    Done(Option<BoundedDiagnostic>),
+}
+
 #[derive(Clone)]
 struct Binding {
     credential: String,
@@ -81,12 +88,11 @@ impl UsageCoordinator {
     ) {
         let Some(context) = context else { return };
         if context.provider_session_id.trim().is_empty()
-            || context.adapter_identity.trim().is_empty()
             || self
                 .inner
                 .registry
                 .resolve(&configured_provider)
-                .is_none_or(|(adapter, _)| adapter.dialect() != context.adapter_identity)
+                .is_none_or(|(adapter, _)| adapter.provider_id() != context.adapter_identity)
         {
             return;
         }
@@ -198,10 +204,7 @@ impl UsageCoordinator {
                 self.finish(&key, generation);
                 return;
             }
-            let Some((adapter, _)) = self.inner.registry.resolve(&key.adapter_identity) else {
-                self.finish(&key, generation);
-                return;
-            };
+            let adapter = self.inner.registry.get(key.adapter_identity);
             let permit = match self.inner.workers.clone().acquire_owned().await {
                 Ok(permit) => permit,
                 Err(_) => return,
@@ -236,47 +239,54 @@ impl UsageCoordinator {
             if !current {
                 continue;
             }
-            match outcome {
-                CollectionOutcome::Complete { enrichment, cursor } => {
-                    self.apply_if_current(&key, generation, enrichment);
-                    if let Some(state) = self
-                        .inner
-                        .states
-                        .lock()
-                        .expect("collection state lock poisoned")
-                        .sessions
-                        .get_mut(&key)
-                        && state.generation == generation
-                    {
-                        state.cursor = Some(cursor);
-                    }
-                }
-                CollectionOutcome::Unchanged { cursor } => {
-                    if let Some(state) = self
-                        .inner
-                        .states
-                        .lock()
-                        .expect("collection state lock poisoned")
-                        .sessions
-                        .get_mut(&key)
-                        && state.generation == generation
-                    {
-                        state.cursor = Some(cursor);
-                    }
-                }
-                CollectionOutcome::Cancelled => continue,
-                CollectionOutcome::Failed(diagnostic) => {
+            match self.settle(&key, generation, outcome) {
+                Settled::Retry => continue,
+                Settled::Done(Some(diagnostic)) => {
                     eprintln!(
                         "sessiontapd: provider collection failed: {}",
                         diagnostic.message()
                     );
                 }
+                Settled::Done(None) => {}
             }
             if self.finish(&key, generation) {
                 continue;
             }
             return;
         }
+    }
+
+    /// Applies the outcome of a current generation. Only a completed scan
+    /// publishes enrichment; unchanged and unsupported outcomes leave verified
+    /// state untouched, and only failures produce a diagnostic.
+    fn settle(
+        &self,
+        key: &ProviderSessionKey,
+        generation: u64,
+        outcome: CollectionOutcome,
+    ) -> Settled {
+        let cursor = match outcome {
+            CollectionOutcome::Complete { enrichment, cursor } => {
+                self.apply_if_current(key, generation, enrichment);
+                cursor
+            }
+            CollectionOutcome::Unchanged { cursor } => cursor,
+            CollectionOutcome::Cancelled => return Settled::Retry,
+            CollectionOutcome::Unsupported => return Settled::Done(None),
+            CollectionOutcome::Failed(diagnostic) => return Settled::Done(Some(diagnostic)),
+        };
+        if let Some(state) = self
+            .inner
+            .states
+            .lock()
+            .expect("collection state lock poisoned")
+            .sessions
+            .get_mut(key)
+            && state.generation == generation
+        {
+            state.cursor = Some(cursor);
+        }
+        Settled::Done(None)
     }
 
     fn finish(&self, key: &ProviderSessionKey, generation: u64) -> bool {
@@ -384,7 +394,8 @@ impl UsageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sessiontap_core::config::Config;
+    use sessiontap_adapters::artifact::ArtifactCursor;
+    use sessiontap_core::{config::Config, domain::Usage};
     use sessiontap_storage::Storage;
     use std::collections::BTreeMap;
     use tokio::sync::broadcast;
@@ -409,7 +420,7 @@ mod tests {
 
     fn context(adapter: &str, session: &str) -> ArtifactCollectionContext {
         ArtifactCollectionContext {
-            adapter_identity: adapter.into(),
+            adapter_identity: adapter.parse().unwrap(),
             provider_session_id: session.into(),
             locator: PathBuf::from(format!("{session}.jsonl")),
         }
@@ -490,6 +501,157 @@ mod tests {
                 .generation,
             2
         );
+    }
+
+    fn register_bound_invocation(
+        coordinator: &UsageCoordinator,
+        provider: &str,
+        session: &str,
+    ) -> (ProviderSessionKey, InvocationId, u64) {
+        use sessiontap_core::domain::{
+            Activity, ActivityConfirmation, Capabilities, InvocationSnapshot, Lifecycle,
+            ProcessMetadata, ProviderSession, derive_status,
+        };
+        let now = chrono::Utc::now();
+        let invocation = InvocationId::new();
+        let snapshot = InvocationSnapshot {
+            schema_version: sessiontap_core::SCHEMA_VERSION,
+            revision: 0,
+            invocation_id: invocation.clone(),
+            provider: provider.into(),
+            executable: provider.into(),
+            args: vec![],
+            cwd: "/tmp".into(),
+            process: ProcessMetadata::default(),
+            created_at: now,
+            updated_at: now,
+            lifecycle: Lifecycle::Alive,
+            activity: Activity::Idle,
+            state_started_at: now,
+            last_state_asserted_at: None,
+            activity_confirmation: ActivityConfirmation::Live,
+            last_evidence: None,
+            source_ordering: vec![],
+            current_tool_activity: None,
+            status: derive_status(Lifecycle::Alive, Activity::Idle),
+            provider_session: Some(ProviderSession {
+                id: session.into(),
+                ..ProviderSession::default()
+            }),
+            provider_metadata: None,
+            usage: None,
+            repository: None,
+            multiplexer: None,
+            capabilities: Capabilities::default(),
+            turn_generation: 0,
+            completed_generation: None,
+        };
+        coordinator
+            .inner
+            .broker
+            .storage
+            .register(&snapshot, "credential", None)
+            .unwrap();
+        // Scheduling without awaiting keeps the spawned worker parked, so the
+        // test drives `settle` directly for the generation it created.
+        coordinator.schedule(
+            provider.into(),
+            invocation.clone(),
+            "credential".into(),
+            Some(context(provider, session)),
+        );
+        let states = coordinator.inner.states.lock().unwrap();
+        let (key, state) = states.sessions.iter().next().unwrap();
+        (key.clone(), invocation, state.generation)
+    }
+
+    fn stored_cursor(
+        coordinator: &UsageCoordinator,
+        key: &ProviderSessionKey,
+    ) -> Option<ArtifactCursor> {
+        coordinator.inner.states.lock().unwrap().sessions[key]
+            .cursor
+            .as_ref()
+            .and_then(|cursor| cursor.downcast_ref::<ArtifactCursor>().copied())
+    }
+
+    #[tokio::test]
+    async fn unchanged_collection_applies_no_enrichment_and_keeps_cursor() {
+        let temp = tempfile::tempdir().unwrap();
+        let coordinator = coordinator(&temp);
+        let (key, invocation, generation) = register_bound_invocation(&coordinator, "claude", "s1");
+        let storage = coordinator.inner.broker.storage.clone();
+        let cursor = ArtifactCursor {
+            device: 1,
+            inode: 2,
+            stable_len: 3,
+        };
+        let usage = Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(2),
+            context_tokens: Some(10),
+            context_window_percent: None,
+        };
+        assert!(matches!(
+            coordinator.settle(
+                &key,
+                generation,
+                CollectionOutcome::Complete {
+                    enrichment: SessionEnrichment {
+                        session_name: None,
+                        usage: Some(usage.clone()),
+                    },
+                    cursor: OpaqueCursor::new(cursor),
+                },
+            ),
+            Settled::Done(None)
+        ));
+        assert_eq!(
+            storage.invocation(&invocation).unwrap().usage,
+            Some(usage.clone())
+        );
+        assert_eq!(stored_cursor(&coordinator, &key), Some(cursor));
+
+        let revision = storage.revision().unwrap();
+        let mut updates = coordinator.inner.broker.updates.subscribe();
+        assert!(matches!(
+            coordinator.settle(
+                &key,
+                generation,
+                CollectionOutcome::Unchanged {
+                    cursor: OpaqueCursor::new(cursor),
+                },
+            ),
+            Settled::Done(None)
+        ));
+        assert_eq!(storage.revision().unwrap(), revision);
+        assert!(updates.try_recv().is_err());
+        assert_eq!(storage.invocation(&invocation).unwrap().usage, Some(usage));
+        assert_eq!(stored_cursor(&coordinator, &key), Some(cursor));
+    }
+
+    #[tokio::test]
+    async fn unsupported_collection_is_a_silent_no_op() {
+        let temp = tempfile::tempdir().unwrap();
+        let coordinator = coordinator(&temp);
+        let (key, invocation, generation) = register_bound_invocation(&coordinator, "pi", "s1");
+        let storage = coordinator.inner.broker.storage.clone();
+        let revision = storage.revision().unwrap();
+        assert!(matches!(
+            coordinator.settle(&key, generation, CollectionOutcome::Unsupported),
+            Settled::Done(None)
+        ));
+        assert_eq!(storage.revision().unwrap(), revision);
+        assert!(storage.invocation(&invocation).unwrap().usage.is_none());
+        assert!(stored_cursor(&coordinator, &key).is_none());
+        assert!(matches!(
+            coordinator.settle(
+                &key,
+                generation,
+                CollectionOutcome::Failed(BoundedDiagnostic::new("boom"))
+            ),
+            Settled::Done(Some(_))
+        ));
     }
 
     #[test]

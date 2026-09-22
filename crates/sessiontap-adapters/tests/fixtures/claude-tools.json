@@ -1,0 +1,9 @@
+[
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Bash","tool_use_id":"t1","tool_input":{"command":"PRIVATE","description":"Run unit tests"}}},
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Read","tool_use_id":"t2","tool_input":{"file_path":"Cargo.toml"}}},
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Read","tool_use_id":"t3","__sessiontap_invocation_workspace":"/","tool_input":{"file_path":"../outside.txt"}}},
+  {"payload":{"hook_event_name":"PostToolUse","session_id":"s","tool_name":"Edit","tool_use_id":"t4","tool_input":{"file_path":"src/lib.rs"},"tool_response":"PRIVATE"}},
+  {"payload":{"hook_event_name":"PostToolUseFailure","session_id":"s","tool_name":"Write","tool_use_id":"t5","tool_input":{"path":"src/lib.rs"}}},
+  {"payload":{"hook_event_name":"PermissionRequest","session_id":"s","tool_name":"Bash","tool_use_id":"t6","tool_input":{"command":"echo","description":"Open https://example.invalid"}}},
+  {"payload":{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"read_file","tool_use_id":"t7","tool_input":{"file_path":"Cargo.toml"}}}
+]

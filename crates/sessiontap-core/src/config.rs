@@ -1,3 +1,4 @@
+use crate::ProviderId;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io, path::Path, time::Duration};
 
@@ -203,10 +204,20 @@ impl Config {
         Ok(config)
     }
 
-    /// Validates sink configuration invariants that cannot be expressed in the
-    /// schema: hub sinks require a stable non-empty source identity, and sink
-    /// URLs must satisfy the network safety policy.
+    /// Validates configuration invariants that cannot be expressed in the
+    /// schema: every adapter alias inherits a built-in provider, hub sinks
+    /// require a stable non-empty source identity, and sink URLs must satisfy
+    /// the network safety policy.
     pub fn validate(&self) -> Result<(), String> {
+        for (name, adapter) in &self.adapters {
+            if adapter.inherits.parse::<ProviderId>().is_err() {
+                return Err(format!(
+                    "adapter '{name}' inherits unknown provider '{}'; expected one of {}",
+                    adapter.inherits,
+                    ProviderId::joined(", ")
+                ));
+            }
+        }
         for (name, sink) in &self.sinks {
             match sink {
                 SinkConfig::Http { url, .. } => validate_sink_url(url, &[])?,
@@ -244,6 +255,18 @@ mod tests {
         let c: Config = toml::from_str("version=1\n[adapters.acme]\nexecutable='company-claude'\ninherits='claude'\n[sinks.debug]\ntype='stdout'\nenabled=false\n").unwrap();
         assert_eq!(c.adapters["acme"].inherits, "claude");
         assert!(!c.sinks["debug"].enabled());
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn alias_with_unknown_inherits_is_rejected() {
+        let c: Config =
+            toml::from_str("version=1\n[adapters.acme]\nexecutable='acme'\ninherits='gemini'\n")
+                .unwrap();
+        let error = c.validate().unwrap_err();
+        assert!(error.contains("'acme'"), "{error}");
+        assert!(error.contains("'gemini'"), "{error}");
+        assert!(error.contains("claude, codex, pi, qwen"), "{error}");
     }
 
     #[test]

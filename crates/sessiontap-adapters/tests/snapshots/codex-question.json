@@ -1,0 +1,31 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_input",
+      "observed_at": "<received_at>",
+      "provider": "codex",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "current_turn_id": "turn-1"
+      },
+      "provider_session_id": "session-fixture",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": "turn-1",
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "generic_input",
+      "summary": "Input requested"
+    }
+  }
+]

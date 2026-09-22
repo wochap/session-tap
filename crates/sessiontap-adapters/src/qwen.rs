@@ -1,27 +1,34 @@
 use crate::{
-    AgentAdapter, BoundedDiagnostic, CollectSessionDataRequest, CollectionOutcome,
-    LaunchPreparation, OpaqueCursor, SessionEnrichment, SetupAction, SetupReport, bounded_field,
-    completed_reason_context, failed_reason_context, is_subagent_payload, merge_hook_config,
-    provider_metadata, sanitize_bounded, status_reason_context, tool_activity_update,
+    CollectSessionDataRequest, LaunchPreparation, NormalizeContext, OpaqueCursor,
+    SessionEnrichment, SetupAction, SetupReport, SideChannelSource, ToolDetailPolicy,
+    artifact::{
+        ArtifactCursor, CollectError, Collected, SessionCollector, check_cancelled,
+        cursor_unchanged, open_bounded_nofollow, optional_u64, validate_under_root,
+    },
+    bounded_field,
+    dialect::HookDialect,
+    driver::HookAdapter,
+    merge_hook_config, provider_metadata, sanitize_bounded, tool_activity,
 };
 use anyhow::{Context, Result, bail};
-use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sessiontap_core::ProviderId;
 use sessiontap_core::domain::{
-    AdapterOutcome, ArtifactCollectionContext, EventEvidence, EventKind, InvocationId,
-    NormalizedAdapterEvent, NormalizedEvent, Usage,
+    ArtifactCollectionContext, EventKind, ProviderMetadata, TOOL_CORRELATION_ID_MAX_CHARS,
+    ToolActivityPhase, ToolActivityUpdate, Usage,
 };
 use std::{
     collections::HashMap,
-    fs::{self, File, OpenOptions},
+    fs::File,
     io::{BufRead, BufReader, Seek, SeekFrom},
-    os::unix::{fs::MetadataExt, fs::OpenOptionsExt},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, OnceLock},
 };
-use uuid::Uuid;
+
+const SIDE_CHANNEL_MAX_LINE: usize = 64 * 1024;
 
 pub struct QwenJsonlTail {
     path: PathBuf,
@@ -42,8 +49,10 @@ impl QwenJsonlTail {
             identity: None,
         }
     }
+}
 
-    pub fn poll(&mut self) -> Result<Vec<Value>> {
+impl SideChannelSource for QwenJsonlTail {
+    fn poll(&mut self) -> Result<Vec<Value>> {
         let file = match File::open(&self.path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
@@ -85,8 +94,8 @@ pub fn qwen_has_user_side_channel(args: &[String]) -> bool {
     })
 }
 
-fn probe_qwen_dual_output(executable: &str) -> bool {
-    static CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+fn probe_qwen_dual_output(executable: &Path) -> bool {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(value) = cache.lock().expect("probe cache poisoned").get(executable) {
         return *value;
@@ -99,7 +108,7 @@ fn probe_qwen_dual_output(executable: &str) -> bool {
     cache
         .lock()
         .expect("probe cache poisoned")
-        .insert(executable.to_owned(), supported);
+        .insert(executable.to_path_buf(), supported);
     supported
 }
 pub const HOOK_EVENTS: &[&str] = &[
@@ -114,61 +123,68 @@ pub const HOOK_EVENTS: &[&str] = &[
     "StopFailure",
     "SessionEnd",
 ];
-pub struct QwenAdapter;
+pub type QwenAdapter = HookAdapter<QwenDialect, QwenCollector>;
 
-#[cfg(test)]
-impl QwenAdapter {
-    /// Test helper for cases that expect a normalized root event.
-    pub fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
-        match <Self as AgentAdapter>::normalize(self, id, raw)? {
-            AdapterOutcome::Event(event) => Ok(*event),
-            AdapterOutcome::Ignored => anyhow::bail!("ignored subagent hook"),
-        }
-    }
+#[allow(non_upper_case_globals)]
+pub const QwenAdapter: QwenAdapter =
+    HookAdapter::new(QwenDialect, QwenCollector, setup).with_launch(prepare_launch);
+
+fn setup(home: &Path, executable: &Path, action: SetupAction) -> Result<SetupReport> {
+    merge_hook_config(
+        &home.join(".qwen/settings.json"),
+        "qwen",
+        HOOK_EVENTS,
+        executable,
+        action,
+    )
 }
 
-#[async_trait]
-impl AgentAdapter for QwenAdapter {
-    fn dialect(&self) -> &'static str {
-        "qwen"
+fn prepare_launch(
+    args: &[String],
+    private_dir: &Path,
+    executable: &Path,
+) -> Result<LaunchPreparation> {
+    if qwen_has_user_side_channel(args) || !probe_qwen_dual_output(executable) {
+        return Ok(LaunchPreparation::default());
     }
-    fn prepare_launch(&self, args: &[String], private_dir: &Path) -> Result<LaunchPreparation> {
-        if qwen_has_user_side_channel(args) || !probe_qwen_dual_output("qwen") {
-            return Ok(LaunchPreparation::default());
-        }
-        let path = private_dir.join("qwen-events.jsonl");
-        Ok(LaunchPreparation {
-            extra_args: vec!["--json-file".into(), path.to_string_lossy().into_owned()],
-            environment: vec![],
-            side_channel: Some(path),
-        })
+    let path = private_dir.join("qwen-events.jsonl");
+    Ok(LaunchPreparation {
+        extra_args: vec!["--json-file".into(), path.to_string_lossy().into_owned()],
+        environment: vec![],
+        side_channel: Some(Box::new(QwenJsonlTail::new(path, SIDE_CHANNEL_MAX_LINE))),
+    })
+}
+
+const TOOL_CORRELATION_FIELDS: &[&str] = &["tool_use_id", "tool_call_id"];
+const TOOL_DETAIL: ToolDetailPolicy = ToolDetailPolicy {
+    described_tools: &["run_shell_command", "shell_command"],
+    path_tools: &["read_file", "write_file", "replace"],
+    path_fields: &["file_path", "path"],
+};
+
+pub struct QwenDialect;
+
+impl HookDialect for QwenDialect {
+    fn id(&self) -> ProviderId {
+        ProviderId::Qwen
     }
-    fn normalize_with_evidence(
-        &self,
-        id: &InvocationId,
-        raw: &Value,
-        evidence: EventEvidence,
-    ) -> Result<AdapterOutcome> {
-        if is_subagent_payload(raw) {
-            return Ok(AdapterOutcome::Ignored);
-        }
-        let Some(kind) = classify(raw) else {
-            return Ok(AdapterOutcome::Ignored);
-        };
-        let received_at = Utc::now();
-        let observed_at = raw
-            .get("timestamp")
+    fn classify(&self, raw: &Value) -> Option<EventKind> {
+        classify(raw)
+    }
+    fn observed_at(&self, raw: &Value) -> Option<DateTime<Utc>> {
+        raw.get("timestamp")
             .and_then(Value::as_str)
-            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&Utc))
-            .unwrap_or(received_at);
-        let status_reason = match kind {
-            EventKind::WaitingApproval => status_reason_context(raw, false),
-            EventKind::WaitingInput => status_reason_context(raw, true),
-            EventKind::Completed => completed_reason_context(raw),
-            EventKind::Failed => failed_reason_context(raw),
-            _ => None,
-        };
+    }
+    fn start_reason(&self, raw: &Value) -> Option<String> {
+        bounded_field(raw, &["source", "reason", "start_reason"], 32)
+            .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact"))
+    }
+    fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
+        provider_metadata(raw, None)
+    }
+    fn inline_usage(&self, raw: &Value) -> Option<Usage> {
         let usage = Usage {
             input_tokens: raw.get("input_tokens").and_then(Value::as_u64),
             output_tokens: raw.get("output_tokens").and_then(Value::as_u64),
@@ -179,108 +195,74 @@ impl AgentAdapter for QwenAdapter {
                 .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0)
                 .map(|v| (v * 100.0).round() as u8),
         };
-        let usage = (usage != Usage::default()).then_some(usage);
-        let turn_id = raw
-            .get("turn_id")
+        (usage != Usage::default()).then_some(usage)
+    }
+    fn turn_id(&self, raw: &Value) -> Option<String> {
+        raw.get("turn_id")
             .and_then(Value::as_str)
-            .and_then(|v| sanitize_bounded(v, 128));
-        Ok(AdapterOutcome::Event(Box::new(NormalizedAdapterEvent {
-            event: NormalizedEvent {
-                schema_version: sessiontap_core::SCHEMA_VERSION,
-                event_id: raw
-                    .get("event_id")
-                    .and_then(Value::as_str)
-                    .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned),
-                invocation_id: id.clone(),
-                provider_event_id: raw
-                    .get("event_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                provider: "qwen".into(),
-                observed_at,
-                received_at,
-                evidence,
-                kind: kind.clone(),
-                provider_session_id: raw
-                    .get("session_id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                provider_session_name: None,
-                provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
-                    .then(|| bounded_field(raw, &["source", "reason", "start_reason"], 32))
-                    .flatten()
-                    .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact")),
-                provider_metadata: provider_metadata(raw, None),
-                usage,
-                turn_id,
-                tool_activity: tool_activity_update("qwen", raw),
-            },
-            status_reason,
-            collection_context: collection_context(raw),
-        })))
+            .and_then(|v| sanitize_bounded(v, 128))
     }
-    async fn collect_session_data(&self, request: CollectSessionDataRequest) -> CollectionOutcome {
-        match tokio::task::spawn_blocking(move || collect(request)).await {
-            Ok(Ok((enrichment, cursor))) => CollectionOutcome::Complete {
-                enrichment,
-                cursor: OpaqueCursor::new(cursor),
-            },
-            Ok(Err(error)) if error.to_string() == "collection cancelled" => {
-                CollectionOutcome::Cancelled
-            }
-            Ok(Err(error)) => CollectionOutcome::Failed(BoundedDiagnostic::new(error.to_string())),
-            Err(error) => CollectionOutcome::Failed(BoundedDiagnostic::new(error.to_string())),
-        }
-    }
-    async fn setup(
+    fn tool_activity(
         &self,
-        home: &Path,
-        executable: &Path,
-        action: SetupAction,
-    ) -> Result<SetupReport> {
-        merge_hook_config(
-            &home.join(".qwen/settings.json"),
-            "qwen",
-            HOOK_EVENTS,
-            executable,
-            action,
+        raw: &Value,
+        context: &NormalizeContext<'_>,
+    ) -> Option<ToolActivityUpdate> {
+        let phase = match raw.get("hook_event_name")?.as_str()? {
+            "PreToolUse" => ToolActivityPhase::Start,
+            "ToolProgress" => ToolActivityPhase::Progress,
+            "PostToolUse" => ToolActivityPhase::Finish,
+            "PostToolUseFailure" => ToolActivityPhase::Failure,
+            "PermissionRequest" => ToolActivityPhase::Attention,
+            _ => return None,
+        };
+        tool_activity(
+            phase,
+            raw.get("tool_name")?.as_str()?,
+            bounded_field(raw, TOOL_CORRELATION_FIELDS, TOOL_CORRELATION_ID_MAX_CHARS),
+            raw.get("tool_input"),
+            &TOOL_DETAIL,
+            context.workspace,
         )
     }
-}
-
-fn collection_context(raw: &Value) -> Option<ArtifactCollectionContext> {
-    Some(ArtifactCollectionContext {
-        adapter_identity: "qwen".into(),
-        provider_session_id: raw.get("session_id")?.as_str()?.trim().to_owned(),
-        locator: PathBuf::from(raw.get("transcript_path")?.as_str()?),
-    })
-    .filter(|context| {
-        !context.provider_session_id.is_empty() && !context.locator.as_os_str().is_empty()
-    })
+    fn collection_context(&self, raw: &Value) -> Option<ArtifactCollectionContext> {
+        Some(ArtifactCollectionContext {
+            adapter_identity: ProviderId::Qwen,
+            provider_session_id: raw.get("session_id")?.as_str()?.trim().to_owned(),
+            locator: PathBuf::from(raw.get("transcript_path")?.as_str()?),
+        })
+        .filter(|context| {
+            !context.provider_session_id.is_empty() && !context.locator.as_os_str().is_empty()
+        })
+    }
 }
 
 const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 
-struct QwenCursor {
-    _device: u64,
-    _inode: u64,
-    _stable_len: u64,
+#[derive(Clone, Copy)]
+pub struct QwenCollector;
+
+impl SessionCollector for QwenCollector {
+    fn collect(&self, request: &CollectSessionDataRequest) -> Result<Collected, CollectError> {
+        Ok(scan(request).context("Qwen collection")?)
+    }
 }
 
-fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, QwenCursor)> {
-    check_cancelled(&request)?;
-    let root = fs::canonicalize(request.home.join(".qwen/projects"))
-        .context("Qwen artifact root is unavailable")?;
-    let canonical = validate_path(&root, &request.locator, &request.key.provider_session_id)?;
-    check_cancelled(&request)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&canonical)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_SCAN_BYTES {
-        bail!("Qwen artifact is not a bounded regular file");
+fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
+    check_cancelled(request)?;
+    let canonical = validate_under_root(
+        &request.home.join(".qwen/projects"),
+        &request.locator,
+        Some(&request.key.provider_session_id),
+        "jsonl",
+    )?;
+    check_cancelled(request)?;
+    let (file, metadata) = open_bounded_nofollow(&canonical, MAX_SCAN_BYTES)?;
+    let cursor = ArtifactCursor::from(&metadata);
+    if cursor_unchanged(request.prior_cursor.as_ref(), &cursor) {
+        return Ok(Collected::Unchanged {
+            cursor: OpaqueCursor::new(cursor),
+        });
     }
     let mut input = 0_u64;
     let mut output = 0_u64;
@@ -291,7 +273,7 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Qwe
     let mut reader = BufReader::new(file);
     let mut line = Vec::new();
     loop {
-        check_cancelled(&request)?;
+        check_cancelled(request)?;
         line.clear();
         let count = reader.read_until(b'\n', &mut line)?;
         if count == 0 {
@@ -341,16 +323,10 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Qwe
             _ => None,
         };
     }
-    check_cancelled(&request)?;
-    let after = reader.get_ref().metadata()?;
-    if after.dev() != metadata.dev()
-        || after.ino() != metadata.ino()
-        || after.len() < metadata.len()
-    {
-        bail!("Qwen artifact changed identity during collection");
-    }
-    Ok((
-        SessionEnrichment {
+    check_cancelled(request)?;
+    cursor.ensure_stable(reader.get_ref())?;
+    Ok(Collected::Complete {
+        enrichment: SessionEnrichment {
             session_name,
             usage: usage_observed.then_some(Usage {
                 input_tokens: Some(input),
@@ -359,40 +335,8 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Qwe
                 context_window_percent: percent,
             }),
         },
-        QwenCursor {
-            _device: metadata.dev(),
-            _inode: metadata.ino(),
-            _stable_len: metadata.len(),
-        },
-    ))
-}
-
-fn validate_path(root: &Path, locator: &Path, session: &str) -> Result<PathBuf> {
-    let unresolved = if locator.is_absolute() {
-        locator.to_path_buf()
-    } else {
-        root.join(locator)
-    };
-    if fs::symlink_metadata(&unresolved)?.file_type().is_symlink() {
-        bail!("Qwen artifact must not be a symlink");
-    }
-    let canonical = fs::canonicalize(unresolved)?;
-    if !canonical.starts_with(root) {
-        bail!("Qwen artifact escapes allowed root");
-    }
-    if canonical.extension().and_then(|value| value.to_str()) != Some("jsonl")
-        || canonical.file_stem().and_then(|value| value.to_str()) != Some(session)
-    {
-        bail!("Qwen artifact identity mismatch");
-    }
-    Ok(canonical)
-}
-
-fn optional_u64(value: &Value, field: &str) -> Result<Option<u64>> {
-    value
-        .get(field)
-        .map(|value| value.as_u64().context("invalid Qwen usage value"))
-        .transpose()
+        cursor: OpaqueCursor::new(cursor),
+    })
 }
 
 fn context_percent(value: u64, window: u64) -> Result<u8> {
@@ -404,19 +348,57 @@ fn context_percent(value: u64, window: u64) -> Result<u8> {
     Ok(u8::try_from(rounded.min(100))?)
 }
 
-fn check_cancelled(request: &CollectSessionDataRequest) -> Result<()> {
-    if request.cancellation.is_cancelled() {
-        bail!("collection cancelled");
+fn classify(raw: &Value) -> Option<EventKind> {
+    let name = raw.get("hook_event_name")?.as_str()?;
+    let ask_user = raw
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .is_some_and(|tool| matches!(tool, "AskUserQuestion" | "ask_user_question"));
+    match name {
+        "SessionStart" => Some(EventKind::ProviderSessionStarted),
+        "SessionEnd" => Some(EventKind::ProviderSessionEnded),
+        "UserPromptSubmit"
+            if raw
+                .get("prompt")
+                .and_then(Value::as_str)
+                .is_some_and(|prompt| prompt.trim().is_empty()) =>
+        {
+            Some(EventKind::Enrichment)
+        }
+        "UserPromptSubmit" => Some(EventKind::NewTurn),
+        "PreToolUse" if ask_user => Some(EventKind::WaitingInput),
+        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => Some(EventKind::Working),
+        "PermissionRequest" if ask_user => Some(EventKind::WaitingInput),
+        "PermissionRequest" => Some(EventKind::WaitingApproval),
+        "Notification" => match raw.get("notification_type").and_then(Value::as_str) {
+            Some("permission_prompt") => Some(EventKind::WaitingApproval),
+            Some("elicitation_dialog" | "agent_needs_input") => Some(EventKind::WaitingInput),
+            Some("idle_prompt") => Some(EventKind::Idle),
+            _ => None,
+        },
+        "Stop" if raw.get("is_interrupt").and_then(Value::as_bool) == Some(true) => {
+            Some(EventKind::Interrupted)
+        }
+        "Stop" => Some(EventKind::Completed),
+        "StopFailure" => Some(EventKind::Failed),
+        _ => None,
     }
-    Ok(())
 }
 
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 mod collection_tests {
     use super::*;
-    use crate::{CollectionCancellation, ProviderSessionKey};
+    use crate::{AgentAdapter, CollectionCancellation, CollectionOutcome, ProviderSessionKey};
     use std::{fs, os::unix::fs::symlink};
+
+    fn collect(
+        request: CollectSessionDataRequest,
+    ) -> Result<(SessionEnrichment, OpaqueCursor), CollectError> {
+        match QwenCollector.collect(&request)? {
+            Collected::Complete { enrichment, cursor } => Ok((enrichment, cursor)),
+            Collected::Unchanged { .. } => panic!("unexpected unchanged outcome"),
+        }
+    }
 
     fn fixture(session: &str, rows: &[&str]) -> (tempfile::TempDir, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
@@ -436,7 +418,7 @@ mod collection_tests {
             home: temp.path().to_path_buf(),
             key: ProviderSessionKey {
                 configured_provider: "qwen".into(),
-                adapter_identity: "qwen".into(),
+                adapter_identity: ProviderId::Qwen,
                 provider_session_id: session.into(),
             },
             locator,
@@ -501,43 +483,163 @@ mod collection_tests {
         let (cancel_home, cancel_path) = fixture("s5", &["{}"]);
         let cancelled = request(&cancel_home, "s5", cancel_path);
         cancelled.cancellation.cancel();
-        assert!(collect(cancelled).is_err());
+        assert!(matches!(collect(cancelled), Err(CollectError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn unchanged_cursor_skips_scan_and_growth_forces_rescan() {
+        let row = r#"{"sessionId":"s1","type":"assistant","usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1}}"#;
+        let (temp, path) = fixture("s1", &[row]);
+        let collect_with = |prior: Option<OpaqueCursor>| {
+            let mut request = request(&temp, "s1", path.clone());
+            request.prior_cursor = prior;
+            QwenAdapter.collect_session_data(request)
+        };
+        let CollectionOutcome::Complete { cursor, .. } = collect_with(None).await else {
+            panic!("expected complete outcome");
+        };
+        assert!(matches!(
+            collect_with(Some(cursor.clone())).await,
+            CollectionOutcome::Unchanged { .. }
+        ));
+        fs::write(&path, format!("{row}\n{row}\n")).unwrap();
+        let CollectionOutcome::Complete { enrichment, .. } = collect_with(Some(cursor)).await
+        else {
+            panic!("grown artifact must be rescanned");
+        };
+        assert_eq!(enrichment.usage.unwrap().input_tokens, Some(8));
     }
 }
 
-fn classify(raw: &Value) -> Option<EventKind> {
-    let name = raw.get("hook_event_name")?.as_str()?;
-    let ask_user = raw
-        .get("tool_name")
-        .and_then(Value::as_str)
-        .is_some_and(|tool| matches!(tool, "AskUserQuestion" | "ask_user_question"));
-    match name {
-        "SessionStart" => Some(EventKind::ProviderSessionStarted),
-        "SessionEnd" => Some(EventKind::ProviderSessionEnded),
-        "UserPromptSubmit"
-            if raw
-                .get("prompt")
-                .and_then(Value::as_str)
-                .is_some_and(|prompt| prompt.trim().is_empty()) =>
-        {
-            Some(EventKind::Enrichment)
-        }
-        "UserPromptSubmit" => Some(EventKind::NewTurn),
-        "PreToolUse" if ask_user => Some(EventKind::WaitingInput),
-        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" => Some(EventKind::Working),
-        "PermissionRequest" if ask_user => Some(EventKind::WaitingInput),
-        "PermissionRequest" => Some(EventKind::WaitingApproval),
-        "Notification" => match raw.get("notification_type").and_then(Value::as_str) {
-            Some("permission_prompt") => Some(EventKind::WaitingApproval),
-            Some("elicitation_dialog" | "agent_needs_input") => Some(EventKind::WaitingInput),
-            Some("idle_prompt") => Some(EventKind::Idle),
-            _ => None,
-        },
-        "Stop" if raw.get("is_interrupt").and_then(Value::as_bool) == Some(true) => {
-            Some(EventKind::Interrupted)
-        }
-        "Stop" => Some(EventKind::Completed),
-        "StopFailure" => Some(EventKind::Failed),
-        _ => None,
+#[cfg(test)]
+mod tool_activity_tests {
+    use super::*;
+    use crate::AgentAdapter;
+    use serde_json::json;
+    use sessiontap_core::domain::{EventEvidence, InvocationId};
+    use std::fs;
+
+    #[test]
+    fn tool_activity_selects_only_allowlisted_safe_detail() {
+        let id = InvocationId::new();
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("src.rs"), "").unwrap();
+        let normalize = |raw: serde_json::Value| {
+            AgentAdapter::normalize_with_evidence(
+                &QwenAdapter,
+                &id,
+                &raw,
+                EventEvidence::managed_hook(1),
+                &NormalizeContext {
+                    workspace: Some(temp.path()),
+                },
+            )
+            .unwrap()
+            .into_event()
+            .unwrap()
+            .event
+            .tool_activity
+            .unwrap()
+        };
+        let shell = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"run_shell_command",
+            "tool_use_id":"q1",
+            "tool_input":{"command":"PRIVATE","description":"Run unit tests"}
+        }));
+        assert_eq!(shell.detail.as_deref(), Some("Run unit tests"));
+        assert_eq!(shell.correlation_id.as_deref(), Some("q1"));
+        let read = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"replace",
+            "tool_use_id":"q2",
+            "tool_input":{"path":"src.rs"}
+        }));
+        assert_eq!(read.detail.as_deref(), Some("src.rs"));
+        let escaped = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"replace",
+            "tool_use_id":"q3",
+            "tool_input":{"path":"../src.rs"}
+        }));
+        assert!(escaped.detail.is_none());
+        let unlisted = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Bash",
+            "tool_use_id":"q4",
+            "tool_input":{"description":"Not allowlisted","file_path":"src.rs"}
+        }));
+        assert!(unlisted.detail.is_none());
+    }
+
+    #[test]
+    fn supported_tool_phase_is_exact_and_result_free() {
+        let id = InvocationId::new();
+        let (payload, phase) = (
+            json!({"hook_event_name":"PermissionRequest","tool_name":"run_shell_command","tool_call_id":"c","tool_input":{"command":"PRIVATE"}}),
+            ToolActivityPhase::Attention,
+        );
+        let event = QwenAdapter.normalize(&id, &payload).unwrap().event;
+        assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
+        assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use crate::AgentAdapter;
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    fn fake_executable(dir: &Path, name: &str, help: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(
+            &path,
+            format!("#!/bin/sh\ntouch \"$0.probed\"\necho '{help}'\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[test]
+    fn alias_executable_is_probed_and_side_channel_is_tailed_through_the_trait() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = fake_executable(temp.path(), "company-qwen", "  --json-file <path>");
+        let private = temp.path().join("private");
+        fs::create_dir_all(&private).unwrap();
+        let mut prep = QwenAdapter
+            .prepare_launch(&["--yolo".into()], &private, &executable)
+            .unwrap();
+        assert!(temp.path().join("company-qwen.probed").exists());
+        let events = private.join("qwen-events.jsonl");
+        assert_eq!(
+            prep.extra_args,
+            vec![
+                "--json-file".to_owned(),
+                events.to_string_lossy().into_owned()
+            ]
+        );
+        let source: &mut dyn SideChannelSource = prep.side_channel.as_deref_mut().unwrap();
+        assert!(source.poll().unwrap().is_empty());
+        fs::write(&events, "{\"hook_event_name\":\"Stop\"}\n").unwrap();
+        assert_eq!(source.poll().unwrap()[0]["hook_event_name"], "Stop");
+    }
+
+    #[test]
+    fn unsupported_or_user_configured_side_channel_is_left_alone() {
+        let temp = tempfile::tempdir().unwrap();
+        let plain = fake_executable(temp.path(), "old-qwen", "usage: qwen [options]");
+        let prep = QwenAdapter
+            .prepare_launch(&[], temp.path(), &plain)
+            .unwrap();
+        assert!(temp.path().join("old-qwen.probed").exists());
+        assert!(prep.extra_args.is_empty() && prep.side_channel.is_none());
+
+        let dual = fake_executable(temp.path(), "new-qwen", "--json-file");
+        let prep = QwenAdapter
+            .prepare_launch(&["--json-fd=4".into()], temp.path(), &dual)
+            .unwrap();
+        assert!(prep.extra_args.is_empty() && prep.side_channel.is_none());
     }
 }

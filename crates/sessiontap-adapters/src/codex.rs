@@ -1,24 +1,27 @@
 use crate::{
-    AgentAdapter, BoundedDiagnostic, CollectSessionDataRequest, CollectionOutcome, OpaqueCursor,
-    SessionEnrichment, SetupAction, SetupReport, bounded_field, completed_reason_context,
-    is_subagent_payload, merge_hook_config, provider_metadata, sanitize_bounded,
-    status_reason_context, tool_activity_update,
+    CollectSessionDataRequest, NormalizeContext, OpaqueCursor, SessionEnrichment, SetupAction,
+    SetupReport, ToolDetailPolicy,
+    artifact::{
+        ArtifactCursor, CollectError, Collected, SessionCollector, check_cancelled,
+        open_bounded_nofollow, optional_u64, validate_under_root,
+    },
+    bounded_field,
+    dialect::HookDialect,
+    driver::HookAdapter,
+    merge_hook_config, provider_metadata, sanitize_bounded, tool_activity,
 };
 use anyhow::{Context, Result, bail};
-use async_trait::async_trait;
-use chrono::Utc;
 use serde_json::Value;
+use sessiontap_core::ProviderId;
 use sessiontap_core::domain::{
-    AdapterOutcome, ArtifactCollectionContext, EventEvidence, EventKind, InvocationId,
-    NormalizedAdapterEvent, NormalizedEvent, Usage,
+    ArtifactCollectionContext, EventKind, ProviderMetadata, TOOL_CORRELATION_ID_MAX_CHARS,
+    ToolActivityPhase, ToolActivityUpdate, Usage,
 };
 use std::{
-    fs::{self, OpenOptions},
+    fs::{self, File},
     io::{BufRead, BufReader},
-    os::unix::{fs::MetadataExt, fs::OpenOptionsExt},
     path::{Path, PathBuf},
 };
-use uuid::Uuid;
 
 pub const HOOK_EVENTS: &[&str] = &[
     "SessionStart",
@@ -33,185 +36,156 @@ pub const HOOK_EVENTS: &[&str] = &[
     "Stop",
     "SessionEnd",
 ];
-pub struct CodexAdapter;
+pub type CodexAdapter = HookAdapter<CodexDialect, CodexCollector>;
 
-#[cfg(test)]
-impl CodexAdapter {
-    /// Test helper for cases that expect a normalized root event.
-    pub fn normalize(&self, id: &InvocationId, raw: &Value) -> Result<NormalizedAdapterEvent> {
-        match <Self as AgentAdapter>::normalize(self, id, raw)? {
-            AdapterOutcome::Event(event) => Ok(*event),
-            AdapterOutcome::Ignored => anyhow::bail!("ignored subagent hook"),
-        }
+#[allow(non_upper_case_globals)]
+pub const CodexAdapter: CodexAdapter = HookAdapter::new(CodexDialect, CodexCollector, setup);
+
+fn setup(home: &Path, executable: &Path, action: SetupAction) -> Result<SetupReport> {
+    let mut report = merge_hook_config(
+        &home.join(".codex/hooks.json"),
+        "codex",
+        HOOK_EVENTS,
+        executable,
+        action,
+    )?;
+    if action != SetupAction::Remove {
+        report
+            .message
+            .push_str("; review or refresh trust with Codex /hooks");
     }
+    Ok(report)
 }
 
-#[async_trait]
-impl AgentAdapter for CodexAdapter {
-    fn dialect(&self) -> &'static str {
-        "codex"
+const TOOL_CORRELATION_FIELDS: &[&str] = &["tool_use_id"];
+const TOOL_DETAIL: ToolDetailPolicy = ToolDetailPolicy {
+    described_tools: &["Bash", "bash"],
+    path_tools: &[
+        "Read",
+        "Write",
+        "Edit",
+        "read_file",
+        "write_file",
+        "edit_file",
+    ],
+    path_fields: &["file_path", "path"],
+};
+
+pub struct CodexDialect;
+
+impl HookDialect for CodexDialect {
+    fn id(&self) -> ProviderId {
+        ProviderId::Codex
     }
-    fn normalize_with_evidence(
+    fn classify(&self, raw: &Value) -> Option<EventKind> {
+        classify(raw)
+    }
+    fn start_reason(&self, raw: &Value) -> Option<String> {
+        bounded_field(raw, &["source", "reason", "start_reason"], 32)
+            .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact"))
+    }
+    fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
+        provider_metadata(raw, None)
+    }
+    fn turn_id(&self, raw: &Value) -> Option<String> {
+        raw.get("turn_id")
+            .and_then(Value::as_str)
+            .and_then(|v| sanitize_bounded(v, 128))
+    }
+    fn tool_activity(
         &self,
-        id: &InvocationId,
         raw: &Value,
-        evidence: EventEvidence,
-    ) -> Result<AdapterOutcome> {
-        if is_subagent_payload(raw) {
-            return Ok(AdapterOutcome::Ignored);
-        }
-        let Some(kind) = classify(raw) else {
-            return Ok(AdapterOutcome::Ignored);
+        context: &NormalizeContext<'_>,
+    ) -> Option<ToolActivityUpdate> {
+        let phase = match raw.get("hook_event_name")?.as_str()? {
+            "PreToolUse" => ToolActivityPhase::Start,
+            "ToolProgress" => ToolActivityPhase::Progress,
+            "PostToolUse" => ToolActivityPhase::Finish,
+            "PostToolUseFailure" => ToolActivityPhase::Failure,
+            "PermissionRequest" => ToolActivityPhase::Attention,
+            _ => return None,
         };
-        Ok(AdapterOutcome::Event(Box::new(build(
-            id, raw, kind, evidence,
-        ))))
+        tool_activity(
+            phase,
+            raw.get("tool_name")?.as_str()?,
+            bounded_field(raw, TOOL_CORRELATION_FIELDS, TOOL_CORRELATION_ID_MAX_CHARS),
+            raw.get("tool_input"),
+            &TOOL_DETAIL,
+            context.workspace,
+        )
     }
-    async fn collect_session_data(&self, request: CollectSessionDataRequest) -> CollectionOutcome {
-        match tokio::task::spawn_blocking(move || collect(request)).await {
-            Ok(Ok((enrichment, cursor))) => CollectionOutcome::Complete {
-                enrichment,
-                cursor: OpaqueCursor::new(cursor),
-            },
-            Ok(Err(error)) if error.to_string() == "collection cancelled" => {
-                CollectionOutcome::Cancelled
-            }
-            Ok(Err(error)) => CollectionOutcome::Failed(BoundedDiagnostic::new(error.to_string())),
-            Err(error) => CollectionOutcome::Failed(BoundedDiagnostic::new(error.to_string())),
-        }
+    fn collection_context(&self, raw: &Value) -> Option<ArtifactCollectionContext> {
+        Some(ArtifactCollectionContext {
+            adapter_identity: ProviderId::Codex,
+            provider_session_id: raw.get("session_id")?.as_str()?.trim().to_owned(),
+            locator: PathBuf::from(raw.get("transcript_path")?.as_str()?),
+        })
+        .filter(|context| {
+            !context.provider_session_id.is_empty() && !context.locator.as_os_str().is_empty()
+        })
     }
-    async fn setup(
-        &self,
-        home: &Path,
-        executable: &Path,
-        action: SetupAction,
-    ) -> Result<SetupReport> {
-        let mut report = merge_hook_config(
-            &home.join(".codex/hooks.json"),
-            "codex",
-            HOOK_EVENTS,
-            executable,
-            action,
-        )?;
-        if action != SetupAction::Remove {
-            report
-                .message
-                .push_str("; review or refresh trust with Codex /hooks");
-        }
-        Ok(report)
-    }
-}
-
-fn classify(raw: &Value) -> Option<EventKind> {
-    let name = raw.get("hook_event_name")?.as_str()?;
-    let request_input = raw
-        .get("tool_name")
-        .and_then(Value::as_str)
-        .is_some_and(|tool| matches!(tool, "request_user_input" | "functions.request_user_input"));
-    match name {
-        "SessionStart" => Some(EventKind::ProviderSessionStarted),
-        "SessionEnd" => Some(EventKind::ProviderSessionEnded),
-        "UserPromptSubmit" => Some(EventKind::NewTurn),
-        "PreToolUse" if request_input => Some(EventKind::WaitingInput),
-        "PreToolUse" | "PostToolUse" => Some(EventKind::Working),
-        "PermissionRequest" if request_input => Some(EventKind::WaitingInput),
-        "PermissionRequest" => Some(EventKind::WaitingApproval),
-        "UserInputRequest" => Some(EventKind::WaitingInput),
-        "PreCompact" => Some(EventKind::Working),
-        "PostCompact" => Some(EventKind::Enrichment),
-        "Interrupt" => Some(EventKind::Interrupted),
-        "Stop" => Some(EventKind::Completed),
-        _ => None,
-    }
-}
-
-fn build(
-    id: &InvocationId,
-    raw: &Value,
-    kind: EventKind,
-    evidence: EventEvidence,
-) -> NormalizedAdapterEvent {
-    let now = Utc::now();
-    let status_reason = match kind {
-        EventKind::WaitingApproval => status_reason_context(raw, false),
-        EventKind::WaitingInput => status_reason_context(raw, true),
-        EventKind::Completed => completed_reason_context(raw),
-        _ => None,
-    };
-    let turn_id = raw
-        .get("turn_id")
-        .and_then(Value::as_str)
-        .and_then(|v| sanitize_bounded(v, 128));
-    NormalizedAdapterEvent {
-        event: NormalizedEvent {
-            schema_version: sessiontap_core::SCHEMA_VERSION,
-            event_id: raw
-                .get("event_id")
-                .and_then(Value::as_str)
-                .map_or_else(|| Uuid::new_v4().to_string(), str::to_owned),
-            invocation_id: id.clone(),
-            provider_event_id: raw
-                .get("event_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            provider: "codex".into(),
-            observed_at: now,
-            received_at: now,
-            evidence,
-            kind: kind.clone(),
-            provider_session_id: raw
-                .get("session_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            provider_session_name: None,
-            provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
-                .then(|| bounded_field(raw, &["source", "reason", "start_reason"], 32))
-                .flatten()
-                .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact")),
-            provider_metadata: provider_metadata(raw, None),
-            usage: None,
-            turn_id,
-            tool_activity: tool_activity_update("codex", raw),
-        },
-        status_reason,
-        collection_context: collection_context(raw),
-    }
-}
-
-fn collection_context(raw: &Value) -> Option<ArtifactCollectionContext> {
-    Some(ArtifactCollectionContext {
-        adapter_identity: "codex".into(),
-        provider_session_id: raw.get("session_id")?.as_str()?.trim().to_owned(),
-        locator: PathBuf::from(raw.get("transcript_path")?.as_str()?),
-    })
-    .filter(|context| {
-        !context.provider_session_id.is_empty() && !context.locator.as_os_str().is_empty()
-    })
 }
 
 const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const SESSION_NAME_MAX_CHARS: usize = 160;
 
+/// Codex enrichment depends on two files, so its cursor covers both: the
+/// rollout and, when readable, the session index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CodexCursor {
-    _device: u64,
-    _inode: u64,
-    _stable_len: u64,
+    rollout: ArtifactCursor,
+    index: Option<ArtifactCursor>,
 }
 
-fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, CodexCursor)> {
-    check_cancelled(&request)?;
-    let root = fs::canonicalize(request.home.join(".codex/sessions"))
-        .context("Codex artifact root is unavailable")?;
-    let canonical = validate_path(&root, &request.locator)?;
-    check_cancelled(&request)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&canonical)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_SCAN_BYTES {
-        bail!("Codex artifact is not a bounded regular file");
+#[derive(Clone, Copy)]
+pub struct CodexCollector;
+
+impl SessionCollector for CodexCollector {
+    fn collect(&self, request: &CollectSessionDataRequest) -> Result<Collected, CollectError> {
+        Ok(scan(request).context("Codex collection")?)
+    }
+}
+
+fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
+    check_cancelled(request)?;
+    let canonical = validate_under_root(
+        &request.home.join(".codex/sessions"),
+        &request.locator,
+        None,
+        "jsonl",
+    )?;
+    // Rollout files are named `rollout-<timestamp>-<session id>.jsonl`.
+    if !canonical
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.strip_suffix(request.key.provider_session_id.as_str()))
+        .is_some_and(|prefix| prefix.ends_with('-'))
+    {
+        bail!("Codex artifact identity mismatch");
+    }
+    check_cancelled(request)?;
+    let (file, metadata) = open_bounded_nofollow(&canonical, MAX_SCAN_BYTES)?;
+    let index = match open_index(request) {
+        Ok((file, metadata)) => Some((file, ArtifactCursor::from(&metadata))),
+        Err(_) => {
+            check_cancelled(request)?;
+            None
+        }
+    };
+    let cursor = CodexCursor {
+        rollout: ArtifactCursor::from(&metadata),
+        index: index.as_ref().map(|(_, cursor)| *cursor),
+    };
+    if request
+        .prior_cursor
+        .as_ref()
+        .and_then(OpaqueCursor::downcast_ref::<CodexCursor>)
+        == Some(&cursor)
+    {
+        return Ok(Collected::Unchanged {
+            cursor: OpaqueCursor::new(cursor),
+        });
     }
     let mut session_bound = false;
     let mut latest = None;
@@ -219,7 +193,7 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cod
     let mut reader = BufReader::new(file);
     let mut line = Vec::new();
     loop {
-        check_cancelled(&request)?;
+        check_cancelled(request)?;
         line.clear();
         let count = reader.read_until(b'\n', &mut line)?;
         if count == 0 {
@@ -284,52 +258,44 @@ fn collect(request: CollectSessionDataRequest) -> Result<(SessionEnrichment, Cod
             context_window_percent: percent,
         });
     }
-    check_cancelled(&request)?;
+    check_cancelled(request)?;
     if !session_bound {
         bail!("Codex artifact did not bind requested session");
     }
-    let after = reader.get_ref().metadata()?;
-    if after.dev() != metadata.dev()
-        || after.ino() != metadata.ino()
-        || after.len() < metadata.len()
-    {
-        bail!("Codex artifact changed identity during collection");
-    }
-    let index_name = match collect_index_name(&request) {
-        Ok(name) => name,
-        Err(_) => {
-            check_cancelled(&request)?;
-            None
-        }
+    cursor.rollout.ensure_stable(reader.get_ref())?;
+    let index_name = match index {
+        Some((file, index_cursor)) => match scan_index(request, file, index_cursor) {
+            Ok(name) => name,
+            Err(_) => {
+                check_cancelled(request)?;
+                None
+            }
+        },
+        None => None,
     };
-    Ok((
-        SessionEnrichment {
+    Ok(Collected::Complete {
+        enrichment: SessionEnrichment {
             session_name: index_name.or(session_name),
             usage: latest,
         },
-        CodexCursor {
-            _device: metadata.dev(),
-            _inode: metadata.ino(),
-            _stable_len: metadata.len(),
-        },
-    ))
+        cursor: OpaqueCursor::new(cursor),
+    })
 }
 
-fn collect_index_name(request: &CollectSessionDataRequest) -> Result<Option<String>> {
+fn open_index(request: &CollectSessionDataRequest) -> Result<(File, fs::Metadata)> {
     check_cancelled(request)?;
     let path = request.home.join(".codex/session_index.jsonl");
     if fs::symlink_metadata(&path)?.file_type().is_symlink() {
         bail!("Codex session index must not be a symlink");
     }
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_SCAN_BYTES {
-        bail!("Codex session index is not a bounded regular file");
-    }
+    open_bounded_nofollow(&path, MAX_SCAN_BYTES)
+}
 
+fn scan_index(
+    request: &CollectSessionDataRequest,
+    file: File,
+    cursor: ArtifactCursor,
+) -> Result<Option<String>> {
     let mut latest = None;
     let mut total = 0_u64;
     let mut reader = BufReader::new(file);
@@ -368,43 +334,35 @@ fn collect_index_name(request: &CollectSessionDataRequest) -> Result<Option<Stri
             latest = Some(name);
         }
     }
-
     check_cancelled(request)?;
-    let after = reader.get_ref().metadata()?;
-    if after.dev() != metadata.dev()
-        || after.ino() != metadata.ino()
-        || after.len() < metadata.len()
-        || after.len() > MAX_SCAN_BYTES
-    {
+    cursor.ensure_stable(reader.get_ref())?;
+    if reader.get_ref().metadata()?.len() > MAX_SCAN_BYTES {
         bail!("Codex session index changed identity during collection");
     }
     Ok(latest)
 }
 
-fn validate_path(root: &Path, locator: &Path) -> Result<PathBuf> {
-    let unresolved = if locator.is_absolute() {
-        locator.to_path_buf()
-    } else {
-        root.join(locator)
-    };
-    if fs::symlink_metadata(&unresolved)?.file_type().is_symlink() {
-        bail!("Codex artifact must not be a symlink");
+fn classify(raw: &Value) -> Option<EventKind> {
+    let name = raw.get("hook_event_name")?.as_str()?;
+    let request_input = raw
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .is_some_and(|tool| matches!(tool, "request_user_input" | "functions.request_user_input"));
+    match name {
+        "SessionStart" => Some(EventKind::ProviderSessionStarted),
+        "SessionEnd" => Some(EventKind::ProviderSessionEnded),
+        "UserPromptSubmit" => Some(EventKind::NewTurn),
+        "PreToolUse" if request_input => Some(EventKind::WaitingInput),
+        "PreToolUse" | "PostToolUse" => Some(EventKind::Working),
+        "PermissionRequest" if request_input => Some(EventKind::WaitingInput),
+        "PermissionRequest" => Some(EventKind::WaitingApproval),
+        "UserInputRequest" => Some(EventKind::WaitingInput),
+        "PreCompact" => Some(EventKind::Working),
+        "PostCompact" => Some(EventKind::Enrichment),
+        "Interrupt" => Some(EventKind::Interrupted),
+        "Stop" => Some(EventKind::Completed),
+        _ => None,
     }
-    let canonical = fs::canonicalize(unresolved)?;
-    if !canonical.starts_with(root) {
-        bail!("Codex artifact escapes allowed root");
-    }
-    if canonical.extension().and_then(|value| value.to_str()) != Some("jsonl") {
-        bail!("Codex artifact must be JSONL");
-    }
-    Ok(canonical)
-}
-
-fn optional_u64(value: &Value, field: &str) -> Result<Option<u64>> {
-    value
-        .get(field)
-        .map(|value| value.as_u64().context("invalid Codex usage value"))
-        .transpose()
 }
 
 fn percent(value: u64, window: u64) -> Result<u8> {
@@ -416,18 +374,20 @@ fn percent(value: u64, window: u64) -> Result<u8> {
     Ok(u8::try_from(rounded.min(100))?)
 }
 
-fn check_cancelled(request: &CollectSessionDataRequest) -> Result<()> {
-    if request.cancellation.is_cancelled() {
-        bail!("collection cancelled");
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod collection_tests {
     use super::*;
-    use crate::{CollectionCancellation, ProviderSessionKey};
+    use crate::{AgentAdapter, CollectionCancellation, CollectionOutcome, ProviderSessionKey};
     use std::{fs, os::unix::fs::symlink};
+
+    fn collect(
+        request: CollectSessionDataRequest,
+    ) -> Result<(SessionEnrichment, OpaqueCursor), CollectError> {
+        match CodexCollector.collect(&request)? {
+            Collected::Complete { enrichment, cursor } => Ok((enrichment, cursor)),
+            Collected::Unchanged { .. } => panic!("unexpected unchanged outcome"),
+        }
+    }
 
     const USAGE_ROW: &str = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":40,"output_tokens":8},"last_token_usage":{"total_tokens":26},"model_context_window":100}}}"#;
 
@@ -449,7 +409,7 @@ mod collection_tests {
             home: temp.path().to_path_buf(),
             key: ProviderSessionKey {
                 configured_provider: "codex".into(),
-                adapter_identity: "codex".into(),
+                adapter_identity: ProviderId::Codex,
                 provider_session_id: session.into(),
             },
             locator,
@@ -626,6 +586,130 @@ mod collection_tests {
         );
         let cancelled = request(&cancel_home, "s5", cancel_path);
         cancelled.cancellation.cancel();
-        assert!(collect(cancelled).is_err());
+        assert!(matches!(collect(cancelled), Err(CollectError::Cancelled)));
+    }
+
+    #[test]
+    fn collector_rejects_rollout_named_for_another_session() {
+        let meta = r#"{"type":"session_meta","payload":{"session_id":"s1"}}"#;
+        let (temp, path) = fixture("s1", &[meta, USAGE_ROW]);
+        assert!(collect(request(&temp, "s1", path.clone())).is_ok());
+        let other = path.with_file_name("rollout-2026-08-31T00-00-00-other.jsonl");
+        fs::rename(&path, &other).unwrap();
+        let error = collect(request(&temp, "s1", other.clone())).err().unwrap();
+        assert!(error.to_string().contains("identity mismatch"), "{error}");
+        let prefixed = path.with_file_name("rollout-xs1.jsonl");
+        fs::rename(&other, &prefixed).unwrap();
+        assert!(collect(request(&temp, "s1", prefixed.clone())).is_err());
+        let timestamped = path.with_file_name("rollout-2026-08-31T00-00-00-s1.jsonl");
+        fs::rename(&prefixed, &timestamped).unwrap();
+        assert!(collect(request(&temp, "s1", timestamped)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn unchanged_cursor_covers_rollout_and_session_index() {
+        let meta = r#"{"type":"session_meta","payload":{"session_id":"s1","title":"Rollout"}}"#;
+        let (temp, path) = fixture("s1", &[meta, USAGE_ROW]);
+        let collect_with = |prior: Option<OpaqueCursor>| {
+            let mut request = request(&temp, "s1", path.clone());
+            request.prior_cursor = prior;
+            CodexAdapter.collect_session_data(request)
+        };
+        let CollectionOutcome::Complete { cursor, .. } = collect_with(None).await else {
+            panic!("expected complete outcome");
+        };
+        assert!(matches!(
+            collect_with(Some(cursor.clone())).await,
+            CollectionOutcome::Unchanged { .. }
+        ));
+        write_index(&temp, "{\"id\":\"s1\",\"thread_name\":\"Renamed\"}\n");
+        let CollectionOutcome::Complete { enrichment, cursor } = collect_with(Some(cursor)).await
+        else {
+            panic!("a new session index must force a rescan");
+        };
+        assert_eq!(enrichment.session_name.as_deref(), Some("Renamed"));
+        assert!(matches!(
+            collect_with(Some(cursor.clone())).await,
+            CollectionOutcome::Unchanged { .. }
+        ));
+        fs::write(&path, format!("{meta}\n{USAGE_ROW}\n{USAGE_ROW}\n")).unwrap();
+        assert!(matches!(
+            collect_with(Some(cursor)).await,
+            CollectionOutcome::Complete { .. }
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tool_activity_tests {
+    use super::*;
+    use crate::AgentAdapter;
+    use serde_json::json;
+    use sessiontap_core::domain::{EventEvidence, InvocationId};
+    use std::fs;
+
+    #[test]
+    fn tool_activity_selects_only_allowlisted_safe_detail() {
+        let id = InvocationId::new();
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("src.rs"), "").unwrap();
+        let normalize = |raw: serde_json::Value| {
+            AgentAdapter::normalize_with_evidence(
+                &CodexAdapter,
+                &id,
+                &raw,
+                EventEvidence::managed_hook(1),
+                &NormalizeContext {
+                    workspace: Some(temp.path()),
+                },
+            )
+            .unwrap()
+            .into_event()
+            .unwrap()
+            .event
+            .tool_activity
+            .unwrap()
+        };
+        let shell = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Bash",
+            "tool_use_id":"c1",
+            "tool_input":{"command":"PRIVATE","description":"Run unit tests"}
+        }));
+        assert_eq!(shell.detail.as_deref(), Some("Run unit tests"));
+        assert_eq!(shell.correlation_id.as_deref(), Some("c1"));
+        let read = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"read_file",
+            "tool_use_id":"c2",
+            "tool_input":{"path":"src.rs"}
+        }));
+        assert_eq!(read.detail.as_deref(), Some("src.rs"));
+        let escaped = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"read_file",
+            "tool_use_id":"c3",
+            "tool_input":{"path":"../src.rs"}
+        }));
+        assert!(escaped.detail.is_none());
+        let unlisted = normalize(json!({
+            "hook_event_name":"PreToolUse",
+            "tool_name":"Grep",
+            "tool_use_id":"c4",
+            "tool_input":{"description":"Not allowlisted","file_path":"src.rs"}
+        }));
+        assert!(unlisted.detail.is_none());
+    }
+
+    #[test]
+    fn supported_tool_phase_is_exact_and_result_free() {
+        let id = InvocationId::new();
+        let (payload, phase) = (
+            json!({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"b","tool_response":"PRIVATE"}),
+            ToolActivityPhase::Finish,
+        );
+        let event = CodexAdapter.normalize(&id, &payload).unwrap().event;
+        assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
+        assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
     }
 }

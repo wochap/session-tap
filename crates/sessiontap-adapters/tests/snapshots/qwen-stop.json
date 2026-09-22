@@ -1,0 +1,30 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "completed",
+      "observed_at": "<received_at>",
+      "provider": "qwen",
+      "provider_event_id": null,
+      "provider_session_id": "session-fixture",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": null,
+      "usage": {
+        "context_tokens": null,
+        "context_window_percent": 50,
+        "input_tokens": 100,
+        "output_tokens": null
+      }
+    },
+    "outcome": "event",
+    "status_reason": null
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "completed",
+      "observed_at": "<received_at>",
+      "provider": "pi",
+      "provider_event_id": null,
+      "provider_metadata": {
+        "effort": "high",
+        "model": "anthropic/claude-sonnet-4-5"
+      },
+      "provider_session_id": "pi-session-1",
+      "provider_session_name": "adapter work",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "turn_id": null,
+      "usage": {
+        "context_tokens": 18204,
+        "context_window_percent": 9,
+        "input_tokens": 1543,
+        "output_tokens": 402
+      }
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "assistant_message",
+      "summary": "Refactored the adapter registry and ran the workspace tests."
+    }
+  }
+]
