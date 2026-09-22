@@ -10,3 +10,6 @@ RTK.md
 /.direnv
 agents-hooks-docs
 .pi
+
+.direnv
+.agents
