@@ -29,11 +29,23 @@ SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sess
 - **THEN** SessionTap permits unauthenticated delivery subject to the configured network safety policy
 
 ### Requirement: Forwarded data is normalized, complete, and selectable
-The broker SHALL send hub sinks canonical source snapshot and update envelopes containing stable source and delivery identities, revision, deterministic changed public field paths, and complete resulting `PublicAgentView` values. SessionTap SHALL exclude internal invocation snapshots, lifecycle/activity/event enums, process and multiplexer control metadata, raw hook bodies, transcripts, complete prompt and assistant text, unselected tool inputs and responses, credentials, and arbitrary provider payloads from every sink. Explicitly selected bounded current status summaries SHALL be public fields eligible for configured sink delivery.
+The broker SHALL send hub sinks canonical source snapshot and update envelopes containing stable source and delivery identities, revision, deterministic changed public field paths, and complete resulting `PublicAgentView` values. SessionTap SHALL exclude internal invocation snapshots, lifecycle/activity/event enums, process and multiplexer control metadata, raw hook bodies, transcripts, complete prompt and assistant text, unselected tool inputs and responses, credentials, and arbitrary provider payloads from every sink. Explicitly selected bounded current status summaries SHALL be public fields eligible for configured sink delivery. When a stdout or HTTP sink configures a non-empty `fields` list, the delivered view SHALL contain only those public fields plus the invocation identity; an empty list delivers the complete public view. Hub sinks SHALL ignore field selection.
 
 #### Scenario: Default HTTP archival sink event
 - **WHEN** a meaningful projected state change is queued for a non-hub HTTP sink
 - **THEN** its payload contains only configured public agent fields and no internal or raw provider data
+
+#### Scenario: Field selection is configured
+- **WHEN** a stdout or HTTP sink configures `fields = ["status", "usage"]`
+- **THEN** each delivered payload's view contains the invocation identity, `status`, and `usage` only, and the changed-field list is filtered to the same set
+
+#### Scenario: Field selection names an unknown field
+- **WHEN** a sink's `fields` list contains a name that is not a public field
+- **THEN** configuration validation fails with a diagnostic naming the sink and the unknown field
+
+#### Scenario: Hub sink has field selection
+- **WHEN** field selection is present on a hub sink definition
+- **THEN** configuration validation rejects it, because hub envelopes are always complete
 
 #### Scenario: Waiting attention is queued for a hub sink
 - **WHEN** internal state changes to waiting approval or waiting input
@@ -60,7 +72,7 @@ The broker SHALL send hub sinks canonical source snapshot and update envelopes c
 - **THEN** the public view leaves usage absent or partially populated rather than reporting estimated values
 
 ### Requirement: HTTP delivery is durable and deduplicable
-The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public-view transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped delivery ID that permits receiver idempotency. Registration, normalized hook changes, lifecycle exit, reconciliation, and future normalized enrichment SHALL be sink-visible only when they change projected public state.
+The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public-view transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped delivery ID that permits receiver idempotency. Registration, normalized hook changes, lifecycle exit, reconciliation, and future normalized enrichment SHALL be sink-visible only when they change projected public state. Each HTTP and hub delivery SHALL use that sink's configured `timeout_ms`. A hub conflict response SHALL be interpreted by its structured error code: `snapshot_required` resets the sink's baseline and retries the update after the snapshot; any other conflict or client error is a permanent rejection subject to the bounded drop policy. The outbox poll interval, outbox batch size, artifact-collection worker limit, stale-working sweep interval, and update broadcast capacity SHALL be configurable in a `[daemon]` configuration section whose defaults are 250 ms, 100 records, 4 workers, 60 seconds, and 1024 updates.
 
 #### Scenario: Receiver is temporarily unavailable
 - **WHEN** HTTP or hub delivery fails with a transient network or server error
@@ -85,6 +97,22 @@ The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as
 #### Scenario: Several public fields change together
 - **WHEN** one committed transition changes status, reason, session, and usage
 - **THEN** one canonical update contains all four changed field paths and the complete resulting public view
+
+#### Scenario: Sink timeout is configured
+- **WHEN** an HTTP or hub sink sets `timeout_ms = 500` and the receiver does not respond within that time
+- **THEN** the delivery is treated as transient and retried with backoff
+
+#### Scenario: Hub responds with a structured snapshot-required conflict
+- **WHEN** the hub returns HTTP 409 with error code `snapshot_required`
+- **THEN** the broker marks the sink's baseline as due, delivers a source snapshot, and retries the held update afterwards
+
+#### Scenario: Hub responds with another conflict
+- **WHEN** the hub returns HTTP 409 whose error code is not `snapshot_required`, or a body that does not parse as the error envelope
+- **THEN** the broker treats the delivery as permanently rejected and applies the bounded drop policy without resetting the baseline
+
+#### Scenario: Daemon section is absent
+- **WHEN** the configuration file has no `[daemon]` section
+- **THEN** the daemon runs with the stated defaults and behaves as before
 
 ### Requirement: Hub sinks repair receiver state with source snapshots
 An enabled hub sink SHALL deliver a complete source snapshot at a consistent source revision when delivery is established or repair is required, and SHALL order subsequent updates after that revision.
