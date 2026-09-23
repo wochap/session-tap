@@ -478,3 +478,34 @@ The broker SHALL clear all retained child-agent state when it accepts a root new
 #### Scenario: Broker restarts with retained children
 - **WHEN** the broker restarts after committing child-agent state
 - **THEN** it restores the retained children with their statuses and timestamps
+
+### Requirement: Stale running child agents expire without a terminal cause
+The broker SHALL remove a retained child agent whose status is running when 30 minutes pass without an accepted child-agent event for that child. Expiry SHALL NOT emit a completed, failed, or interrupted cause for the child, SHALL NOT change root lifecycle, activity, status, or status reason, and SHALL NOT expire a blocked or stopped child. A child's updated time SHALL be the time of its last accepted child-agent event and SHALL be the basis for the stale check. Expiry SHALL be applied by the same periodic sweep that expires stale root working activity and SHALL publish one update whose changed set contains `children`.
+
+#### Scenario: Killed subagent goes silent
+- **WHEN** a running child receives no accepted child-agent event for 30 minutes while the invocation remains alive
+- **THEN** the sweep removes that child, the changed set contains `children`, and the root status and reason are unchanged
+
+#### Scenario: Last child expires
+- **WHEN** the only retained child is removed by expiry
+- **THEN** the public view no longer contains the `children` key and the update's changed set contains `children`
+
+#### Scenario: Blocked child stays silent
+- **WHEN** a blocked child receives no further event for longer than the stale interval
+- **THEN** the sweep leaves that child blocked with its reason intact
+
+#### Scenario: Stopped child is not expired
+- **WHEN** a stopped child remains retained past the stale interval
+- **THEN** the sweep leaves it in place until a retention boundary clears it
+
+#### Scenario: Child event resets the clock
+- **WHEN** a child working or waiting event is accepted for a running child before the interval elapses
+- **THEN** the child's updated time advances and the stale interval restarts from that event
+
+#### Scenario: Root and child expire together
+- **WHEN** one sweep finds both stale root working activity and a stale running child
+- **THEN** it applies both in one committed revision and the changed set contains `status` and `children`
+
+#### Scenario: Only the child is stale
+- **WHEN** the root is stopped for the current turn and a running child becomes stale
+- **THEN** the sweep removes the child and the root remains stopped with its completed reason intact
