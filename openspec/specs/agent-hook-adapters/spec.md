@@ -231,7 +231,7 @@ The project SHALL NOT copy or mechanically transform external non-MIT source, te
 - **THEN** its tests and documentation identify the provider contract or sanitized independent fixture used to establish the behavior
 
 ### Requirement: Adapter output is normalized-only
-A provider adapter SHALL pass only typed provider-neutral events and selected bounded status context across the adapter boundary, or explicitly report that a payload was ignored. It SHALL NOT choose or overwrite the configured provider identity and SHALL NOT expose raw provider JSON, provider store records, arbitrary unknown fields, or provider-specific payload types to the daemon, storage, sinks, or hub. The daemon SHALL stamp normalized facts with the configured provider identity associated with the authenticated invocation; adapter dialect SHALL remain an internal dispatch detail.
+A provider adapter SHALL pass only typed provider-neutral events and selected bounded status context across the adapter boundary, or explicitly report that a payload was ignored. It SHALL NOT choose or overwrite the configured provider identity and SHALL NOT expose raw provider JSON, provider store records, arbitrary unknown fields, or provider-specific payload types to the daemon, storage, sinks, or hub. The daemon SHALL stamp normalized facts with the configured provider identity associated with the authenticated invocation; adapter dialect SHALL remain an internal dispatch detail. A payload that a provider adapter identifies as belonging to a child agent SHALL cross the boundary only as a typed child-agent event carrying a bounded child identity, a bounded agent type, an event kind, and optional bounded tool activity.
 
 #### Scenario: Hook contains unknown provider data
 - **WHEN** a raw root-agent hook contains fields that the provider adapter does not explicitly normalize
@@ -239,11 +239,11 @@ A provider adapter SHALL pass only typed provider-neutral events and selected bo
 
 #### Scenario: Hook belongs to a subagent
 - **WHEN** a hook includes a non-empty documented `agent_id` or is a subagent lifecycle event
-- **THEN** the adapter ignores the payload before extracting activity, reason, session, metadata, or usage and the root public view does not change
+- **THEN** the adapter emits a child-agent event that carries no root session name, start reason, provider metadata, or usage, and the root public status, reason, session, metadata, and usage do not change
 
 #### Scenario: Main session uses a named agent
 - **WHEN** a root hook contains `agent_type` without a subagent `agent_id`
-- **THEN** the adapter does not ignore it solely because the main session has an agent type
+- **THEN** the adapter treats it as a root hook and does not emit a child-agent event
 
 #### Scenario: Configured provider inherits a dialect
 - **WHEN** `company-claude` is configured to inherit the Claude adapter
@@ -352,11 +352,19 @@ An adapter SHALL validate a provider-supplied transcript or session-artifact pat
 - **THEN** no artifact path appears in normalized events, snapshots, reasons, status output, sinks, or hub envelopes
 
 ### Requirement: Subagent payloads remain outside root normalization
-Built-in adapters SHALL reject a payload with a documented non-empty child-agent identity or child-agent lifecycle event before extracting state, attention, metadata, usage, or artifacts.
+Built-in adapters SHALL identify a payload with a documented non-empty child-agent identity or child-agent lifecycle event before extracting root state, attention, metadata, usage, or artifacts. Child identification SHALL be owned by each provider's dialect. A provider whose dialect does not identify child agents SHALL ignore such payloads entirely. Child-agent payloads SHALL NOT contribute provider session name, start reason, provider metadata, usage, artifact collection context, or status excerpt to the root invocation.
 
 #### Scenario: Child hook includes root session identity
-- **WHEN** a subagent payload also contains the root provider session ID or turn ID
+- **WHEN** a Claude subagent payload also contains the root provider session ID or turn ID
+- **THEN** the adapter emits a child-agent event that carries the session ID for ordering guards only and the root invocation's session, turn, metadata, and usage remain unchanged
+
+#### Scenario: Provider without child support receives a child payload
+- **WHEN** a Codex, Qwen, or Pi payload carries a documented child-agent identity or child lifecycle event
 - **THEN** the adapter ignores the entire payload and the root invocation remains unchanged
+
+#### Scenario: Child payload contains subagent content
+- **WHEN** a subagent lifecycle payload contains a subagent transcript path, a last assistant message, or a background task list
+- **THEN** none of those values crosses the adapter boundary or appears in normalized state, status output, sinks, or hub envelopes
 
 ### Requirement: Adapter evidence is typed and transport-stamped
 Every normalized adapter event SHALL carry typed evidence identifying its observation channel and trust basis. Collector revision, bounded collector instance identity, and source sequence SHALL be optional. Evidence fields MUST be stamped after invocation authentication or by a trusted local collector and MUST NOT be copied from provider payload fields.
@@ -378,7 +386,7 @@ Every normalized adapter event SHALL carry typed evidence identifying its observ
 - **THEN** it omits source ordering and the normalized event remains valid
 
 ### Requirement: Adapters emit bounded root tool activity
-A built-in adapter SHALL convert supported root-agent tool lifecycle payloads into provider-neutral tool activity updates containing only phase, a bounded normalized tool label, an optional bounded correlation ID, and optional allowlisted safe detail. It SHALL discard arbitrary tool input, commands, URLs, results, errors, and provider-specific objects. The workspace used to bind file targets SHALL come from the authenticated launch context supplied to normalization, never from a field in the hook payload.
+A built-in adapter SHALL convert supported root-agent and child-agent tool lifecycle payloads into provider-neutral tool activity updates containing only phase, a bounded normalized tool label, an optional bounded correlation ID, and optional allowlisted safe detail. It SHALL discard arbitrary tool input, commands, URLs, results, errors, and provider-specific objects. The workspace used to bind file targets SHALL come from the authenticated launch context supplied to normalization, never from a field in the hook payload. Tool activity attached to a child-agent event SHALL describe only that child.
 
 #### Scenario: Root tool starts
 - **WHEN** a supported root pre-tool event contains a valid tool name and correlation ID
@@ -405,8 +413,8 @@ A built-in adapter SHALL convert supported root-agent tool lifecycle payloads in
 - **THEN** the adapter omits it from tool activity and all normalized metadata
 
 #### Scenario: Subagent tool event arrives
-- **WHEN** a tool lifecycle payload belongs to a documented child agent
-- **THEN** the adapter ignores it before emitting evidence or tool activity
+- **WHEN** a tool lifecycle payload belongs to a documented child agent of a provider that identifies child agents
+- **THEN** the adapter emits the bounded tool activity on a child-agent event and never on a root event
 
 ### Requirement: Adapter output changes apply in place
 Normalized adapter output SHALL use typed evidence and tool activity directly without retaining the free-form source field, compatibility aliases, or version-negotiated variants.
@@ -516,3 +524,26 @@ The Pi adapter SHALL normalize cumulative usage computed by the managed extensio
 #### Scenario: Metadata changes mid-session
 - **WHEN** pi reports a model or thinking-level change
 - **THEN** the adapter emits enrichment with the sanitized model and effort values and no usage synthesis
+
+### Requirement: Claude subagent lifecycle is normalized
+The Claude adapter SHALL install `SubagentStart` and `SubagentStop` managed hooks alongside its root hooks. It SHALL identify a child agent by a non-empty `agent_id`, SHALL carry `agent_type` as the bounded child agent type, SHALL map `SubagentStart` to a child new-turn event, SHALL map `SubagentStop` to a child completed event, and SHALL map child `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, and `PermissionRequest` using the same exact mappings as their root counterparts. Child identity and type SHALL be sanitized and bounded before crossing the adapter boundary.
+
+#### Scenario: Subagent starts
+- **WHEN** a `SubagentStart` hook arrives with a non-empty `agent_id` and an `agent_type`
+- **THEN** the adapter emits a child new-turn event identifying that child and its type
+
+#### Scenario: Subagent stops
+- **WHEN** a `SubagentStop` hook arrives for a known or unknown `agent_id`
+- **THEN** the adapter emits a child completed event and discards `agent_transcript_path`, `last_assistant_message`, and `background_tasks`
+
+#### Scenario: Subagent requests approval
+- **WHEN** a `PermissionRequest` hook arrives with a non-empty `agent_id`
+- **THEN** the adapter emits a child waiting-approval event with bounded tool activity and the root activity does not change
+
+#### Scenario: Child identity exceeds bounds
+- **WHEN** `agent_id` or `agent_type` fails sanitization or exceeds the documented bound
+- **THEN** the adapter ignores the payload rather than emitting an unbounded or unsanitized identity
+
+#### Scenario: Managed hook configuration is merged
+- **WHEN** the Claude adapter installs or removes its managed hooks
+- **THEN** the subagent lifecycle hook entries are added and removed reversibly together with the root hook entries
