@@ -7,7 +7,7 @@ Define safe, deterministic routing of accepted SessionTap hub updates to configu
 ## Requirements
 
 ### Requirement: Hub loads versioned routing configuration
-The hub SHALL read a versioned YAML configuration defining subscriptions as normalized match criteria, optional changed-field criteria, and one or more commands.
+The hub SHALL read a versioned YAML configuration defining subscriptions as normalized match criteria, optional changed-field criteria, and one or more commands. Changed-field names, public status values, and public reason values SHALL be validated against the canonical public schema's own definitions so that the hub accepts exactly the field, status, and reason names the public view can carry, with no separately maintained list.
 
 #### Scenario: Valid configuration loads
 - **WHEN** the configuration contains supported subscription fields and commands
@@ -16,6 +16,14 @@ The hub SHALL read a versioned YAML configuration defining subscriptions as norm
 #### Scenario: Configuration is invalid
 - **WHEN** the configuration contains an unsupported version, unknown field, or malformed command
 - **THEN** the hub reports the error and does not silently run a partial or broadened rule set
+
+#### Scenario: Public schema gains a field
+- **WHEN** the canonical public view gains a new public field in a later SessionTap version
+- **THEN** a subscription may watch that field by its canonical name without a hub-side allowlist change
+
+#### Scenario: Status name has wrong case
+- **WHEN** routing configuration names status `Blocked` instead of the canonical `blocked`
+- **THEN** configuration validation rejects it with the accepted values
 
 ### Requirement: Subscriptions match normalized agent data
 Subscription match criteria SHALL support source ID, changed public field paths, and fields available in the canonical public envelope, including provider, public status, public reason kind, and repository. Supported public reason filters SHALL include `input`, `approval`, `completed`, and `failed`. Routing SHALL NOT depend on internal lifecycle, activity, normalized event kind, process control data, or multiplexer metadata. Different fields SHALL be combined by logical AND and values within one field by logical OR.
@@ -56,7 +64,7 @@ A subscription SHALL be able to require changes to one or more `PublicAgentView`
 - **THEN** the subscription does not run
 
 ### Requirement: Commands receive canonical structured input
-The hub SHALL execute configured commands directly as argument arrays without shell evaluation, SHALL provide the accepted canonical public envelope on stdin, and SHALL expose documented public scalar `SESSIONTAP_*` environment variables as conveniences rather than an alternative schema. Private source fields and internal event metadata SHALL not be available.
+The hub SHALL execute configured commands directly as argument arrays without shell evaluation, SHALL provide the accepted canonical public envelope on stdin, and SHALL expose documented public scalar `SESSIONTAP_*` environment variables as conveniences rather than an alternative schema. Private source fields and internal event metadata SHALL not be available. The hub SHALL run at most `max_concurrent_commands` subscription commands at once (default 4) and SHALL terminate a command that exceeds `command_timeout_secs` (default 30), logging the delivery identity and command. Command duration or failure SHALL NOT delay ingestion acknowledgement or block other deliveries beyond the concurrency limit.
 
 #### Scenario: Notification script runs
 - **WHEN** a matching blocked-input public update is accepted
@@ -65,6 +73,18 @@ The hub SHALL execute configured commands directly as argument arrays without sh
 #### Scenario: Command contains shell metacharacters
 - **WHEN** a configured argument contains spaces or shell metacharacters
 - **THEN** the hub passes it as one literal process argument without shell interpretation
+
+#### Scenario: Command hangs
+- **WHEN** a subscription command does not exit within `command_timeout_secs`
+- **THEN** the hub kills it, logs the timeout with the delivery identity, and continues routing later deliveries
+
+#### Scenario: Burst of matching updates
+- **WHEN** more matching updates arrive than `max_concurrent_commands`
+- **THEN** the hub queues the excess commands and runs them as slots free, without dropping any accepted delivery
+
+#### Scenario: Limits are absent from configuration
+- **WHEN** the configuration omits `max_concurrent_commands` and `command_timeout_secs`
+- **THEN** the hub uses 4 and 30 seconds
 
 ### Requirement: Routing follows accepted state exactly once per delivery identity
 The hub SHALL evaluate subscriptions only after a new update is durably accepted and SHALL NOT evaluate them for rejected, stale, or transport-duplicate updates.

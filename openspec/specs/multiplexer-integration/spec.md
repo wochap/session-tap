@@ -7,11 +7,19 @@ tmux discovery, stable pane metadata, and validated capture/input control throug
 ## Requirements
 
 ### Requirement: Multiplexer support uses a backend-neutral interface
-The core SHALL define a multiplexer adapter interface for inspection, pane capture, and input delivery without embedding tmux-specific fields in provider adapters.
+The core SHALL define a multiplexer adapter interface for inspection, pane capture, and input delivery without embedding tmux-specific fields in provider adapters. Capture and input delivery SHALL select the adapter from the backend recorded in the invocation's multiplexer metadata, and SHALL fail with a typed unsupported-backend error when no adapter exists for that backend. The recorded backend SHALL serialize as the same lowercase string it does today.
 
 #### Scenario: Future backend implementation
 - **WHEN** a Kitty or Zellij adapter is added later
 - **THEN** provider launch and normalization code require no provider-specific changes
+
+#### Scenario: Capture dispatches by recorded backend
+- **WHEN** a capture request targets an invocation whose multiplexer metadata records backend `tmux`
+- **THEN** the tmux adapter performs the capture without the daemon naming tmux in its request handling
+
+#### Scenario: Recorded backend has no adapter
+- **WHEN** an invocation's multiplexer metadata records a backend with no registered adapter
+- **THEN** capture and input requests fail with an unsupported-backend error and no command is executed
 
 ### Requirement: Enclosing tmux context is discovered
 When launched inside tmux, SessionTap SHALL resolve the exact socket path, server PID, session ID and name, window ID and index, pane ID, pane TTY, and pane process identity when available.

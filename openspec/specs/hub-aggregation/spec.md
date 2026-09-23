@@ -7,7 +7,7 @@ Define canonical multi-source ingestion, persistence, repair, and live observati
 ## Requirements
 
 ### Requirement: Hub ingests only canonical SessionTap envelopes
-The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks.
+The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks. The hub SHALL distinguish transport-level rejections by status code: 400 for a request line or headers it cannot parse, 411 for a missing or non-numeric `content-length`, 431 for headers exceeding the header limit, and 413 only for a body exceeding the configured body limit. Every rejection body SHALL carry a structured error code.
 
 #### Scenario: Canonical update arrives
 - **WHEN** a source sends a valid public update containing source identity, delivery identity, changed public field paths, and complete resulting public agent view
@@ -24,6 +24,22 @@ The hub SHALL accept canonical source snapshot and update envelopes produced by 
 #### Scenario: Future source adds optional public metadata
 - **WHEN** a newer source includes an unrecognized optional public field while all required canonical fields remain valid
 - **THEN** the hub accepts the envelope, ignores the unknown field, and does not echo it to listeners or commands
+
+#### Scenario: Request is not parseable HTTP
+- **WHEN** a connection sends bytes that do not form a request line and headers before the connection ends
+- **THEN** the hub responds 400 with error code `malformed_request` and changes no state
+
+#### Scenario: Content length is missing
+- **WHEN** a request has a parseable request line and headers but no numeric `content-length`
+- **THEN** the hub responds 411 with error code `length_required` rather than treating the body as empty
+
+#### Scenario: Body exceeds the limit
+- **WHEN** `content-length` or the received body exceeds the configured maximum body size
+- **THEN** the hub responds 413 with error code `payload_too_large`
+
+#### Scenario: Headers exceed the limit
+- **WHEN** the request headers exceed the header size limit
+- **THEN** the hub responds 431 with error code `headers_too_large`
 
 ### Requirement: Hub merges stable source identities
 Each source SHALL have a configured stable ID and optional display name, and the hub SHALL identify an agent by the pair of source ID and invocation ID.
