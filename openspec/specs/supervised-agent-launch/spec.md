@@ -35,6 +35,10 @@ SessionTap SHALL launch the provider with the caller's terminal streams and envi
 - **WHEN** the user launches `sessiontap claude`, `sessiontap codex`, or `sessiontap qwen` from a terminal
 - **THEN** the provider's native interactive TUI can read input, render output, observe terminal resize, and use terminal control sequences normally
 
+#### Scenario: Terminal is returned after the provider exits
+- **WHEN** the provider exits and the wrapper runs as a job-control job, including a pipeline or background process group launched by a script
+- **THEN** the wrapper restores its own process group as the terminal's foreground group without being stopped by `SIGTTOU`, and exits with the provider's exit status
+
 ### Requirement: The wrapper supervises provider lifecycle
 When the broker is available, the wrapper SHALL register an invocation before launch, report the child process identity after spawn, forward termination-related signals, record the child's termination, and exit with the provider's exit status or corresponding signal status. When the broker is unavailable, the wrapper SHALL skip tracking registration and lifecycle reporting while preserving signal forwarding and provider exit behavior.
 

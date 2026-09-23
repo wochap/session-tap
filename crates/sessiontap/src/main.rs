@@ -389,7 +389,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     let pid = child.id().context("child PID unavailable")?;
     let terminal = std::fs::File::open("/dev/tty").ok();
     if let Some(tty) = &terminal {
-        match nix::unistd::tcsetpgrp(tty, nix::unistd::Pid::from_raw(pid as i32)) {
+        match set_terminal_foreground(tty, nix::unistd::Pid::from_raw(pid as i32)) {
             Ok(()) | Err(nix::errno::Errno::EINVAL) => {}
             Err(error) => {
                 eprintln!("sessiontap: provider may not control the terminal: {error}")
@@ -428,7 +428,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         let _ = task.await;
     }
     if let Some(tty) = &terminal {
-        let _ = nix::unistd::tcsetpgrp(tty, nix::unistd::getpgrp());
+        let _ = set_terminal_foreground(tty, nix::unistd::getpgrp());
     }
     let status = wait_result?;
     let code = status.code();
@@ -508,6 +508,24 @@ async fn tail_provider_side_channel(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// Makes `group` the terminal's foreground process group with SIGTTOU blocked.
+///
+/// Once the provider owns the terminal, the wrapper's own group is in the
+/// background. A background `tcsetpgrp` raises SIGTTOU on the caller's whole
+/// process group, which would stop the wrapper and any parent sharing that
+/// group, such as a script that launched it. Blocking the signal for the call,
+/// as job-control shells do, lets the kernel apply the change instead.
+fn set_terminal_foreground(tty: &std::fs::File, group: nix::unistd::Pid) -> nix::Result<()> {
+    use nix::sys::signal::{SigSet, SigmaskHow, Signal, pthread_sigmask};
+    let mut ttou = SigSet::empty();
+    ttou.add(Signal::SIGTTOU);
+    let mut previous = SigSet::empty();
+    pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&ttou), Some(&mut previous))?;
+    let result = nix::unistd::tcsetpgrp(tty, group);
+    let _ = pthread_sigmask(SigmaskHow::SIG_SETMASK, Some(&previous), None);
+    result
 }
 
 async fn wait_with_signal_forwarding(

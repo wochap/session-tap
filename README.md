@@ -102,6 +102,71 @@ either value at runtime.
 Everything after the provider token is forwarded to the provider verbatim, so
 `sessiontap codex --help` shows Codex help.
 
+## Development
+
+Enter the dev shell, then build the workspace:
+
+```sh
+nix develop
+cargo build --workspace
+```
+
+Debug binaries land in `target/debug/`. Put that directory first on `PATH` so
+the wrapper, the daemon, and the hooks all resolve the freshly built
+`sessiontap` and `sessiontapd`:
+
+```sh
+export PATH="$PWD/target/debug:$PATH"
+which sessiontap sessiontapd   # both should point into target/debug
+```
+
+Run the local build end to end, using three terminals that share that `PATH`:
+
+```sh
+# Terminal 1: broker
+sessiontapd
+
+# Terminal 2: observer
+sessiontap listen
+
+# Terminal 3: install hooks once, then launch a tracked provider
+sessiontap setup claude
+sessiontap doctor claude
+sessiontap claude
+```
+
+`listen` prints a snapshot line, then one update line per state change while
+the provider runs. Use `sessiontap status` for a one-shot view.
+
+The broker socket lives in `$XDG_RUNTIME_DIR/sessiontap`, so stop any
+installed `sessiontapd` before starting the development one. To keep the
+development database away from your real one, export an isolated state
+directory in every terminal:
+
+```sh
+export XDG_STATE_HOME="$PWD/target/dev-state"
+```
+
+Do not override `XDG_RUNTIME_DIR`: the provider needs it for Wayland and
+D-Bus.
+
+`setup` writes the absolute path of the `sessiontap` binary that ran it into
+the provider's hook config. Running `setup` from `target/debug` therefore
+points the hooks at your development build. When you finish, rerun `setup`
+with your installed `sessiontap` to point the hooks back at it, or run
+`sessiontap hooks remove <provider>` to remove them.
+
+Checks before submitting a change (same as `make check`):
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+```
+
+Run one test target with, for example,
+`cargo test -p sessiontap --test terminal_control`.
+
 ## Stack
 
 Rust workspace. `sessiontap` (CLI wrapper), `sessiontapd` (broker daemon),
