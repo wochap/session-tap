@@ -2,8 +2,7 @@ use crate::{ProviderId, domain::PublicField};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs, io,
-    path::Path,
+    io,
     time::Duration,
 };
 
@@ -269,21 +268,11 @@ pub fn validate_sink_url(raw: &str, trusted_addresses: &[String]) -> Result<(), 
 }
 
 impl Config {
-    pub fn load(path: &Path) -> io::Result<Self> {
-        let symlink =
-            fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink());
-        if !path.exists() {
-            if symlink {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "configuration symlink target not found",
-                ));
-            }
-            return Ok(Self::default());
-        }
-        let raw = fs::read_to_string(path)?;
+    /// Parses TOML configuration and checks its version. File access lives
+    /// in `sessiontap_infra::config::load_config`.
+    pub fn from_toml(raw: &str) -> io::Result<Self> {
         let config: Self =
-            toml::from_str(&raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            toml::from_str(raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         if config.version != 1 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -365,29 +354,6 @@ mod tests {
         assert!(error.contains("'acme'"), "{error}");
         assert!(error.contains("'gemini'"), "{error}");
         assert!(error.contains("claude, codex, pi, qwen"), "{error}");
-    }
-
-    #[test]
-    fn config_load_follows_symlink() {
-        use std::os::unix::fs::symlink;
-        let temp = tempfile::tempdir().unwrap();
-        let target = temp.path().join("target.toml");
-        fs::write(&target, "version=1\nretention_days=99\n").unwrap();
-        let link = temp.path().join("config.toml");
-        symlink(&target, &link).unwrap();
-        let config = Config::load(&link).unwrap();
-        assert_eq!(config.retention_days, 99);
-    }
-
-    #[test]
-    fn config_load_rejects_dangling_symlink() {
-        use std::os::unix::fs::symlink;
-        let temp = tempfile::tempdir().unwrap();
-        let link = temp.path().join("config.toml");
-        symlink(temp.path().join("missing.toml"), &link).unwrap();
-        let error = Config::load(&link).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
-        assert!(error.to_string().contains("symlink target not found"));
     }
 
     #[test]
@@ -507,11 +473,8 @@ trusted_addresses = ["192.168.100.1"]
 
     #[test]
     fn unsupported_config_version_is_rejected() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("config.toml");
-        fs::write(&path, "version=2\n").unwrap();
         assert_eq!(
-            Config::load(&path).unwrap_err().kind(),
+            Config::from_toml("version=2\n").unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
     }

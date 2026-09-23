@@ -1,19 +1,19 @@
 use anyhow::{Context, Result, bail};
-use fs2::FileExt;
 use sessiontap_hub::config::{HubConfig, Subscription};
 use sessiontap_hub::ingest::{self, HubPublication};
 use sessiontap_hub::listen::{self, HubRequest};
 use sessiontap_hub::paths::HubPaths;
+use sessiontap_hub::routing::CommandLimits;
 use sessiontap_hub::store::HubStore;
-use std::{
-    fs::{self, OpenOptions},
-    os::unix::fs::PermissionsExt,
-    sync::Arc,
-    time::Duration,
+use sessiontap_infra::{
+    fs::prepare_private_dir,
+    json::write_json_line,
+    socket::{bind_error, bind_private_unix_socket},
 };
+use std::{fs, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpListener, UnixListener, UnixStream},
+    io::{AsyncBufReadExt, BufReader},
+    net::{TcpListener, UnixStream},
     sync::broadcast,
 };
 
@@ -35,16 +35,11 @@ async fn main() -> Result<()> {
 
 async fn run_service() -> Result<()> {
     let paths = HubPaths::discover()?;
-    HubPaths::prepare_private(&paths.runtime_dir)?;
-    HubPaths::prepare_private(&paths.state_dir)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(paths.lock())?;
-    lock.try_lock_exclusive()
-        .context("sessiontap-hub is already running")?;
+    prepare_private_dir(&paths.runtime_dir)?;
+    prepare_private_dir(&paths.state_dir)?;
+    let socket = paths.socket();
+    let (unix_listener, lock) = bind_private_unix_socket(&socket, &paths.lock())
+        .map_err(|error| bind_error("sessiontap-hub", &socket, error))?;
     let config = HubConfig::load(&paths.config_file()).unwrap_or_else(|e| {
         eprintln!("sessiontap-hub: configuration disabled: {e}");
         HubConfig::default()
@@ -61,16 +56,11 @@ async fn run_service() -> Result<()> {
         eprintln!("sessiontap-hub: subscription '{label}' active");
     }
     let subscriptions = Arc::new(config.subscriptions.clone());
-    tokio::spawn(route_updates(updates.subscribe(), subscriptions));
-    let socket = paths.socket();
-    if socket.exists() {
-        if UnixStream::connect(&socket).await.is_ok() {
-            bail!("sessiontap-hub is already listening");
-        }
-        fs::remove_file(&socket).context("remove stale socket")?;
-    }
-    let unix_listener = UnixListener::bind(&socket)?;
-    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+    tokio::spawn(route_updates(
+        updates.subscribe(),
+        subscriptions,
+        CommandLimits::from_config(&config),
+    ));
     let tcp_listener = TcpListener::bind(&config.listen)
         .await
         .with_context(|| format!("bind ingestion address {}", config.listen))?;
@@ -133,12 +123,17 @@ async fn retention_task(store: Arc<HubStore>, retention_days: u64) {
 async fn route_updates(
     mut receiver: broadcast::Receiver<HubPublication>,
     subscriptions: Arc<Vec<Subscription>>,
+    limits: CommandLimits,
 ) {
     loop {
         match receiver.recv().await {
             Ok(HubPublication::Update(update)) => {
                 if !subscriptions.is_empty() {
-                    sessiontap_hub::routing::dispatch((*subscriptions).clone(), *update);
+                    sessiontap_hub::routing::dispatch(
+                        Arc::clone(&subscriptions),
+                        *update,
+                        limits.clone(),
+                    );
                 }
             }
             Ok(HubPublication::SnapshotApplied { .. }) => {}
@@ -156,10 +151,7 @@ async fn listen_client() -> Result<()> {
     let mut stream = UnixStream::connect(paths.socket())
         .await
         .context("connect sessiontap-hub; is the service running?")?;
-    stream
-        .write_all(&serde_json::to_vec(&HubRequest::Listen)?)
-        .await?;
-    stream.write_all(b"\n").await?;
+    write_json_line(&mut stream, &HubRequest::Listen).await?;
     let mut lines = BufReader::new(stream).lines();
     while let Some(line) = lines.next_line().await? {
         println!("{line}");

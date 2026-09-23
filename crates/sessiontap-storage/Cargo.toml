@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 sessiontap-core = { path = "../sessiontap-core" }
+sessiontap-infra = { path = "../sessiontap-infra" }
 anyhow.workspace = true
 chrono.workspace = true
 rusqlite.workspace = true

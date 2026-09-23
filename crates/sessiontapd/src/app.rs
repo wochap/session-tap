@@ -10,8 +10,8 @@ use sessiontap_core::{
         ArtifactCollectionContext, InvocationId, InvocationSnapshot, NormalizedEvent,
         PublicAgentView, StatusReasonContext, changed_public_fields, project_public,
     },
-    multiplexer::MultiplexerAdapter,
 };
+use sessiontap_infra::multiplexer::MultiplexerRegistry;
 use sessiontap_storage::{AppliedUpdate, Publish, Storage};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::broadcast;
@@ -35,8 +35,6 @@ impl PublishConfig {
     }
 }
 
-pub type SharedMultiplexer = Arc<dyn MultiplexerAdapter + Send + Sync>;
-
 /// Shared state behind [`App`]. The usage coordinator holds this directly as
 /// its [`EnrichmentApplier`]; the coordinator itself lives in `App`, so there
 /// is no reference cycle.
@@ -44,7 +42,7 @@ pub struct AppCore {
     storage: Arc<Storage>,
     updates: broadcast::Sender<AppliedUpdate>,
     publish: PublishConfig,
-    multiplexer: SharedMultiplexer,
+    multiplexers: Arc<MultiplexerRegistry>,
 }
 
 impl AppCore {
@@ -105,7 +103,7 @@ impl App {
         storage: Arc<Storage>,
         publish: PublishConfig,
         daemon: &DaemonConfig,
-        multiplexer: SharedMultiplexer,
+        multiplexers: Arc<MultiplexerRegistry>,
         collection: Collection,
     ) -> Self {
         let (updates, _) = broadcast::channel(daemon.update_buffer.max(1));
@@ -113,7 +111,7 @@ impl App {
             storage,
             updates,
             publish,
-            multiplexer,
+            multiplexers,
         });
         let usage = UsageCoordinator::new(
             core.clone(),
@@ -230,15 +228,21 @@ impl App {
         Ok(())
     }
 
+    /// Captures the pane through the adapter for the invocation's recorded
+    /// backend; an unregistered backend fails before any command runs.
     pub fn capture(&self, invocation_id: &InvocationId) -> Result<String> {
         let (metadata, pid) = self.multiplexer_target(invocation_id)?;
-        self.core.multiplexer.capture(&metadata, pid)
+        self.core
+            .multiplexers
+            .require(metadata.backend)?
+            .capture(&metadata, pid)
     }
 
     pub fn send_input(&self, invocation_id: &InvocationId, text: &str) -> Result<()> {
         let (metadata, pid) = self.multiplexer_target(invocation_id)?;
         self.core
-            .multiplexer
+            .multiplexers
+            .require(metadata.backend)?
             .send_input(&metadata, pid, text.as_bytes())
     }
 
@@ -247,7 +251,9 @@ impl App {
         invocation_id: &InvocationId,
     ) -> Result<(sessiontap_core::domain::MultiplexerMetadata, u32)> {
         let snapshot = self.core.storage.invocation(invocation_id)?;
-        let metadata = snapshot.multiplexer.context("invocation is not in tmux")?;
+        let metadata = snapshot
+            .multiplexer
+            .context("invocation is not in a multiplexer")?;
         let pid = snapshot
             .process
             .child_pid
@@ -302,29 +308,17 @@ pub(crate) mod tests {
         config::Config,
         domain::{
             Activity, ActivityConfirmation, Capabilities, EventEvidence, EventKind, Lifecycle,
-            MultiplexerMetadata, ProcessMetadata, PublicStatus, derive_status,
+            MultiplexerBackend, MultiplexerMetadata, ProcessMetadata, PublicStatus, derive_status,
         },
     };
-
-    struct NoMultiplexer;
-    impl MultiplexerAdapter for NoMultiplexer {
-        fn inspect(&self) -> Result<Option<MultiplexerMetadata>> {
-            Ok(None)
-        }
-        fn capture(&self, _: &MultiplexerMetadata, _: u32) -> Result<String> {
-            bail!("no multiplexer")
-        }
-        fn send_input(&self, _: &MultiplexerMetadata, _: u32, _: &[u8]) -> Result<()> {
-            bail!("no multiplexer")
-        }
-    }
+    use sessiontap_infra::multiplexer::UnsupportedBackend;
 
     pub(crate) fn app(storage: Storage) -> App {
         App::new(
             Arc::new(storage),
             PublishConfig::default(),
             &DaemonConfig::default(),
-            Arc::new(NoMultiplexer),
+            Arc::new(MultiplexerRegistry::empty()),
             Collection {
                 home: PathBuf::from("/nonexistent"),
                 registry: Arc::new(AdapterRegistry::new(&Config::default())),
@@ -489,8 +483,31 @@ pub(crate) mod tests {
         let initial = snapshot();
         app.register(initial.clone(), "credential").unwrap();
         let error = app.capture(&initial.invocation_id).unwrap_err();
-        assert!(error.to_string().contains("not in tmux"));
+        assert!(error.to_string().contains("not in a multiplexer"));
         assert!(app.send_input(&InvocationId::new(), "x").is_err());
+    }
+
+    #[tokio::test]
+    async fn unregistered_backend_is_unsupported_without_running_commands() {
+        let app = app(Storage::memory().unwrap());
+        let mut initial = snapshot();
+        initial.process.child_pid = Some(std::process::id());
+        initial.multiplexer = Some(MultiplexerMetadata {
+            backend: MultiplexerBackend::Tmux,
+            socket: "/nonexistent/tmux.sock".into(),
+            pane_id: "%0".into(),
+            ..Default::default()
+        });
+        app.register(initial.clone(), "credential").unwrap();
+        for error in [
+            app.capture(&initial.invocation_id).unwrap_err(),
+            app.send_input(&initial.invocation_id, "x").unwrap_err(),
+        ] {
+            assert_eq!(
+                error.downcast_ref::<UnsupportedBackend>(),
+                Some(&UnsupportedBackend(MultiplexerBackend::Tmux))
+            );
+        }
     }
 
     #[tokio::test]

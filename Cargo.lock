@@ -1088,13 +1088,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "fs2",
  "hex",
  "nix",
  "rand 0.9.5",
  "serde_json",
  "sessiontap-adapters",
  "sessiontap-core",
+ "sessiontap-infra",
  "tempfile",
  "tokio",
  "uuid",
@@ -1111,6 +1111,7 @@ dependencies = [
  "libc",
  "serde_json",
  "sessiontap-core",
+ "sessiontap-infra",
  "tempfile",
  "tokio",
  "toml",
@@ -1123,10 +1124,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "nix",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror",
  "toml",
  "url",
@@ -1140,6 +1139,7 @@ dependencies = [
  "anyhow",
  "serde_json",
  "sessiontap-core",
+ "sessiontap-infra",
  "tokio",
 ]
 
@@ -1149,15 +1149,30 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "fs2",
- "nix",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
  "sessiontap-core",
+ "sessiontap-infra",
  "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "sessiontap-infra"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fs2",
+ "nix",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sessiontap-core",
+ "tempfile",
+ "thiserror",
  "tokio",
 ]
 
@@ -1170,6 +1185,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "sessiontap-core",
+ "sessiontap-infra",
  "tempfile",
  "uuid",
 ]
@@ -1181,15 +1197,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "fs2",
- "libc",
- "nix",
  "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
  "sessiontap-adapters",
  "sessiontap-core",
+ "sessiontap-infra",
  "sessiontap-storage",
  "tempfile",
  "tokio",

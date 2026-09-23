@@ -126,3 +126,89 @@ fn reasonless_interruption_projection_is_not_completion_routable() {
     assert!(!serialized.contains("completed"));
     assert!(!serialized.contains("failed"));
 }
+
+/// Sends raw bytes to `serve_connection` over TCP and returns the status
+/// code, error code, and whether any publication resulted.
+async fn exchange(raw: Vec<u8>, max_body: usize) -> (u16, serde_json::Value, bool) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let store = std::sync::Arc::new(HubStore::memory().unwrap());
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        sessiontap_hub::ingest::serve_connection(stream, store, None, max_body).await
+    });
+    let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+    client.write_all(&raw).await.unwrap();
+    client.shutdown().await.unwrap();
+    let mut response = String::new();
+    client.read_to_string(&mut response).await.unwrap();
+    let published = server.await.unwrap().is_some();
+    let status = response.split_whitespace().nth(1).unwrap().parse().unwrap();
+    let body = response.split_once("\r\n\r\n").unwrap().1;
+    (status, serde_json::from_str(body).unwrap(), published)
+}
+
+fn snapshot_body() -> Vec<u8> {
+    serde_json::to_vec(&SourceEnvelope::Snapshot {
+        schema_version: 1,
+        source: SourceIdentity {
+            id: "sandbox".into(),
+            display_name: None,
+        },
+        revision: 1,
+        views: vec![view(PublicStatus::Idle)],
+    })
+    .unwrap()
+}
+
+fn post(headers: &str, body: &[u8]) -> Vec<u8> {
+    let mut raw = format!("POST /ingest HTTP/1.1\r\nhost: hub\r\n{headers}\r\n").into_bytes();
+    raw.extend_from_slice(body);
+    raw
+}
+
+#[tokio::test]
+async fn transport_rejections_use_distinct_status_codes() {
+    let body = snapshot_body();
+    let cases: Vec<(Vec<u8>, u16, &str)> = vec![
+        (b"not http at all".to_vec(), 400, "malformed_request"),
+        (b"POST /ingest\r\n\r\n".to_vec(), 400, "malformed_request"),
+        (post("", &body), 411, "length_required"),
+        (
+            post("content-length: many\r\n", &body),
+            411,
+            "length_required",
+        ),
+        (
+            post(&format!("content-length: {}\r\n", 1 << 20), b""),
+            413,
+            "payload_too_large",
+        ),
+        (
+            post(&format!("x-big: {}\r\n", "a".repeat(70 * 1024)), b""),
+            431,
+            "headers_too_large",
+        ),
+    ];
+    for (raw, status, code) in cases {
+        let (got, body, published) = exchange(raw, 64 * 1024).await;
+        assert_eq!((got, body["error"].as_str()), (status, Some(code)));
+        assert!(!published);
+    }
+}
+
+#[tokio::test]
+async fn valid_envelope_is_still_accepted() {
+    let body = snapshot_body();
+    let (status, response, published) = exchange(
+        post(&format!("content-length: {}\r\n", body.len()), &body),
+        64 * 1024,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(response["status"], "applied");
+    assert!(published);
+    let (status, _, _) = exchange(b"GET /health HTTP/1.1\r\n\r\n".to_vec(), 64 * 1024).await;
+    assert_eq!(status, 200);
+}

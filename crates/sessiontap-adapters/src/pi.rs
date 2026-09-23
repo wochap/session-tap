@@ -10,9 +10,9 @@ use sessiontap_core::domain::{
     EventKind, ProviderMetadata, StatusReasonContext, StatusReasonSource,
     TOOL_CORRELATION_ID_MAX_CHARS, ToolActivityPhase, ToolActivityUpdate, Usage,
 };
+use sessiontap_infra::fs::atomic_write;
 use std::{
     fs::{self, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -213,10 +213,7 @@ pub fn manage_extension(
                 .write(true)
                 .open(dir.join(format!("{MANAGED_EXTENSION_FILE}.sessiontap.lock")))?;
             lock.lock_exclusive()?;
-            let mut temp = tempfile::NamedTempFile::new_in(dir)?;
-            temp.write_all(rendered.as_bytes())?;
-            temp.as_file().sync_all()?;
-            temp.persist(&path).map_err(|error| error.error)?;
+            atomic_write(&path, rendered.as_bytes(), 0o600)?;
             Ok(SetupReport {
                 changed: true,
                 healthy: true,

@@ -1,51 +1,17 @@
-//! Unix socket front end: daemon lock, private socket, and per-connection
-//! request dispatch onto [`App`].
+//! Unix socket front end: per-connection request dispatch onto [`App`].
 
 use crate::app::App;
-use anyhow::{Context, Result};
-use fs2::FileExt;
+use anyhow::Result;
 use sessiontap_core::{
     SCHEMA_VERSION,
     protocol::{ErrorEnvelope, Request, Response, StreamEnvelope},
 };
-use std::{
-    fs::{self, File, OpenOptions},
-    os::unix::fs::PermissionsExt,
-    path::Path,
-};
+use sessiontap_infra::json::write_json_line;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{UnixListener, UnixStream},
+    io::{AsyncBufReadExt, BufReader},
+    net::UnixStream,
     sync::broadcast,
 };
-
-/// Takes the exclusive daemon lock. The returned file holds the lock until
-/// dropped.
-pub fn acquire_daemon_lock(path: &Path) -> Result<File> {
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(path)?;
-    lock.try_lock_exclusive()
-        .context("sessiontapd is already running")?;
-    Ok(lock)
-}
-
-/// Binds the control socket with owner-only permissions, replacing a stale
-/// socket file but refusing to displace a live listener.
-pub async fn bind_private_socket(path: &Path) -> Result<UnixListener> {
-    if path.exists() {
-        if UnixStream::connect(path).await.is_ok() {
-            anyhow::bail!("sessiontapd is already listening");
-        }
-        fs::remove_file(path).context("remove stale socket")?;
-    }
-    let listener = UnixListener::bind(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(listener)
-}
 
 /// Serves one connection: a single request/response, or a listener stream.
 pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
@@ -57,7 +23,7 @@ pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
     let request: Request = serde_json::from_str(&line)?;
     if matches!(request, Request::Listen) {
         let (revision, views, mut rx) = app.subscribe()?;
-        write_json(
+        write_json_line(
             &mut write,
             &StreamEnvelope::Snapshot {
                 schema_version: SCHEMA_VERSION,
@@ -75,7 +41,7 @@ pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
                 },
                 received = rx.recv() => match received {
                     Ok(update) if update.revision > revision => {
-                        write_json(
+                        write_json_line(
                             &mut write,
                             &StreamEnvelope::Update {
                                 schema_version: SCHEMA_VERSION,
@@ -90,7 +56,7 @@ pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
                     Ok(_) => {}
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         let (r, views) = app.status()?;
-                        write_json(
+                        write_json_line(
                             &mut write,
                             &StreamEnvelope::Snapshot {
                                 schema_version: SCHEMA_VERSION,
@@ -112,7 +78,7 @@ pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
             message: e.to_string(),
         })
     });
-    write_json(&mut write, &response).await
+    Ok(write_json_line(&mut write, &response).await?)
 }
 
 /// Dispatches one non-streaming request.
@@ -180,36 +146,4 @@ pub fn process(request: Request, app: &App) -> Result<Response> {
         }
         Request::Listen => anyhow::bail!("listen is a streaming request"),
     })
-}
-
-async fn write_json<T: serde::Serialize>(
-    write: &mut tokio::net::unix::OwnedWriteHalf,
-    value: &T,
-) -> Result<()> {
-    write.write_all(&serde_json::to_vec(value)?).await?;
-    write.write_all(b"\n").await?;
-    Ok(())
-}
-
-/// Returns whether `pid` is alive and, when given, still has the recorded
-/// start identity (guards against PID reuse).
-#[must_use]
-pub fn process_alive(pid: u32, identity: Option<&str>) -> bool {
-    let path = format!("/proc/{pid}");
-    if Path::new(&path).exists() {
-        return identity.is_none_or(|expected| {
-            fs::read_to_string(format!("/proc/{pid}/stat"))
-                .ok()
-                .and_then(|stat| {
-                    stat.rsplit_once(')')?
-                        .1
-                        .split_whitespace()
-                        .nth(19)
-                        .map(str::to_owned)
-                })
-                .as_deref()
-                == Some(expected)
-        });
-    }
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
 }

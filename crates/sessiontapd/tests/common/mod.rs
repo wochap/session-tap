@@ -10,9 +10,9 @@ use sessiontap_core::{
         InvocationSnapshot, Lifecycle, MultiplexerMetadata, NormalizedEvent, ProcessMetadata,
         derive_status,
     },
-    multiplexer::MultiplexerAdapter,
     protocol::{Request, StreamEnvelope},
 };
+use sessiontap_infra::multiplexer::{MultiplexerAdapter, MultiplexerBackend, MultiplexerRegistry};
 use sessiontap_storage::Storage;
 use sessiontapd::app::{App, Collection, PublishConfig};
 use std::sync::Arc;
@@ -40,7 +40,10 @@ pub fn app_with(storage: Storage, daemon: &DaemonConfig) -> App {
         Arc::new(storage),
         PublishConfig::default(),
         daemon,
-        Arc::new(NoMultiplexer),
+        Arc::new(
+            MultiplexerRegistry::empty()
+                .with_adapter(MultiplexerBackend::Tmux, Arc::new(NoMultiplexer)),
+        ),
         Collection {
             home: "/nonexistent".into(),
             registry: Arc::new(AdapterRegistry::new(&Config::default())),

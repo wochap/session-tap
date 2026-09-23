@@ -169,6 +169,19 @@ pub enum PublicStatus {
     Stopped,
 }
 
+impl PublicStatus {
+    /// Canonical serialized name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Idle => "idle",
+            Self::Blocked => "blocked",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+
 /// Observer-facing reason category. Internal event kinds and attention source
 /// details deliberately do not cross the public projection boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,6 +191,19 @@ pub enum PublicReasonKind {
     Approval,
     Completed,
     Failed,
+}
+
+impl PublicReasonKind {
+    /// Canonical serialized name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Approval => "approval",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,6 +259,26 @@ pub enum PublicField {
     Metadata,
     Usage,
     Repository,
+}
+
+impl PublicField {
+    /// Canonical serialized field path.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvocationId => "invocation_id",
+            Self::Provider => "provider",
+            Self::Status => "status",
+            Self::Reason => "reason",
+            Self::Cwd => "cwd",
+            Self::CreatedAt => "created_at",
+            Self::UpdatedAt => "updated_at",
+            Self::Session => "session",
+            Self::Metadata => "metadata",
+            Self::Usage => "usage",
+            Self::Repository => "repository",
+        }
+    }
 }
 
 #[must_use]
@@ -393,9 +439,35 @@ pub struct ProcessMetadata {
     pub signal: Option<i32>,
 }
 
+/// Terminal multiplexer that hosts an invocation. Serialized as the same
+/// lowercase string persisted before the enum existed.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MultiplexerBackend {
+    #[default]
+    Tmux,
+}
+
+impl MultiplexerBackend {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tmux => "tmux",
+        }
+    }
+}
+
+impl std::fmt::Display for MultiplexerBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MultiplexerMetadata {
-    pub backend: String,
+    pub backend: MultiplexerBackend,
     pub socket: String,
     pub server_pid: Option<u32>,
     pub session_id: Option<String>,
@@ -555,6 +627,71 @@ pub struct NormalizedEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn serde_name<T: Serialize>(value: T) -> String {
+        serde_json::to_value(value)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn as_str_matches_serialized_names() {
+        for status in [
+            PublicStatus::Running,
+            PublicStatus::Idle,
+            PublicStatus::Blocked,
+            PublicStatus::Stopped,
+        ] {
+            assert_eq!(status.as_str(), serde_name(status));
+        }
+        for kind in [
+            PublicReasonKind::Input,
+            PublicReasonKind::Approval,
+            PublicReasonKind::Completed,
+            PublicReasonKind::Failed,
+        ] {
+            assert_eq!(kind.as_str(), serde_name(kind));
+        }
+        for field in [
+            PublicField::InvocationId,
+            PublicField::Provider,
+            PublicField::Status,
+            PublicField::Reason,
+            PublicField::Cwd,
+            PublicField::CreatedAt,
+            PublicField::UpdatedAt,
+            PublicField::Session,
+            PublicField::Metadata,
+            PublicField::Usage,
+            PublicField::Repository,
+        ] {
+            assert_eq!(field.as_str(), serde_name(field));
+        }
+        assert_eq!(
+            MultiplexerBackend::Tmux.as_str(),
+            serde_name(MultiplexerBackend::Tmux)
+        );
+    }
+
+    /// Written by the code before `MultiplexerBackend` existed, when the
+    /// backend was a free-form string.
+    #[test]
+    fn pre_enum_snapshot_round_trips_identically() {
+        let raw = include_str!("../tests/golden/pre-enum-tmux-snapshot.json");
+        let snapshot: InvocationSnapshot = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            snapshot.multiplexer.as_ref().map(|m| m.backend),
+            Some(MultiplexerBackend::Tmux)
+        );
+        assert_eq!(
+            serde_json::to_string_pretty(&snapshot).unwrap(),
+            raw.trim_end()
+        );
+        let unknown = raw.replace("\"backend\": \"tmux\"", "\"backend\": \"kitty\"");
+        assert!(serde_json::from_str::<InvocationSnapshot>(&unknown).is_err());
+    }
 
     #[test]
     fn status_precedence_is_exhaustive() {

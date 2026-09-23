@@ -1,29 +1,13 @@
-use crate::domain::{Capabilities, MultiplexerMetadata};
+use super::MultiplexerAdapter;
+use crate::process::parent_pid;
 use anyhow::{Context, Result, bail};
+use sessiontap_core::domain::{MultiplexerBackend, MultiplexerMetadata};
 use std::{
     env,
     io::Write,
     path::Path,
     process::{Command, Stdio},
 };
-
-pub trait MultiplexerAdapter {
-    fn inspect(&self) -> Result<Option<MultiplexerMetadata>>;
-    fn capture(&self, expected: &MultiplexerMetadata, process_pid: u32) -> Result<String>;
-    fn send_input(
-        &self,
-        expected: &MultiplexerMetadata,
-        process_pid: u32,
-        text: &[u8],
-    ) -> Result<()>;
-    fn capabilities(&self, present: bool) -> Capabilities {
-        Capabilities {
-            capture: present,
-            send_input: present,
-            usage: false,
-        }
-    }
-}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TmuxAdapter;
@@ -48,7 +32,7 @@ impl TmuxAdapter {
             bail!("unexpected tmux metadata");
         }
         Ok(MultiplexerMetadata {
-            backend: "tmux".into(),
+            backend: MultiplexerBackend::Tmux,
             socket: socket.into(),
             server_pid: fields[0].parse().ok(),
             session_id: Some(fields[1].into()),
@@ -157,24 +141,6 @@ fn is_descendant(mut child: u32, ancestor: u32) -> bool {
         child = parent;
     }
     false
-}
-
-fn parent_pid(pid: u32) -> Option<u32> {
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        return stat
-            .rsplit_once(')')?
-            .1
-            .split_whitespace()
-            .nth(1)?
-            .parse()
-            .ok();
-    }
-    let output = Command::new("ps")
-        .args(["-o", "ppid=", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
-    output.status.success().then_some(())?;
-    String::from_utf8(output.stdout).ok()?.trim().parse().ok()
 }
 
 #[cfg(test)]

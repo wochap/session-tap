@@ -1,7 +1,4 @@
-use std::{
-    env, fs, io,
-    path::{Path, PathBuf},
-};
+use std::{env, io, path::PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HubPaths {
@@ -28,28 +25,6 @@ impl HubPaths {
             state_dir: state.join("sessiontap-hub"),
             runtime_dir: runtime.join("sessiontap-hub"),
         })
-    }
-
-    pub fn prepare_private(path: &Path) -> io::Result<()> {
-        if let Ok(metadata) = fs::symlink_metadata(path) {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "private path must be a real directory",
-                ));
-            }
-        }
-        fs::create_dir_all(path)?;
-        use std::os::unix::fs::MetadataExt;
-        use std::os::unix::fs::PermissionsExt;
-        if fs::symlink_metadata(path)?.uid() != nix::unistd::Uid::effective().as_raw() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "private directory is owned by another user",
-            ));
-        }
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-        Ok(())
     }
 
     #[must_use]

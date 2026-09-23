@@ -11,11 +11,11 @@ use sessiontap_core::{
         ToolActivityPhase, ToolActivityUpdate, Usage,
     },
 };
+use sessiontap_infra::fs::atomic_write;
 use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
     fs::{self, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -793,11 +793,7 @@ pub fn merge_hook_config(
             },
         });
     }
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.write_all(&rendered)?;
-    temp.as_file().sync_all()?;
-    temp.persist(path).map_err(|e| e.error)?;
+    atomic_write(path, &rendered, 0o600)?;
     Ok(SetupReport {
         changed,
         healthy: true,
@@ -834,11 +830,7 @@ pub fn merge_owned_toml(path: &Path, table: &str, value: Option<toml::Value>) ->
     } else {
         document.remove(table);
     }
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.write_all(toml::to_string_pretty(&document)?.as_bytes())?;
-    temp.as_file().sync_all()?;
-    temp.persist(path).map_err(|error| error.error)?;
+    atomic_write(path, toml::to_string_pretty(&document)?.as_bytes(), 0o600)?;
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -32,20 +32,6 @@ CREATE TABLE IF NOT EXISTS accepted_deliveries (
  PRIMARY KEY (source_id, delivery_id)
 );
 "#;
-
-pub const CANONICAL_FIELDS: &[&str] = &[
-    "invocation_id",
-    "provider",
-    "status",
-    "reason",
-    "cwd",
-    "created_at",
-    "updated_at",
-    "session",
-    "metadata",
-    "usage",
-    "repository",
-];
 
 pub struct HubStore {
     conn: Mutex<Connection>,
@@ -90,17 +76,7 @@ pub enum UpdateAccept {
 
 impl HubStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if path
-            .symlink_metadata()
-            .is_ok_and(|m| m.file_type().is_symlink())
-        {
-            bail!("database path must not be a symlink");
-        }
-        let conn = Connection::open(path).with_context(|| format!("open {}", path.display()))?;
-        use std::{fs, os::unix::fs::PermissionsExt};
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
+        let conn = sessiontap_infra::sqlite::open_private_sqlite(path)?;
         conn.execute_batch(MIGRATION)?;
         Ok(Self {
             conn: Mutex::new(conn),

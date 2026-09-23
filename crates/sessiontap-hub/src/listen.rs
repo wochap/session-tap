@@ -1,10 +1,11 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use sessiontap_core::domain::{PublicAgentView, PublicField};
+use sessiontap_infra::json::write_json_line;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     net::UnixStream,
     sync::broadcast,
 };
@@ -56,7 +57,7 @@ pub async fn serve_listener(
         bail!("hub listener accepts only listen requests");
     }
     let (mut since, sources, agents) = store.merged()?;
-    write_json(
+    write_json_line(
         &mut write,
         &HubStreamEnvelope::Snapshot {
             hub_revision: since,
@@ -75,7 +76,7 @@ pub async fn serve_listener(
             received = receiver.recv() => match received {
                 Ok(HubPublication::Update(update)) if update.hub_revision > since => {
                     since = update.hub_revision;
-                    write_json(
+                    write_json_line(
                         &mut write,
                         &HubStreamEnvelope::Update {
                             hub_revision: update.hub_revision,
@@ -91,7 +92,7 @@ pub async fn serve_listener(
                 Ok(HubPublication::SnapshotApplied { hub_revision }) if hub_revision > since => {
                     let (hub_revision, sources, agents) = store.merged()?;
                     since = hub_revision;
-                    write_json(
+                    write_json_line(
                         &mut write,
                         &HubStreamEnvelope::Snapshot {
                             hub_revision,
@@ -105,7 +106,7 @@ pub async fn serve_listener(
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let (hub_revision, sources, agents) = store.merged()?;
                     since = hub_revision;
-                    write_json(
+                    write_json_line(
                         &mut write,
                         &HubStreamEnvelope::Snapshot {
                             hub_revision,
@@ -119,14 +120,5 @@ pub async fn serve_listener(
             }
         }
     }
-    Ok(())
-}
-
-async fn write_json<T: serde::Serialize>(
-    write: &mut tokio::net::unix::OwnedWriteHalf,
-    value: &T,
-) -> Result<()> {
-    write.write_all(&serde_json::to_vec(value)?).await?;
-    write.write_all(b"\n").await?;
     Ok(())
 }

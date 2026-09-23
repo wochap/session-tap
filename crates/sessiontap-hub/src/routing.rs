@@ -1,14 +1,10 @@
-use crate::{config::Subscription, ingest::AcceptedUpdate};
+use crate::{
+    config::{HubConfig, Subscription},
+    ingest::AcceptedUpdate,
+};
 use sessiontap_core::protocol::{HUB_SCHEMA_VERSION, SourceEnvelope};
-use std::process::Stdio;
-use tokio::{io::AsyncWriteExt, process::Command};
-
-fn enum_string<T: serde::Serialize>(value: T) -> String {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_default()
-}
+use std::{process::Stdio, sync::Arc, time::Duration};
+use tokio::{io::AsyncWriteExt, process::Command, sync::Semaphore, task::JoinHandle};
 
 pub fn matches(subscription: &Subscription, update: &AcceptedUpdate) -> bool {
     let criteria = &subscription.match_criteria;
@@ -18,20 +14,17 @@ pub fn matches(subscription: &Subscription, update: &AcceptedUpdate) -> bool {
     if !criteria.providers.is_empty() && !criteria.providers.contains(&update.view.provider) {
         return false;
     }
-    if !criteria.statuses.is_empty()
-        && !criteria.statuses.contains(&enum_string(update.view.status))
-    {
+    if !criteria.statuses.is_empty() && !criteria.statuses.contains(&update.view.status) {
         return false;
     }
-    if !criteria.reasons.is_empty() {
-        let reason = update
+    if !criteria.reasons.is_empty()
+        && update
             .view
             .reason
             .as_ref()
-            .map(|reason| enum_string(reason.kind));
-        if reason.is_none_or(|reason| !criteria.reasons.contains(&reason)) {
-            return false;
-        }
+            .is_none_or(|reason| !criteria.reasons.contains(&reason.kind))
+    {
+        return false;
     }
     if !criteria.repositories.is_empty() {
         let root = update
@@ -49,12 +42,10 @@ pub fn matches(subscription: &Subscription, update: &AcceptedUpdate) -> bool {
         }
     }
     subscription.changes.is_empty()
-        || subscription.changes.iter().any(|field| {
-            update
-                .changed
-                .iter()
-                .any(|changed| enum_string(*changed) == *field)
-        })
+        || subscription
+            .changes
+            .iter()
+            .any(|field| update.changed.contains(field))
 }
 
 pub fn canonical_envelope(update: &AcceptedUpdate) -> SourceEnvelope {
@@ -82,7 +73,7 @@ pub fn environment(update: &AcceptedUpdate) -> Vec<(String, String)> {
             update.source_revision.to_string(),
         ),
         ("SESSIONTAP_PROVIDER".into(), view.provider.clone()),
-        ("SESSIONTAP_STATUS".into(), enum_string(view.status)),
+        ("SESSIONTAP_STATUS".into(), view.status.as_str().into()),
         (
             "SESSIONTAP_INVOCATION_ID".into(),
             view.invocation_id.to_string(),
@@ -92,7 +83,7 @@ pub fn environment(update: &AcceptedUpdate) -> Vec<(String, String)> {
             update
                 .changed
                 .iter()
-                .map(|field| enum_string(*field))
+                .map(|field| field.as_str())
                 .collect::<Vec<_>>()
                 .join(","),
         ),
@@ -110,46 +101,108 @@ pub fn environment(update: &AcceptedUpdate) -> Vec<(String, String)> {
         }
     }
     if let Some(reason) = &view.reason {
-        vars.push(("SESSIONTAP_REASON_KIND".into(), enum_string(reason.kind)));
+        vars.push(("SESSIONTAP_REASON_KIND".into(), reason.kind.as_str().into()));
         vars.push(("SESSIONTAP_REASON_SUMMARY".into(), reason.summary.clone()));
     }
     vars
 }
 
+/// Bounds subscription command execution: at most `permits` commands run at
+/// once across all deliveries, and each is killed after `timeout`.
+#[derive(Debug, Clone)]
+pub struct CommandLimits {
+    permits: Arc<Semaphore>,
+    timeout: Duration,
+}
+
+impl CommandLimits {
+    #[must_use]
+    pub fn new(max_concurrent: usize, timeout: Duration) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(max_concurrent.max(1))),
+            timeout,
+        }
+    }
+
+    #[must_use]
+    pub fn from_config(config: &HubConfig) -> Self {
+        Self::new(
+            config.max_concurrent_commands,
+            Duration::from_secs(config.command_timeout_secs),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandOutcome {
+    Exited(std::process::ExitStatus),
+    /// The command exceeded its timeout and was killed.
+    TimedOut,
+}
+
+/// Runs one command with the canonical envelope on stdin. Writing stdin and
+/// waiting both count toward `timeout`; on expiry the child is killed.
 pub async fn execute(
     command: &[String],
     update: &AcceptedUpdate,
-) -> std::io::Result<std::process::ExitStatus> {
+    timeout: Duration,
+) -> std::io::Result<CommandOutcome> {
     let (program, args) = command
         .split_first()
         .expect("configuration validation rejects empty commands");
+    let payload = serde_json::to_vec(&canonical_envelope(update))?;
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .envs(environment(update))
+        .kill_on_drop(true)
         .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(&serde_json::to_vec(&canonical_envelope(update))?)
-            .await?;
+    let stdin = child.stdin.take();
+    let run = async {
+        if let Some(mut stdin) = stdin {
+            stdin.write_all(&payload).await?;
+        }
+        child.wait().await
+    };
+    match tokio::time::timeout(timeout, run).await {
+        Ok(status) => Ok(CommandOutcome::Exited(status?)),
+        Err(_) => {
+            let _ = child.kill().await;
+            Ok(CommandOutcome::TimedOut)
+        }
     }
-    child.wait().await
 }
 
-pub fn dispatch(subscriptions: Vec<Subscription>, update: AcceptedUpdate) {
+/// Runs every matching subscription's commands for one accepted update.
+/// Commands for this update run in configuration order; each waits for a
+/// concurrency permit, so excess commands queue rather than being dropped.
+pub fn dispatch(
+    subscriptions: Arc<Vec<Subscription>>,
+    update: AcceptedUpdate,
+    limits: CommandLimits,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         for subscription in subscriptions
             .iter()
             .filter(|subscription| matches(subscription, &update))
         {
             for command in &subscription.commands {
-                match execute(command, &update).await {
-                    Ok(status) if status.success() => {}
-                    Ok(status) => eprintln!(
+                let Ok(_permit) = limits.permits.acquire().await else {
+                    return;
+                };
+                match execute(command, &update, limits.timeout).await {
+                    Ok(CommandOutcome::Exited(status)) if status.success() => {}
+                    Ok(CommandOutcome::Exited(status)) => eprintln!(
                         "sessiontap-hub: subscription command {:?} exited with {status} for delivery '{}'",
                         command, update.delivery_id
+                    ),
+                    Ok(CommandOutcome::TimedOut) => eprintln!(
+                        "sessiontap-hub: subscription command {:?} timed out after {}s for delivery '{}'; killed",
+                        command,
+                        limits.timeout.as_secs_f64(),
+                        update.delivery_id
                     ),
                     Err(error) => eprintln!(
                         "sessiontap-hub: subscription command {:?} failed for delivery '{}': {error}",
@@ -158,7 +211,7 @@ pub fn dispatch(subscriptions: Vec<Subscription>, update: AcceptedUpdate) {
                 }
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
@@ -205,11 +258,11 @@ mod tests {
             match_criteria: MatchCriteria {
                 sources: vec!["sandbox".into()],
                 providers: vec!["codex".into()],
-                statuses: vec!["blocked".into()],
-                reasons: vec!["input".into()],
+                statuses: vec![PublicStatus::Blocked],
+                reasons: vec![PublicReasonKind::Input],
                 repositories: vec![],
             },
-            changes: vec!["reason".into()],
+            changes: vec![PublicField::Reason],
             commands: vec![vec!["true".into()]],
         };
         assert!(matches(&subscription, &update()));
@@ -220,11 +273,11 @@ mod tests {
         let subscription = Subscription {
             name: Some("completed".into()),
             match_criteria: MatchCriteria {
-                statuses: vec!["stopped".into()],
-                reasons: vec!["completed".into()],
+                statuses: vec![PublicStatus::Stopped],
+                reasons: vec![PublicReasonKind::Completed],
                 ..Default::default()
             },
-            changes: vec!["status".into(), "reason".into()],
+            changes: vec![PublicField::Status, PublicField::Reason],
             commands: vec![vec!["true".into()]],
         };
         let mut completed = update();
@@ -241,5 +294,94 @@ mod tests {
 
         completed.view.reason = None;
         assert!(!matches(&subscription, &completed));
+    }
+
+    fn shell_subscription(commands: &[&str]) -> Arc<Vec<Subscription>> {
+        Arc::new(vec![Subscription {
+            name: None,
+            match_criteria: MatchCriteria::default(),
+            changes: vec![],
+            commands: commands
+                .iter()
+                .map(|script| vec!["sh".into(), "-c".into(), (*script).into()])
+                .collect(),
+        }])
+    }
+
+    #[tokio::test]
+    async fn hanging_command_is_killed_at_timeout() {
+        let started = std::time::Instant::now();
+        let outcome = execute(
+            &["sleep".into(), "60".into()],
+            &update(),
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, CommandOutcome::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn dispatch_continues_after_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("log");
+        let after = format!("echo after >> '{}'", log.display());
+        dispatch(
+            shell_subscription(&["sleep 60", &after]),
+            update(),
+            CommandLimits::new(1, Duration::from_millis(200)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "after\n");
+    }
+
+    #[tokio::test]
+    async fn burst_runs_at_most_limit_commands_and_keeps_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("log");
+        let first = format!(
+            "echo \"start $SESSIONTAP_DELIVERY_ID\" >> '{0}'; sleep 0.2; echo \"end $SESSIONTAP_DELIVERY_ID\" >> '{0}'",
+            log.display()
+        );
+        let second = format!(
+            "echo \"second $SESSIONTAP_DELIVERY_ID\" >> '{}'",
+            log.display()
+        );
+        let subscriptions = shell_subscription(&[&first, &second]);
+        let limits = CommandLimits::new(2, Duration::from_secs(10));
+        let handles: Vec<_> = (0..5)
+            .map(|index| {
+                let mut update = update();
+                update.delivery_id = format!("d{index}");
+                dispatch(subscriptions.clone(), update, limits.clone())
+            })
+            .collect();
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        let log = std::fs::read_to_string(&log).unwrap();
+        let (mut running, mut peak) = (0_i32, 0_i32);
+        for line in log.lines() {
+            match line.split_once(' ').unwrap().0 {
+                "start" => running += 1,
+                "end" => running -= 1,
+                _ => {}
+            }
+            peak = peak.max(running);
+        }
+        assert!(peak <= 2, "peak concurrency {peak}:\n{log}");
+        assert!(peak >= 1);
+        for index in 0..5 {
+            let lines: Vec<&str> = log.lines().collect();
+            let end = lines.iter().position(|l| *l == format!("end d{index}"));
+            let second = lines.iter().position(|l| *l == format!("second d{index}"));
+            assert!(
+                end.is_some() && second.is_some(),
+                "delivery d{index} dropped:\n{log}"
+            );
+            assert!(end < second, "order broken for d{index}:\n{log}");
+        }
     }
 }

@@ -213,7 +213,7 @@ mod tests {
                 source_name: None,
             },
             &daemon,
-            Arc::new(sessiontap_core::multiplexer::TmuxAdapter),
+            Arc::new(sessiontap_infra::multiplexer::MultiplexerRegistry::empty()),
             Collection {
                 home: "/nonexistent".into(),
                 registry: Arc::new(AdapterRegistry::new(&Config::default())),

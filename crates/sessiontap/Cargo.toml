@@ -8,9 +8,9 @@ rust-version.workspace = true
 [dependencies]
 sessiontap-adapters = { path = "../sessiontap-adapters" }
 sessiontap-core = { path = "../sessiontap-core" }
+sessiontap-infra = { path = "../sessiontap-infra" }
 anyhow.workspace = true
 chrono.workspace = true
-fs2.workspace = true
 hex.workspace = true
 nix.workspace = true
 rand.workspace = true

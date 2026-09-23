@@ -23,14 +23,21 @@ sessiontap-hub listen     # merged snapshot, then JSONL updates
 The service reads `$XDG_CONFIG_HOME/sessiontap-hub/config.yaml` (falling back
 to `$HOME/.config/sessiontap-hub/config.yaml`). Configuration is versioned and
 strict: unknown fields, unsupported versions, empty commands, and unknown
-`changes` fields are reported and the service refuses to start rather than
-running a partial or broadened rule set.
+`changes` fields, statuses, or reasons are reported and the service refuses to
+start rather than running a partial or broadened rule set. Field, status, and
+reason names are parsed directly into the canonical public schema types, so the
+hub accepts exactly the names a public view can carry; names are lowercase and
+case-sensitive (`blocked`, not `Blocked`), and an error names the subscription
+index and the accepted values.
 
 ```yaml
 version: 1
 listen: "127.0.0.1:8931"        # HTTP ingestion bind address
 retention_days: 7               # stopped agents + accepted-event identities
 # token_file: /run/keys/sessiontap-hub-token   # optional bearer token
+max_body_bytes: 1048576         # largest accepted request body
+max_concurrent_commands: 4      # subscription commands running at once
+command_timeout_secs: 30        # a command running longer is killed
 subscriptions: []
 ```
 
@@ -103,6 +110,27 @@ internal events, lifecycle/activity state, credentials, process-control data,
 or multiplexer metadata. Bounded blocked or stopped reasons and fields such as
 cwd, repository paths, and session names remain potentially sensitive. Hub
 sinks are trusted, operator-controlled observers of these selected fields.
+
+## Ingestion responses
+
+Sources `POST` canonical envelopes to the ingestion address. Every rejection
+body is JSON with a structured `error` code:
+
+| Status | `error` | Meaning |
+| --- | --- | --- |
+| 200 | — | `{"status": "applied" \| "duplicate" \| "stale"}` |
+| 400 | `malformed_request` | Request line or headers cannot be parsed, or the connection ended early |
+| 400 | `malformed_envelope` | Body is not a valid canonical envelope |
+| 400 | `unsupported_schema_version` | Envelope schema version is not supported |
+| 401 | `unauthorized` | Bearer token missing or wrong |
+| 405 | `method_not_allowed` | Not a `POST` (except `GET /health`) |
+| 409 | `snapshot_required` | Hub has no baseline for this source |
+| 411 | `length_required` | `content-length` missing or not a number |
+| 413 | `payload_too_large` | Body exceeds `max_body_bytes` |
+| 431 | `headers_too_large` | Request headers exceed 64 KiB |
+
+Daemon hub sinks re-send a source snapshot on `409 snapshot_required`, treat
+every other 4xx as a permanent rejection, and retry 5xx and transport failures.
 
 ## Token authentication
 
@@ -191,8 +219,15 @@ conveniences, not an alternative schema — read stdin for anything richer:
 | `SESSIONTAP_REPOSITORY_ROOT` / `SESSIONTAP_REPOSITORY_BRANCH` | Repository when known |
 | `SESSIONTAP_REASON_KIND` / `SESSIONTAP_REASON_SUMMARY` | Bounded compatible blocked or stopped reason when present |
 
-Command failures are logged to the hub's stderr and never reject or redeliver
-an already accepted ingestion. Scripts that need stronger than best-effort
+Commands are bounded. At most `max_concurrent_commands` (default 4) run at once
+across all deliveries; excess commands queue and run as slots free, and no
+accepted delivery is dropped. Commands for one delivery run in configuration
+order. A command still running after `command_timeout_secs` (default 30) is
+killed, and the hub logs the command and delivery identity. Command duration
+never delays the ingestion response.
+
+Command failures and timeouts are logged to the hub's stderr and never reject
+or redeliver an already accepted ingestion. Scripts that need stronger than best-effort
 guarantees should persist their own idempotency keys keyed by
 `SESSIONTAP_DELIVERY_ID` and `SESSIONTAP_SOURCE`.
 

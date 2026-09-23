@@ -9,16 +9,15 @@ pub use http::HttpSink;
 pub use hub::HubSink;
 pub use stdout::StdoutSink;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use sessiontap_core::{
     config::{SinkConfig, validate_sink_url},
     domain::PublicField,
 };
+use sessiontap_infra::token::read_private_token;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    os::unix::fs::PermissionsExt,
     path::PathBuf,
 };
 
@@ -77,14 +76,9 @@ impl TokenSource {
         match self {
             Self::None => Ok(None),
             Self::Env(name) => Ok(std::env::var(name).ok()),
-            Self::File(path) => {
-                let meta = fs::symlink_metadata(path)
-                    .with_context(|| format!("token file {}", path.display()))?;
-                if meta.file_type().is_symlink() || meta.permissions().mode() & 0o077 != 0 {
-                    bail!("token file must be private and not a symlink");
-                }
-                Ok(Some(fs::read_to_string(path)?.trim().to_owned()))
-            }
+            Self::File(path) => read_private_token(path)
+                .map(Some)
+                .with_context(|| format!("token file {}", path.display())),
         }
     }
 }
@@ -329,7 +323,10 @@ pub(crate) mod tests {
 
     #[test]
     fn token_source_prefers_private_file_and_rejects_open_or_linked_files() {
-        use std::os::unix::fs::symlink;
+        use std::{
+            fs,
+            os::unix::fs::{PermissionsExt, symlink},
+        };
         let temp = tempfile::tempdir().unwrap();
         let token = temp.path().join("token");
         fs::write(&token, "secret\n").unwrap();

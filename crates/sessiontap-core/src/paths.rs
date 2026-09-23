@@ -1,7 +1,4 @@
-use std::{
-    env, fs, io,
-    path::{Path, PathBuf},
-};
+use std::{env, io, path::PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
@@ -31,28 +28,6 @@ impl AppPaths {
             data_dir: data.join("sessiontap"),
             runtime_dir: runtime.join("sessiontap"),
         })
-    }
-
-    pub fn prepare_private(path: &Path) -> io::Result<()> {
-        if let Ok(metadata) = fs::symlink_metadata(path) {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "private path must be a real directory",
-                ));
-            }
-        }
-        fs::create_dir_all(path)?;
-        use std::os::unix::fs::MetadataExt;
-        use std::os::unix::fs::PermissionsExt;
-        if fs::symlink_metadata(path)?.uid() != nix::unistd::Uid::effective().as_raw() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "private directory is owned by another user",
-            ));
-        }
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-        Ok(())
     }
 
     #[must_use]
@@ -104,38 +79,5 @@ mod tests {
             paths.hook_inspection_socket(),
             PathBuf::from("/home/u/.local/state/runtime/sessiontap/hook-inspection.sock")
         );
-    }
-    #[test]
-    fn private_directory_mode() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("private");
-        AppPaths::prepare_private(&path).unwrap();
-        assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o700);
-    }
-
-    #[test]
-    fn private_directory_rejects_symlink() {
-        use std::os::unix::fs::symlink;
-        let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("target");
-        fs::create_dir(&target).unwrap();
-        let link = tmp.path().join("link");
-        symlink(target, &link).unwrap();
-        assert_eq!(
-            AppPaths::prepare_private(&link).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
-    }
-
-    #[test]
-    fn private_directory_tightens_existing_permissions() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("runtime");
-        fs::create_dir(&path).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o777)).unwrap();
-        AppPaths::prepare_private(&path).unwrap();
-        assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o700);
     }
 }

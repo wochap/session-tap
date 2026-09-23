@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "revision": 3,
+  "invocation_id": "7d4f4d9e-1c1a-4c1b-9d5e-2f6a3b7c8d90",
+  "provider": "claude",
+  "executable": "claude",
+  "args": [],
+  "cwd": "/work",
+  "process": {
+    "wrapper_pid": 100,
+    "child_pid": 101,
+    "start_identity": "12345",
+    "exit_code": null,
+    "signal": null
+  },
+  "created_at": "2026-01-02T03:04:05Z",
+  "updated_at": "2026-01-02T03:04:05Z",
+  "lifecycle": "alive",
+  "activity": "idle",
+  "state_started_at": "2026-01-02T03:04:05Z",
+  "last_state_asserted_at": null,
+  "activity_confirmation": "live",
+  "last_evidence": null,
+  "source_ordering": [],
+  "current_tool_activity": null,
+  "status": "idle",
+  "provider_session": null,
+  "usage": null,
+  "repository": null,
+  "multiplexer": {
+    "backend": "tmux",
+    "socket": "/tmp/tmux-1000/default",
+    "server_pid": 42,
+    "session_id": "$1",
+    "session_name": "work",
+    "window_id": "@2",
+    "window_index": 0,
+    "pane_id": "%3",
+    "pane_tty": "/dev/pts/4",
+    "pane_pid": 99
+  },
+  "capabilities": {
+    "capture": true,
+    "send_input": true,
+    "usage": false
+  }
+}

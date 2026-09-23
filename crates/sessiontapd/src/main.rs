@@ -1,10 +1,17 @@
 use anyhow::Result;
 use sessiontap_adapters::AdapterRegistry;
-use sessiontap_core::{config::Config, multiplexer::TmuxAdapter, paths::AppPaths};
+use sessiontap_core::{config::Config, paths::AppPaths};
+use sessiontap_infra::{
+    config::load_config,
+    fs::prepare_private_dir,
+    multiplexer::MultiplexerRegistry,
+    process::process_alive,
+    socket::{bind_error, bind_private_unix_socket},
+};
 use sessiontap_storage::Storage;
 use sessiontapd::{
     app::{App, Collection, PublishConfig},
-    server::{acquire_daemon_lock, bind_private_socket, handle, process_alive},
+    server::handle,
     sinks::build_sinks,
     workers::{SinkWorker, stale_working_worker},
 };
@@ -13,12 +20,12 @@ use std::{fs, path::Path, sync::Arc};
 #[tokio::main]
 async fn main() -> Result<()> {
     let paths = AppPaths::discover()?;
-    AppPaths::prepare_private(&paths.runtime_dir)?;
-    AppPaths::prepare_private(&paths.state_dir)?;
-    let lock = acquire_daemon_lock(&paths.lock())?;
+    prepare_private_dir(&paths.runtime_dir)?;
+    prepare_private_dir(&paths.state_dir)?;
     let socket = paths.socket();
-    let listener = bind_private_socket(&socket).await?;
-    let config = Config::load(&paths.config_file()).unwrap_or_else(|e| {
+    let (listener, lock) = bind_private_unix_socket(&socket, &paths.lock())
+        .map_err(|error| bind_error("sessiontapd", &socket, error))?;
+    let config = load_config(&paths.config_file()).unwrap_or_else(|e| {
         eprintln!("sessiontapd: configuration disabled: {e}");
         Config::default()
     });
@@ -35,7 +42,7 @@ async fn main() -> Result<()> {
             source_name: config.source_name.clone(),
         },
         &daemon,
-        Arc::new(TmuxAdapter),
+        Arc::new(MultiplexerRegistry::new()),
         Collection {
             home: std::env::var_os("HOME").map_or_else(|| Path::new("/").to_path_buf(), Into::into),
             registry: Arc::new(AdapterRegistry::new(&config)),

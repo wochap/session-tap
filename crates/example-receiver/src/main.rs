@@ -1,8 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use sessiontap_core::protocol::{HUB_SCHEMA_VERSION, SourceEnvelope};
+use sessiontap_infra::http::{HttpLimits, read_http_request};
 use std::{collections::HashSet, sync::Arc};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     sync::Mutex,
 };
@@ -22,40 +23,15 @@ async fn main() -> Result<()> {
     }
 }
 async fn handle(mut stream: TcpStream, seen: Arc<Mutex<HashSet<String>>>) -> Result<()> {
-    let mut bytes = Vec::with_capacity(4096);
-    let split = loop {
-        if bytes.len() > 300_000 {
-            anyhow::bail!("request too large");
-        }
-        if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-            break end + 4;
-        }
-        let mut chunk = [0_u8; 4096];
-        let count = stream.read(&mut chunk).await?;
-        if count == 0 {
-            anyhow::bail!("incomplete HTTP request");
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-    };
-    let headers = String::from_utf8_lossy(&bytes[..split]);
-    let content_length = headers
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse::<usize>().ok())
-                .flatten()
-        })
-        .context("Content-Length required")?;
-    while bytes.len() - split < content_length {
-        let mut chunk = [0_u8; 4096];
-        let count = stream.read(&mut chunk).await?;
-        if count == 0 {
-            anyhow::bail!("incomplete HTTP body");
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-    }
-    let envelope: SourceEnvelope = serde_json::from_slice(&bytes[split..split + content_length])?;
+    let request = read_http_request(
+        &mut stream,
+        HttpLimits {
+            max_header_bytes: 300_000,
+            max_body_bytes: usize::MAX,
+        },
+    )
+    .await?;
+    let envelope: SourceEnvelope = serde_json::from_slice(&request.body)?;
     let (schema_version, delivery_key) = match &envelope {
         SourceEnvelope::Snapshot {
             schema_version,

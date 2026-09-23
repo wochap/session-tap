@@ -1,10 +1,14 @@
 use crate::store::{HubStore, Reject, SnapshotAccept, UpdateAccept};
-use anyhow::{Result, bail};
+use anyhow::Result;
 use sessiontap_core::{
     domain::{PublicAgentView, PublicField},
     protocol::SourceEnvelope,
 };
-use std::{collections::BTreeSet, sync::Arc};
+use sessiontap_infra::{
+    http::{HttpLimits, HttpReadError, read_http_request},
+    token::{constant_time_eq, read_private_token},
+};
+use std::{collections::BTreeSet, path::Path, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -39,81 +43,42 @@ pub struct IngestedRequest {
     pub body: Vec<u8>,
 }
 
+/// Hub ingestion header limit; oversized headers are answered with 431.
+pub const MAX_HEADER_BYTES: usize = 64 * 1024;
+
+/// Reads one ingestion request, extracting the bearer token.
 pub async fn read_request(
     stream: &mut TcpStream,
     max_body_bytes: usize,
-) -> Result<IngestedRequest> {
-    let mut bytes = Vec::with_capacity(4096);
-    let header_end = loop {
-        if bytes.len() > 64 * 1024 {
-            bail!("request headers too large");
-        }
-        if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-            break end + 4;
-        }
-        let mut chunk = [0_u8; 4096];
-        let count = stream.read(&mut chunk).await?;
-        if count == 0 {
-            bail!("incomplete HTTP request");
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-    };
-    let headers = String::from_utf8_lossy(&bytes[..header_end]);
-    let mut lines = headers.lines();
-    let mut request_line = lines.next().unwrap_or_default().split_whitespace();
-    let method = request_line.next().unwrap_or_default().to_owned();
-    let path = request_line.next().unwrap_or_default().to_owned();
-    let mut content_length = 0;
-    let mut bearer = None;
-    for line in lines {
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
-        if name.trim().eq_ignore_ascii_case("content-length") {
-            content_length = value.trim().parse().unwrap_or(0);
-        }
-        if name.trim().eq_ignore_ascii_case("authorization") {
-            bearer = value.trim().strip_prefix("Bearer ").map(str::to_owned);
-        }
-    }
-    if content_length > max_body_bytes {
-        bail!("request body exceeds limit");
-    }
-    while bytes.len() - header_end < content_length {
-        let mut chunk = [0_u8; 4096];
-        let count = stream.read(&mut chunk).await?;
-        if count == 0 {
-            bail!("incomplete HTTP body");
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-    }
+) -> Result<IngestedRequest, HttpReadError> {
+    let request = read_http_request(
+        stream,
+        HttpLimits {
+            max_header_bytes: MAX_HEADER_BYTES,
+            max_body_bytes,
+        },
+    )
+    .await?;
+    let bearer = request
+        .header("authorization")
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::to_owned);
     Ok(IngestedRequest {
-        method,
-        path,
+        method: request.method,
+        path: request.path,
         bearer,
-        body: bytes[header_end..header_end + content_length].to_vec(),
+        body: request.body,
     })
 }
 
-fn expected_token(path: &str) -> Result<String> {
-    use std::{fs, os::unix::fs::PermissionsExt};
-    let meta = fs::symlink_metadata(path)?;
-    if meta.file_type().is_symlink() || meta.permissions().mode() & 0o077 != 0 {
-        bail!("hub token file must be private and not a symlink");
-    }
-    Ok(fs::read_to_string(path)?.trim().to_owned())
-}
 fn token_matches(provided: Option<&str>, token_file: Option<&str>) -> bool {
     let Some(path) = token_file else {
         return true;
     };
-    let Ok(expected) = expected_token(path) else {
+    let Ok(expected) = read_private_token(Path::new(path)) else {
         return false;
     };
-    provided.is_some_and(|provided| {
-        let (a, b) = (provided.as_bytes(), expected.as_bytes());
-        a.len() == b.len() && a.iter().zip(b).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
-    })
+    provided.is_some_and(|provided| constant_time_eq(provided.as_bytes(), expected.as_bytes()))
 }
 
 pub fn handle_ingest(
@@ -214,7 +179,9 @@ pub async fn write_response(stream: &mut TcpStream, outcome: &IngestOutcome) -> 
         401 => "Unauthorized",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        411 => "Length Required",
         413 => "Payload Too Large",
+        431 => "Request Header Fields Too Large",
         _ => "Error",
     };
     let body = serde_json::to_vec(&outcome.body)?;
@@ -228,6 +195,38 @@ pub async fn write_response(stream: &mut TcpStream, outcome: &IngestOutcome) -> 
     Ok(())
 }
 
+/// Closes our side, then discards a bounded amount of unread request input
+/// so the kernel does not answer the peer with a reset that could destroy
+/// the rejection response before the client reads it.
+async fn drain_and_close(stream: &mut TcpStream) {
+    const DRAIN_LIMIT: usize = 1024 * 1024;
+    let _ = stream.shutdown().await;
+    let drain = async {
+        let mut chunk = [0_u8; 4096];
+        let mut total = 0;
+        while total < DRAIN_LIMIT {
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(count) => total += count,
+            }
+        }
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), drain).await;
+}
+
+/// Maps a transport-level read failure to its status code and error code.
+/// I/O failures have no response because the connection is unusable.
+#[must_use]
+pub fn transport_rejection(error: &HttpReadError) -> IngestOutcome {
+    let (status, code) = match error {
+        HttpReadError::Malformed(_) | HttpReadError::Io(_) => (400, "malformed_request"),
+        HttpReadError::LengthRequired => (411, "length_required"),
+        HttpReadError::BodyTooLarge => (413, "payload_too_large"),
+        HttpReadError::HeadersTooLarge => (431, "headers_too_large"),
+    };
+    outcome(status, serde_json::json!({ "error": code }), None)
+}
+
 pub async fn serve_connection(
     mut stream: TcpStream,
     store: Arc<HubStore>,
@@ -236,9 +235,10 @@ pub async fn serve_connection(
 ) -> Option<HubPublication> {
     let request = match read_request(&mut stream, max_body_bytes).await {
         Ok(request) => request,
-        Err(_) => {
-            let rejected = outcome(413, serde_json::json!({"error":"payload_too_large"}), None);
-            let _ = write_response(&mut stream, &rejected).await;
+        Err(HttpReadError::Io(_)) => return None,
+        Err(error) => {
+            let _ = write_response(&mut stream, &transport_rejection(&error)).await;
+            drain_and_close(&mut stream).await;
             return None;
         }
     };

@@ -14,6 +14,7 @@ use sessiontap_core::{
         local_mutation, mark_lost, validate_event,
     },
 };
+use sessiontap_infra::{sqlite::open_private_sqlite, token::constant_time_eq};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -76,18 +77,7 @@ pub struct Storage {
 
 impl Storage {
     pub fn open(path: &Path) -> Result<Self> {
-        if path
-            .symlink_metadata()
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-        {
-            bail!("database path must not be a symlink");
-        }
-        let conn = Connection::open(path).with_context(|| format!("open {}", path.display()))?;
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
+        let conn = open_private_sqlite(path)?;
         conn.execute_batch(MIGRATION)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -769,13 +759,6 @@ fn persist_snapshot(
 fn decode_snapshot(raw: &str) -> Result<InvocationSnapshot> {
     serde_json::from_str(raw)
         .context("incompatible retained invocation state; internal alpha schemas change in place")
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 #[cfg(test)]

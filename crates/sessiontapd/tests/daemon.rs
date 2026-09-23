@@ -8,10 +8,10 @@ use sessiontap_core::{
     config::{Config, DaemonConfig},
     domain::{EventKind, PublicReasonKind, PublicStatus, StatusReasonContext, StatusReasonSource},
 };
+use sessiontap_infra::socket::{acquire_exclusive_lock, bind_private_unix_socket};
 use sessiontap_storage::Storage;
 use sessiontapd::{
     app::{App, Collection, PublishConfig},
-    server::{acquire_daemon_lock, bind_private_socket},
     sinks::{TokenSource, build_sinks},
     workers::SinkWorker,
 };
@@ -84,7 +84,7 @@ fn concurrent_activation_has_one_lock_owner() {
             let (path, barrier) = (path.clone(), barrier.clone());
             std::thread::spawn(move || {
                 barrier.wait();
-                let lock = acquire_daemon_lock(&path);
+                let lock = acquire_exclusive_lock(&path);
                 // Keep the winner's lock alive until both have tried.
                 barrier.wait();
                 lock.is_ok()
@@ -182,7 +182,7 @@ async fn transient_http_retry_is_deduplicated_then_acknowledged() {
             source_name: None,
         },
         &daemon,
-        Arc::new(common::NoMultiplexer),
+        Arc::new(sessiontap_infra::multiplexer::MultiplexerRegistry::empty()),
         Collection {
             home: "/nonexistent".into(),
             registry: Arc::new(sessiontap_adapters::AdapterRegistry::new(&config)),
@@ -223,21 +223,21 @@ async fn transient_http_retry_is_deduplicated_then_acknowledged() {
 async fn socket_and_token_permission_attack_matrix() {
     let temp = tempfile::tempdir().unwrap();
     let socket = temp.path().join("sessiontap.sock");
-    let listener = bind_private_socket(&socket).await.unwrap();
+    let lock = temp.path().join("sessiontap.lock");
+    let (listener, held) = bind_private_unix_socket(&socket, &lock).unwrap();
     assert_eq!(
         socket.metadata().unwrap().permissions().mode() & 0o777,
         0o600
     );
-    // A live listener cannot be displaced; a stale socket file is replaced.
-    assert!(bind_private_socket(&socket).await.is_err());
-    drop(listener);
-    let rebound = bind_private_socket(&socket).await.unwrap();
-    drop(rebound);
-
-    let lock = temp.path().join("sessiontap.lock");
-    let held = acquire_daemon_lock(&lock).unwrap();
-    assert!(acquire_daemon_lock(&lock).is_err());
+    // A second daemon cannot take the lock; with the lock released, a live
+    // listener still cannot be displaced; a stale socket file is replaced.
+    assert!(bind_private_unix_socket(&socket, &lock).is_err());
+    assert!(acquire_exclusive_lock(&lock).is_err());
     drop(held);
+    assert!(bind_private_unix_socket(&socket, &lock).is_err());
+    drop(listener);
+    let rebound = bind_private_unix_socket(&socket, &lock).unwrap();
+    drop(rebound);
 
     let token = temp.path().join("token");
     fs::write(&token, "secret").unwrap();

@@ -1,26 +1,28 @@
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use fs2::FileExt;
 use rand::RngCore;
 use sessiontap_adapters::{
     ADAPTER_API_VERSION, AdapterRegistry, NormalizeContext, SetupAction, SideChannelSource,
 };
 use sessiontap_core::{
     SCHEMA_VERSION,
-    config::Config,
     domain::{
         Activity, ActivityConfirmation, EventEvidence, EvidenceChannel, EvidenceTrust,
         InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
     },
-    multiplexer::{MultiplexerAdapter, TmuxAdapter},
     paths::AppPaths,
     protocol::{Request, Response},
 };
+use sessiontap_infra::{
+    config::load_config,
+    fs::prepare_private_dir,
+    multiplexer::MultiplexerRegistry,
+    process::process_start_identity,
+    socket::{bind_error, bind_private_unix_datagram},
+};
 use std::{
-    env,
-    fs::{self, OpenOptions},
+    env, fs,
     io::{Read, Write},
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -140,7 +142,7 @@ fn completions(shell: Option<String>) -> Result<()> {
 async fn setup(paths: &AppPaths, provider: Option<String>, action: SetupAction) -> Result<()> {
     let home = PathBuf::from(env::var_os("HOME").context("HOME missing")?);
     let executable = env::current_exe()?;
-    let config = Config::load(&paths.config_file()).unwrap_or_default();
+    let config = load_config(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let providers = provider.map_or_else(
         || {
@@ -193,29 +195,27 @@ impl Drop for InspectionEndpoint {
     }
 }
 
-async fn inspect_hooks(paths: &AppPaths) -> Result<()> {
-    AppPaths::prepare_private(&paths.runtime_dir)?;
-    let lock = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(paths.hook_inspection_lock())?;
-    lock.try_lock_exclusive()
-        .context("another hook inspector is already running")?;
+/// Binds the private hook-inspection datagram socket under its exclusive
+/// lock. A stale socket file is replaced; a live one is left alone.
+fn bind_inspection_endpoint(paths: &AppPaths) -> Result<(UnixDatagram, InspectionEndpoint)> {
+    prepare_private_dir(&paths.runtime_dir)?;
     let socket_path = paths.hook_inspection_socket();
-    if fs::symlink_metadata(&socket_path).is_ok() {
-        fs::remove_file(&socket_path).context("remove stale hook inspection endpoint")?;
-    }
+    let (socket, lock) = bind_private_unix_datagram(&socket_path, &paths.hook_inspection_lock())
+        .map_err(|error| bind_error("hook inspector", &socket_path, error))?;
+    Ok((
+        socket,
+        InspectionEndpoint {
+            socket: socket_path,
+            _lock: lock,
+        },
+    ))
+}
+
+async fn inspect_hooks(paths: &AppPaths) -> Result<()> {
+    let (socket, _endpoint) = bind_inspection_endpoint(paths)?;
     eprintln!(
         "WARNING: raw hook payloads may contain prompts, tool inputs, paths, credentials, and other sensitive data. Terminal scrollback and explicit redirection may retain this output. SessionTap does not persist or forward it."
     );
-    let socket = UnixDatagram::bind(&socket_path).context("bind hook inspection endpoint")?;
-    let _endpoint = InspectionEndpoint {
-        socket: socket_path,
-        _lock: lock,
-    };
-    fs::set_permissions(&_endpoint.socket, fs::Permissions::from_mode(0o600))?;
     let (sender, mut receiver) = mpsc::channel::<Vec<u8>>(INSPECTION_QUEUE_DEPTH);
     let writer = tokio::task::spawn_blocking(move || {
         let stdout = std::io::stdout();
@@ -253,7 +253,7 @@ async fn inspect_hooks(paths: &AppPaths) -> Result<()> {
 }
 
 async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<()> {
-    let config = Config::load(&paths.config_file()).unwrap_or_default();
+    let config = load_config(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let (adapter, executable) = registry.resolve(provider).ok_or_else(|| {
         unknown_provider(&registry, provider)
@@ -291,12 +291,14 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     let sanitized = adapter.redact_args(&args);
     let mut prep = sessiontap_adapters::LaunchPreparation::default();
     if tracked {
-        AppPaths::prepare_private(&paths.runtime_dir.join(id.to_string()))?;
+        prepare_private_dir(&paths.runtime_dir.join(id.to_string()))?;
         prep = adapter.prepare_launch(
             &args,
             &paths.runtime_dir.join(id.to_string()),
             Path::new(&executable),
         )?;
+        let multiplexers = MultiplexerRegistry::new();
+        let multiplexer = multiplexers.detect().unwrap_or(None);
         let snapshot = InvocationSnapshot {
             schema_version: SCHEMA_VERSION,
             revision: 0,
@@ -324,8 +326,8 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
             provider_metadata: None,
             usage: None,
             repository: repository_metadata(&cwd),
-            multiplexer: TmuxAdapter.inspect().unwrap_or(None),
-            capabilities: TmuxAdapter.capabilities(std::env::var_os("TMUX").is_some()),
+            multiplexer: multiplexer.clone(),
+            capabilities: multiplexers.capabilities(multiplexer.as_ref()),
             turn_generation: 0,
             completed_generation: None,
         };
@@ -458,7 +460,7 @@ async fn tail_provider_side_channel(
     mut source: Box<dyn SideChannelSource>,
     workspace: PathBuf,
 ) {
-    let config = Config::load(&paths.config_file()).unwrap_or_default();
+    let config = load_config(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let Some((adapter, _)) = registry.resolve(&provider) else {
         return;
@@ -548,7 +550,7 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
     let Ok(uuid) = uuid_parse(&id) else {
         return Ok(());
     };
-    let config = Config::load(&paths.config_file()).unwrap_or_default();
+    let config = load_config(&paths.config_file()).unwrap_or_default();
     let registry = AdapterRegistry::new(&config);
     let Some((adapter, _)) = registry.resolve(provider) else {
         return Ok(());
@@ -700,14 +702,6 @@ fn random_credential() -> String {
 }
 fn uuid_parse(value: &str) -> Result<InvocationId> {
     Ok(InvocationId(uuid::Uuid::parse_str(value)?))
-}
-fn process_start_identity(pid: u32) -> Option<String> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(19)
-        .map(str::to_owned)
 }
 fn repository_metadata(cwd: &std::path::Path) -> Option<sessiontap_core::domain::Repository> {
     let cwd = cwd.to_owned();
@@ -867,24 +861,45 @@ mod tests {
         )));
     }
 
-    #[test]
-    fn inspection_lock_allows_only_one_inspector() {
+    fn temp_paths(temp: &tempfile::TempDir) -> AppPaths {
+        AppPaths {
+            config_dir: temp.path().join("config"),
+            state_dir: temp.path().join("state"),
+            data_dir: temp.path().join("data"),
+            runtime_dir: temp.path().join("runtime"),
+        }
+    }
+
+    #[tokio::test]
+    async fn inspection_lock_allows_only_one_inspector() {
         let temp = tempfile::tempdir().unwrap();
-        let lock_path = temp.path().join("inspect.lock");
-        let first = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .unwrap();
-        let second = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&lock_path)
-            .unwrap();
-        first.try_lock_exclusive().unwrap();
-        assert!(second.try_lock_exclusive().is_err());
+        let paths = temp_paths(&temp);
+        let (_socket, endpoint) = bind_inspection_endpoint(&paths).unwrap();
+        let error = bind_inspection_endpoint(&paths).err().unwrap();
+        assert!(error.to_string().contains("already running"));
+        assert!(paths.hook_inspection_socket().exists());
+        drop(endpoint);
+        assert!(!paths.hook_inspection_socket().exists());
+    }
+
+    #[tokio::test]
+    async fn live_inspection_socket_is_not_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(&temp);
+        prepare_private_dir(&paths.runtime_dir).unwrap();
+        // A live endpoint whose owner does not hold the lock (for example a
+        // lock file removed out from under it) must still not be displaced.
+        let live = std::os::unix::net::UnixDatagram::bind(paths.hook_inspection_socket()).unwrap();
+        assert!(bind_inspection_endpoint(&paths).is_err());
+        let probe = std::os::unix::net::UnixDatagram::unbound().unwrap();
+        probe.connect(paths.hook_inspection_socket()).unwrap();
+        probe.send(b"still-live").unwrap();
+        let mut buffer = [0_u8; 16];
+        let size = live.recv(&mut buffer).unwrap();
+        assert_eq!(&buffer[..size], b"still-live");
+        // Once the owner is gone the stale file is replaced.
+        drop(live);
+        let (_socket, _endpoint) = bind_inspection_endpoint(&paths).unwrap();
     }
 
     #[test]
@@ -913,13 +928,8 @@ mod tests {
     #[tokio::test]
     async fn inspection_delivery_is_ephemeral_and_provider_independent() {
         let temp = tempfile::tempdir().unwrap();
-        let paths = AppPaths {
-            config_dir: temp.path().join("config"),
-            state_dir: temp.path().join("state"),
-            data_dir: temp.path().join("data"),
-            runtime_dir: temp.path().join("runtime"),
-        };
-        AppPaths::prepare_private(&paths.runtime_dir).unwrap();
+        let paths = temp_paths(&temp);
+        prepare_private_dir(&paths.runtime_dir).unwrap();
         let listener = match UnixDatagram::bind(paths.hook_inspection_socket()) {
             Ok(listener) => listener,
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {

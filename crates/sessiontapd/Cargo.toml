@@ -14,14 +14,12 @@ path = "src/main.rs"
 
 [dependencies]
 sessiontap-core = { path = "../sessiontap-core" }
+sessiontap-infra = { path = "../sessiontap-infra" }
 sessiontap-adapters = { path = "../sessiontap-adapters" }
 sessiontap-storage = { path = "../sessiontap-storage" }
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
-fs2.workspace = true
-libc.workspace = true
-nix.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

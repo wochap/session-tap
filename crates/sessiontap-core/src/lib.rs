@@ -1,6 +1,5 @@
 pub mod config;
 pub mod domain;
-pub mod multiplexer;
 pub mod paths;
 pub mod protocol;
 pub mod provider;
