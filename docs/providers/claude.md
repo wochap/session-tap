@@ -44,9 +44,28 @@ An independently sanitized capture maps `prompt_id` to current turn and
 allowlisted `permission_mode` (including `dontAsk`) and `effort.level` to provider metadata. At most the first sanitized question is selected
 as current input context; options and remaining question content are discarded.
 
-Hooks with a non-empty `agent_id`, plus `SubagentStart` and `SubagentStop`, are
-ignored before extracting root activity, reasons, session metadata, or usage.
-An `agent_type` without `agent_id` is still treated as the main session.
+Subagents are tracked as children of the root invocation. Hooks with a
+non-empty `agent_id` become child-agent events instead of root events:
+`SubagentStart` starts a running child, `SubagentStop` stops it with a
+`completed` reason, and child `PreToolUse`, `PostToolUse`,
+`PostToolUseFailure`, and `PermissionRequest` use the same mappings as their
+root counterparts. The child's `agent_id` (at most 128 characters) and
+`agent_type` (at most 64 characters) are sanitized; a payload whose identity
+fails those bounds, or a subagent lifecycle hook without `agent_id`, is
+ignored. Child events never change the root's status, reason, turn, session,
+metadata, or usage, and the subagent transcript path, last assistant message,
+background task list, and tool input never cross the adapter boundary. An
+`agent_type` without `agent_id` is still treated as the main session.
+
+A background subagent can keep working after the root `Stop`, so the root may
+report `stopped` while a child is `running` or `blocked`. Check `children`
+before the root status to derive an effective status. Children are cleared on
+the next prompt, a new provider session, or process exit. A killed subagent
+that never emits `SubagentStop` stays `running` until one of those clears it.
+
+`SubagentStart` and `SubagentStop` are managed hooks. Existing installations
+must re-run `sessiontap setup claude` to install them; until then, children
+appear only through their tool hooks and never report a start or stop.
 
 Minimum locally tested version: Claude Code 2.1.241. New event fields and
 unsupported exact event names or notification subtypes are ignored. Live smoke testing is opt-in; see

@@ -17,5 +17,7 @@
   {"expected":"completed","payload":{"hook_event_name":"Stop","session_id":"s"}},
   {"expected":"interrupted","payload":{"hook_event_name":"Stop","session_id":"s","is_interrupt":true}},
   {"expected":"failed","payload":{"hook_event_name":"StopFailure","session_id":"s","reason":"timeout"}},
-  {"expected":"provider_session_ended","payload":{"hook_event_name":"SessionEnd","session_id":"s"}}
+  {"expected":"provider_session_ended","payload":{"hook_event_name":"SessionEnd","session_id":"s"}},
+  {"expected":"new_turn","payload":{"hook_event_name":"SubagentStart","session_id":"s","agent_id":"agent-1","agent_type":"Explore"}},
+  {"expected":"completed","payload":{"hook_event_name":"SubagentStop","session_id":"s","agent_id":"agent-1","agent_type":"Explore","agent_transcript_path":"/private/agent-1.jsonl","last_assistant_message":"PRIVATE_SUBAGENT_MESSAGE"}}
 ]

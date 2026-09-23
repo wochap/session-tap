@@ -3,9 +3,11 @@
 //! prior row, assigns the revision, and persists what this module returns.
 
 use crate::domain::{
-    Activity, ActivityConfirmation, COLLECTOR_INSTANCE_ID_MAX_CHARS, CurrentStatusReason,
-    CurrentToolActivity, EventEvidence, EventKind, EvidenceChannel, EvidenceTrust,
-    InvocationSnapshot, Lifecycle, NormalizedEvent, ProviderSession, PublicAgentView, PublicField,
+    Activity, ActivityConfirmation, CHILD_AGENT_ID_MAX_CHARS, CHILD_AGENT_TYPE_MAX_CHARS,
+    CHILD_AGENTS_MAX, COLLECTOR_INSTANCE_ID_MAX_CHARS, ChildActivity, ChildAgentRef,
+    ChildAgentState, CurrentStatusReason, CurrentToolActivity, EventEvidence, EventKind,
+    EvidenceChannel, EvidenceTrust, InvocationSnapshot, Lifecycle, NormalizedEvent,
+    ProviderSession, PublicAgentView, PublicChildAgentReason, PublicField, PublicReasonKind,
     SOURCE_ORDER_CURSOR_MAX, STATUS_REASON_MAX_BYTES, STATUS_REASON_MAX_CHARS, SourceOrderCursor,
     StatusReasonContext, TOOL_CORRELATION_ID_MAX_CHARS, TOOL_DETAIL_MAX_CHARS,
     TOOL_LABEL_MAX_CHARS, ToolActivityPhase, ToolActivityUpdate, changed_public_fields,
@@ -64,6 +66,7 @@ pub fn validate_event(
 ) -> Result<()> {
     validate_evidence(&event.evidence)?;
     validate_tool_activity(event)?;
+    validate_child_agent(event)?;
     if status_reason.is_some_and(|context| {
         context.summary.is_empty()
             || context.summary.len() > STATUS_REASON_MAX_BYTES
@@ -82,6 +85,9 @@ pub fn apply_event(
     status_reason: Option<&StatusReasonContext>,
 ) -> Result<Transition> {
     validate_event(event, status_reason)?;
+    if let Some(child) = &event.child_agent {
+        return Ok(apply_child_event(prior, event, child));
+    }
     let mut snapshot = prior.snapshot.clone();
     let mut effective = event_with_channel_authority(event);
     if matches!(snapshot.lifecycle, Lifecycle::Exited | Lifecycle::Lost) {
@@ -157,12 +163,120 @@ pub fn apply_event(
     })
 }
 
+/// Applies one child-agent event. Only `children` changes; the root turn,
+/// session, metadata, usage, tool activity, and reason are untouched. A child
+/// may outlive the root's terminal turn, so terminal-turn suppression does not
+/// apply, while stale source-order and older-session guards do.
+fn apply_child_event(
+    prior: Prior<'_>,
+    event: &NormalizedEvent,
+    child: &ChildAgentRef,
+) -> Transition {
+    let mut snapshot = prior.snapshot.clone();
+    let effective = event_with_channel_authority(event);
+    let stale_order = is_stale_source_order(&snapshot.source_ordering, &event.evidence);
+    let stale_session = effective.provider_session_id.as_ref().is_some_and(|id| {
+        snapshot
+            .provider_session
+            .as_ref()
+            .is_some_and(|current| current.id != *id)
+    });
+    let suppressed = stale_order || stale_session;
+    if !suppressed {
+        if !matches!(snapshot.lifecycle, Lifecycle::Exited | Lifecycle::Lost) {
+            reduce_child(&mut snapshot, &effective, child);
+        }
+        record_source_order(&mut snapshot, &event.evidence);
+    }
+    Transition {
+        snapshot,
+        reason: ReasonEffect::Keep,
+        suppressed,
+    }
+}
+
+/// Updates, creates, or evicts the child addressed by `child`. Events that
+/// carry no child activity leave the list unchanged.
+pub fn reduce_child(
+    snapshot: &mut InvocationSnapshot,
+    event: &NormalizedEvent,
+    child: &ChildAgentRef,
+) {
+    let (activity, kind) = match event.kind {
+        EventKind::NewTurn | EventKind::Working => (ChildActivity::Running, None),
+        EventKind::WaitingInput => (ChildActivity::Blocked, Some(PublicReasonKind::Input)),
+        EventKind::WaitingApproval => (ChildActivity::Blocked, Some(PublicReasonKind::Approval)),
+        EventKind::Completed => (ChildActivity::Stopped, Some(PublicReasonKind::Completed)),
+        EventKind::Failed | EventKind::Interrupted => {
+            (ChildActivity::Stopped, Some(PublicReasonKind::Failed))
+        }
+        EventKind::Idle
+        | EventKind::ProviderSessionStarted
+        | EventKind::ProviderSessionEnded
+        | EventKind::SessionEnded
+        | EventKind::Enrichment => return,
+    };
+    let label = event.tool_activity.as_ref().map(|tool| tool.label.clone());
+    let now = event.received_at;
+    let existing = snapshot
+        .children
+        .iter()
+        .position(|state| state.agent_id == child.agent_id);
+    let index = if let Some(index) = existing {
+        index
+    } else {
+        if snapshot.children.len() >= CHILD_AGENTS_MAX {
+            let Some(oldest_stopped) = snapshot
+                .children
+                .iter()
+                .enumerate()
+                .filter(|(_, state)| state.activity == ChildActivity::Stopped)
+                .min_by(|(_, a), (_, b)| {
+                    a.started_at
+                        .cmp(&b.started_at)
+                        .then_with(|| a.agent_id.cmp(&b.agent_id))
+                })
+                .map(|(index, _)| index)
+            else {
+                return;
+            };
+            snapshot.children.remove(oldest_stopped);
+        }
+        snapshot.children.push(ChildAgentState {
+            agent_id: child.agent_id.clone(),
+            agent_type: child.agent_type.clone(),
+            activity,
+            reason: None,
+            started_at: now,
+            updated_at: now,
+        });
+        snapshot.children.len() - 1
+    };
+    let state = &mut snapshot.children[index];
+    let summary = if activity == ChildActivity::Stopped {
+        label
+    } else {
+        label.or_else(|| {
+            state
+                .reason
+                .as_ref()
+                .and_then(|reason| reason.summary.clone())
+        })
+    };
+    state.agent_type.clone_from(&child.agent_type);
+    state.activity = activity;
+    state.reason =
+        (kind.is_some() || summary.is_some()).then_some(PublicChildAgentReason { kind, summary });
+    state.updated_at = now;
+}
+
 /// The supervised process disappeared without a lifecycle exit.
 #[must_use]
 pub fn mark_lost(prior: Prior<'_>) -> Transition {
     let mut snapshot = prior.snapshot.clone();
     snapshot.lifecycle = Lifecycle::Lost;
     snapshot.current_tool_activity = None;
+    snapshot.children.clear();
     snapshot.last_evidence = Some(EventEvidence::local(EvidenceChannel::ProcessObservation));
     snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
     Transition {
@@ -216,6 +330,9 @@ pub fn local_mutation(
     snapshot.last_evidence = Some(EventEvidence::local(EvidenceChannel::ProcessObservation));
     if clear_incompatible_reason {
         snapshot.current_tool_activity = None;
+    }
+    if matches!(snapshot.lifecycle, Lifecycle::Exited | Lifecycle::Lost) {
+        snapshot.children.clear();
     }
     snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
     let reason = if clear_incompatible_reason {
@@ -289,6 +406,19 @@ pub fn validate_evidence(evidence: &EventEvidence) -> Result<()> {
         })
     {
         bail!("collector instance identity is not bounded normalized text");
+    }
+    Ok(())
+}
+
+pub fn validate_child_agent(event: &NormalizedEvent) -> Result<()> {
+    let bounded = |value: &str, max: usize| {
+        !value.is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control)
+    };
+    if event.child_agent.as_ref().is_some_and(|child| {
+        !bounded(&child.agent_id, CHILD_AGENT_ID_MAX_CHARS)
+            || !bounded(&child.agent_type, CHILD_AGENT_TYPE_MAX_CHARS)
+    }) {
+        bail!("child agent identity is not bounded normalized text");
     }
     Ok(())
 }
@@ -487,6 +617,7 @@ pub fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
             snapshot.turn_generation += 1;
             snapshot.completed_generation = None;
             snapshot.activity = Activity::Working;
+            snapshot.children.clear();
         }
         EventKind::Working if snapshot.completed_generation != Some(snapshot.turn_generation) => {
             snapshot.activity = Activity::Working
@@ -510,7 +641,10 @@ pub fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
             snapshot.activity = Activity::Idle;
         }
         EventKind::ProviderSessionEnded => {}
-        EventKind::SessionEnded => snapshot.lifecycle = Lifecycle::Exited,
+        EventKind::SessionEnded => {
+            snapshot.lifecycle = Lifecycle::Exited;
+            snapshot.children.clear();
+        }
         EventKind::Enrichment
         | EventKind::Working
         | EventKind::WaitingInput
@@ -528,6 +662,7 @@ pub fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
         let is_new = prior.is_none_or(|session| session.id != *id);
         if is_new {
             snapshot.usage = None;
+            snapshot.children.clear();
         }
         snapshot.provider_session = Some(ProviderSession {
             id: id.clone(),
@@ -624,6 +759,7 @@ mod tests {
             capabilities: Capabilities::default(),
             turn_generation: 0,
             completed_generation: None,
+            children: Vec::new(),
         }
     }
 
@@ -645,6 +781,7 @@ mod tests {
             usage: None,
             turn_id: None,
             tool_activity: None,
+            child_agent: None,
         }
     }
 
@@ -1247,6 +1384,364 @@ mod tests {
         let (view, changed) = finalize(&prior_view, &mut reason_only, Some(&waiting), at(60));
         assert!(changed.contains(&PublicField::Reason));
         assert_eq!(view.reason.unwrap().summary, "Choose");
+    }
+
+    fn child_event(kind: EventKind, agent_id: &str) -> NormalizedEvent {
+        let mut value = event(kind);
+        value.child_agent = Some(ChildAgentRef {
+            agent_id: agent_id.into(),
+            agent_type: "Explore".into(),
+        });
+        value
+    }
+
+    fn with_tool(mut value: NormalizedEvent, label: &str) -> NormalizedEvent {
+        value.tool_activity = Some(ToolActivityUpdate {
+            phase: ToolActivityPhase::Start,
+            label: label.into(),
+            correlation_id: Some("toolu_1".into()),
+            detail: Some("PRIVATE_DETAIL".into()),
+        });
+        value
+    }
+
+    fn child_reason(
+        kind: Option<PublicReasonKind>,
+        summary: Option<&str>,
+    ) -> Option<PublicChildAgentReason> {
+        Some(PublicChildAgentReason {
+            kind,
+            summary: summary.map(Into::into),
+        })
+    }
+
+    #[test]
+    fn child_kinds_map_to_child_activity_and_reason() {
+        let cases = [
+            (EventKind::NewTurn, ChildActivity::Running, None),
+            (EventKind::Working, ChildActivity::Running, None),
+            (
+                EventKind::WaitingInput,
+                ChildActivity::Blocked,
+                Some(PublicReasonKind::Input),
+            ),
+            (
+                EventKind::WaitingApproval,
+                ChildActivity::Blocked,
+                Some(PublicReasonKind::Approval),
+            ),
+            (
+                EventKind::Completed,
+                ChildActivity::Stopped,
+                Some(PublicReasonKind::Completed),
+            ),
+            (
+                EventKind::Failed,
+                ChildActivity::Stopped,
+                Some(PublicReasonKind::Failed),
+            ),
+            (
+                EventKind::Interrupted,
+                ChildActivity::Stopped,
+                Some(PublicReasonKind::Failed),
+            ),
+        ];
+        for (kind, activity, reason_kind) in cases {
+            let mut state = State::new();
+            state.apply(&with_tool(child_event(kind.clone(), "a"), "bash"), None);
+            let child = &state.snapshot.children[0];
+            assert_eq!(child.activity, activity, "{kind:?}");
+            assert_eq!(child.reason, child_reason(reason_kind, Some("bash")));
+        }
+        for kind in [
+            EventKind::Idle,
+            EventKind::ProviderSessionStarted,
+            EventKind::ProviderSessionEnded,
+            EventKind::SessionEnded,
+            EventKind::Enrichment,
+        ] {
+            let mut state = State::new();
+            state.apply(&child_event(kind.clone(), "a"), None);
+            assert!(state.snapshot.children.is_empty(), "{kind:?}");
+            assert_eq!(state.snapshot.lifecycle, Lifecycle::Alive);
+        }
+    }
+
+    #[test]
+    fn child_summary_follows_tool_labels_and_clears_on_stop() {
+        let mut state = State::new();
+        state.apply(&child_event(EventKind::NewTurn, "a"), None);
+        assert_eq!(state.snapshot.children[0].activity, ChildActivity::Running);
+        assert_eq!(state.snapshot.children[0].reason, None);
+        state.apply(
+            &with_tool(child_event(EventKind::Working, "a"), "bash"),
+            None,
+        );
+        assert_eq!(
+            state.snapshot.children[0].reason,
+            child_reason(None, Some("bash"))
+        );
+        state.apply(&child_event(EventKind::WaitingApproval, "a"), None);
+        assert_eq!(
+            state.snapshot.children[0].reason,
+            child_reason(Some(PublicReasonKind::Approval), Some("bash"))
+        );
+        state.apply(&child_event(EventKind::Completed, "a"), None);
+        let child = &state.snapshot.children[0];
+        assert_eq!(child.activity, ChildActivity::Stopped);
+        assert_eq!(
+            child.reason,
+            child_reason(Some(PublicReasonKind::Completed), None)
+        );
+        assert_eq!(state.snapshot.status, PublicStatus::Idle);
+    }
+
+    #[test]
+    fn unknown_child_is_created_from_its_first_event() {
+        let mut state = State::new();
+        let mut working = with_tool(child_event(EventKind::Working, "late-start"), "read");
+        working.received_at = at(5);
+        state.apply(&working, None);
+        let child = &state.snapshot.children[0];
+        assert_eq!(child.agent_id, "late-start");
+        assert_eq!(child.agent_type, "Explore");
+        assert_eq!(child.activity, ChildActivity::Running);
+        assert_eq!((child.started_at, child.updated_at), (at(5), at(5)));
+        let mut start = child_event(EventKind::NewTurn, "late-start");
+        start.received_at = at(6);
+        state.apply(&start, None);
+        assert_eq!(state.snapshot.children.len(), 1);
+        assert_eq!(state.snapshot.children[0].started_at, at(5));
+        assert_eq!(state.snapshot.children[0].updated_at, at(6));
+    }
+
+    #[test]
+    fn full_child_list_evicts_the_oldest_stopped_child_first() {
+        let mut state = State::new();
+        for index in 0..CHILD_AGENTS_MAX {
+            let mut start = child_event(EventKind::NewTurn, &format!("child-{index:02}"));
+            start.received_at = at(i64::try_from(index).unwrap());
+            state.apply(&start, None);
+        }
+        state.apply(&child_event(EventKind::NewTurn, "overflow"), None);
+        assert_eq!(state.snapshot.children.len(), CHILD_AGENTS_MAX);
+        assert!(
+            state
+                .snapshot
+                .children
+                .iter()
+                .all(|child| child.agent_id != "overflow")
+        );
+        for id in ["child-07", "child-03"] {
+            state.apply(&child_event(EventKind::Completed, id), None);
+        }
+        state.apply(&child_event(EventKind::NewTurn, "overflow"), None);
+        let ids: Vec<&str> = state
+            .snapshot
+            .children
+            .iter()
+            .map(|child| child.agent_id.as_str())
+            .collect();
+        assert_eq!(ids.len(), CHILD_AGENTS_MAX);
+        assert!(ids.contains(&"overflow"));
+        assert!(!ids.contains(&"child-03"));
+        assert!(ids.contains(&"child-07"));
+    }
+
+    #[test]
+    fn child_approval_after_root_stop_leaves_root_state_intact() {
+        let mut state = State::new();
+        state.apply(&event(EventKind::NewTurn), None);
+        state.apply(&child_event(EventKind::NewTurn, "a"), None);
+        state.apply(&event(EventKind::Completed), Some(&context("Done")));
+        let root = state.snapshot.clone();
+        let transition = state.apply(
+            &with_tool(child_event(EventKind::WaitingApproval, "a"), "bash"),
+            Some(&context("Ignored")),
+        );
+        assert!(!transition.suppressed);
+        assert_eq!(transition.reason, ReasonEffect::Keep);
+        assert_eq!(state.snapshot.activity, Activity::Stopped);
+        assert_eq!(state.snapshot.status, PublicStatus::Stopped);
+        assert_eq!(state.reason, Some(reason(EventKind::Completed, "Done")));
+        assert_eq!(
+            state.snapshot.completed_generation,
+            root.completed_generation
+        );
+        let child = &state.snapshot.children[0];
+        assert_eq!(child.activity, ChildActivity::Blocked);
+        assert_eq!(
+            child.reason,
+            child_reason(Some(PublicReasonKind::Approval), Some("bash"))
+        );
+        let view = project_public(&state.snapshot, state.reason.as_ref());
+        assert_eq!(view.status, PublicStatus::Stopped);
+        assert_eq!(view.reason.unwrap().summary, "Done");
+        let prior_view = project_public(&root, state.reason.as_ref());
+        let mut next = state.snapshot.clone();
+        let (_, changed) = finalize(&prior_view, &mut next, state.reason.as_ref(), at(9));
+        assert_eq!(
+            changed,
+            BTreeSet::from([PublicField::UpdatedAt, PublicField::Children])
+        );
+    }
+
+    #[test]
+    fn child_events_obey_session_and_source_order_guards() {
+        let mut state = State::new();
+        let mut start = event(EventKind::ProviderSessionStarted);
+        start.provider_session_id = Some("current".into());
+        state.apply(&start, None);
+        let mut older = child_event(EventKind::Working, "a");
+        older.provider_session_id = Some("older".into());
+        let transition = state.apply(&older, None);
+        assert!(transition.suppressed);
+        assert!(state.snapshot.children.is_empty());
+        assert_eq!(
+            state.snapshot.provider_session.as_ref().unwrap().id,
+            "current"
+        );
+
+        let mut ordered = child_event(EventKind::Working, "a");
+        ordered.provider_session_id = Some("current".into());
+        ordered.evidence = EventEvidence {
+            channel: EvidenceChannel::SideChannel,
+            trust: EvidenceTrust::LocalObservation,
+            collector_revision: Some(1),
+            collector_instance_id: Some("side".into()),
+            source_sequence: Some(4),
+        };
+        assert!(!state.apply(&ordered, None).suppressed);
+        let mut late = ordered.clone();
+        late.kind = EventKind::Completed;
+        assert!(state.apply(&late, None).suppressed);
+        assert_eq!(state.snapshot.children[0].activity, ChildActivity::Running);
+    }
+
+    #[test]
+    fn child_state_clears_at_root_retention_boundaries() {
+        let retained = || {
+            let mut state = State::new();
+            let mut start = event(EventKind::ProviderSessionStarted);
+            start.provider_session_id = Some("s".into());
+            state.apply(&start, None);
+            state.apply(&child_event(EventKind::NewTurn, "a"), None);
+            assert_eq!(state.snapshot.children.len(), 1);
+            state
+        };
+        let mut state = retained();
+        state.apply(&event(EventKind::NewTurn), None);
+        assert!(state.snapshot.children.is_empty());
+        assert!(project_public(&state.snapshot, None).children.is_none());
+
+        let mut state = retained();
+        let mut next = event(EventKind::ProviderSessionStarted);
+        next.provider_session_id = Some("t".into());
+        state.apply(&next, None);
+        assert!(state.snapshot.children.is_empty());
+
+        let mut state = retained();
+        let mut same = event(EventKind::Working);
+        same.provider_session_id = Some("s".into());
+        state.apply(&same, None);
+        assert_eq!(state.snapshot.children.len(), 1);
+
+        let mut state = retained();
+        state.apply(&event(EventKind::SessionEnded), None);
+        assert!(state.snapshot.children.is_empty());
+        state.apply(&child_event(EventKind::Working, "a"), None);
+        assert!(state.snapshot.children.is_empty());
+
+        let state = retained();
+        let lost = mark_lost(state.prior());
+        assert!(lost.snapshot.children.is_empty());
+        assert_eq!(lost.snapshot.status, PublicStatus::Stopped);
+
+        let state = retained();
+        let exit = local_mutation(state.prior(), true, |snapshot| {
+            snapshot.lifecycle = Lifecycle::Exited;
+        });
+        assert!(exit.snapshot.children.is_empty());
+        assert_eq!(exit.snapshot.status, PublicStatus::Stopped);
+
+        let state = retained();
+        let bind = local_mutation(state.prior(), false, |snapshot| {
+            snapshot.process.child_pid = Some(7);
+        });
+        assert_eq!(bind.snapshot.children.len(), 1);
+    }
+
+    #[test]
+    fn child_events_never_touch_root_state() {
+        let mut state = State::new();
+        let mut turn = event(EventKind::NewTurn);
+        turn.provider_session_id = Some("s".into());
+        turn.provider_session_name = Some("Root".into());
+        turn.turn_id = Some("turn-1".into());
+        turn.provider_metadata = Some(ProviderMetadata {
+            model: Some("root-model".into()),
+            ..Default::default()
+        });
+        turn.usage = Some(Usage {
+            input_tokens: Some(1),
+            ..Default::default()
+        });
+        state.apply(&with_tool(turn, "root-tool"), None);
+        state.apply(&with_tool(event(EventKind::Working), "root-tool"), None);
+        let prior = state.snapshot.clone();
+
+        let mut child = with_tool(child_event(EventKind::Working, "a"), "child-tool");
+        child.tool_activity.as_mut().unwrap().phase = ToolActivityPhase::Finish;
+        child.provider_session_id = Some("s".into());
+        child.provider_session_name = Some("Child".into());
+        child.provider_session_start_reason = Some("startup".into());
+        child.turn_id = Some("turn-child".into());
+        child.provider_metadata = Some(ProviderMetadata {
+            model: Some("child-model".into()),
+            permission_mode: Some("dontAsk".into()),
+            current_turn_id: Some("turn-child".into()),
+            ..Default::default()
+        });
+        child.usage = Some(Usage {
+            input_tokens: Some(99),
+            ..Default::default()
+        });
+        child.received_at = at(50);
+        for kind in [EventKind::NewTurn, EventKind::Working, EventKind::Completed] {
+            child.kind = kind;
+            state.apply(&child, Some(&context("Child")));
+        }
+        assert!(state.reason.is_none());
+        let mut after = state.snapshot.clone();
+        assert_eq!(after.children.len(), 1);
+        after.children.clear();
+        after.updated_at = prior.updated_at;
+        assert_eq!(after, prior);
+    }
+
+    #[test]
+    fn unbounded_child_identity_is_rejected() {
+        let prior = snapshot();
+        let prior = Prior {
+            snapshot: &prior,
+            reason: None,
+        };
+        let long_id = "x".repeat(CHILD_AGENT_ID_MAX_CHARS + 1);
+        let long_type = "x".repeat(CHILD_AGENT_TYPE_MAX_CHARS + 1);
+        for (id, kind) in [
+            ("", "Explore"),
+            ("a", ""),
+            ("a\nb", "Explore"),
+            (long_id.as_str(), "Explore"),
+            ("a", long_type.as_str()),
+        ] {
+            let mut value = event(EventKind::Working);
+            value.child_agent = Some(ChildAgentRef {
+                agent_id: id.into(),
+                agent_type: kind.into(),
+            });
+            assert!(apply_event(prior, &value, None).is_err());
+        }
     }
 
     /// Deterministic event corpus: every kind across every channel, with and

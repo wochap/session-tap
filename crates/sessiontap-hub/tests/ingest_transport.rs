@@ -1,6 +1,9 @@
 use chrono::Utc;
 use sessiontap_core::{
-    domain::{InvocationId, PublicAgentView, PublicField, PublicStatus},
+    domain::{
+        InvocationId, PublicAgentView, PublicChildAgentReason, PublicChildAgentView, PublicField,
+        PublicReasonKind, PublicStatus,
+    },
     protocol::{SourceEnvelope, SourceIdentity},
 };
 use sessiontap_hub::{
@@ -22,8 +25,20 @@ fn view(status: PublicStatus) -> PublicAgentView {
         metadata: None,
         usage: None,
         repository: None,
+        children: None,
     }
 }
+fn child(agent_id: &str, status: PublicStatus) -> PublicChildAgentView {
+    PublicChildAgentView {
+        agent_id: agent_id.into(),
+        agent_type: "Explore".into(),
+        status,
+        reason: None,
+        started_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
+}
+
 fn request(value: serde_json::Value) -> IngestedRequest {
     IngestedRequest {
         method: "POST".into(),
@@ -75,6 +90,56 @@ fn ingestion_discards_unknown_private_fields_and_deduplicates_delivery() {
     let serialized = serde_json::to_string(&agents).unwrap();
     assert!(!serialized.contains("PRIVATE"));
     assert!(!serialized.contains("multiplexer"));
+}
+
+#[test]
+fn child_only_update_is_applied_with_children_changed() {
+    let store = HubStore::memory().unwrap();
+    let mut stopped = view(PublicStatus::Stopped);
+    stopped.children = Some(vec![child("agent-1", PublicStatus::Running)]);
+    let snapshot = SourceEnvelope::Snapshot {
+        schema_version: 1,
+        source: SourceIdentity {
+            id: "sandbox".into(),
+            display_name: None,
+        },
+        revision: 1,
+        views: vec![stopped.clone()],
+    };
+    assert_eq!(
+        handle_ingest(
+            &store,
+            None,
+            &request(serde_json::to_value(snapshot).unwrap())
+        )
+        .status,
+        200
+    );
+
+    let mut blocked = stopped;
+    let mut approval = child("agent-1", PublicStatus::Blocked);
+    approval.reason = Some(PublicChildAgentReason {
+        kind: Some(PublicReasonKind::Approval),
+        summary: Some("shell".into()),
+    });
+    blocked.children = Some(vec![approval]);
+    let update = SourceEnvelope::Update {
+        schema_version: 1,
+        source_id: "sandbox".into(),
+        delivery_id: "delivery-children".into(),
+        revision: 2,
+        changed: BTreeSet::from([PublicField::Children]),
+        view: Box::new(blocked.clone()),
+    };
+    let response = handle_ingest(
+        &store,
+        None,
+        &request(serde_json::to_value(update).unwrap()),
+    );
+    assert_eq!(response.body["status"], "applied");
+    let (_, _, agents) = store.merged().unwrap();
+    assert_eq!(agents[0].view, blocked);
+    assert_eq!(agents[0].view.status, PublicStatus::Stopped);
 }
 
 #[test]

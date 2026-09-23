@@ -84,6 +84,35 @@ Internal lifecycle, activity, event kinds, and reducer bookkeeping are not
 part of either observation protocol. Notify only on post-baseline updates,
 never on initial or lag-recovery snapshots.
 
+The optional `children` list reports child agents (for example Claude
+subagents) observed during the current root turn:
+
+```json
+"children": [
+  {
+    "agent_id": "a1b2c3",
+    "agent_type": "Explore",
+    "status": "blocked",
+    "reason": { "kind": "approval", "summary": "shell" },
+    "started_at": "2026-08-28T12:00:10Z",
+    "updated_at": "2026-08-28T12:02:00Z"
+  }
+]
+```
+
+Each child has a bounded `agent_id` and `agent_type`, a `status` of
+`running`, `blocked`, or `stopped`, and optional `reason` with an optional
+`kind` (`input`, `approval`, `completed`, `failed`) and an optional `summary`
+(the child's latest tool label). Children are sorted by `started_at`, then
+`agent_id`, and at most 32 are retained; the oldest stopped child is evicted
+first. The key is absent when no child is retained. Child state never changes
+the root `status` or `reason`, so a root can be `stopped` while a child is
+still `running`; consumers derive an effective status by checking `children`
+first. Children are cleared on the next root prompt, a new provider session,
+or process exit or loss. A child killed without a stop hook stays `running`
+until that clearing. A child-only change produces an update whose `changed`
+set lists `children` (and `updated_at`), not `status`.
+
 The optional current status reason is status-compatible: blocked views may use
 `input` or `approval`; stopped views may use `completed` or `failed`. Selected
 question, provider message, description, command, or final assistant text has
@@ -119,7 +148,7 @@ max_payload_bytes = 262144
 
 Stdout and HTTP sinks may set `fields` to a list of public field names
 (`invocation_id`, `provider`, `status`, `reason`, `cwd`, `created_at`,
-`updated_at`, `session`, `metadata`, `usage`, `repository`). Each delivered
+`updated_at`, `session`, `metadata`, `usage`, `repository`, `children`). Each delivered
 update then carries only those view fields plus `invocation_id`, and its
 `changed` list is filtered to the same set. An empty or absent list delivers
 the complete public view. An unknown name fails configuration validation with

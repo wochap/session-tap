@@ -14,8 +14,8 @@ use serde_json::Value;
 use sessiontap_core::{
     ProviderId,
     domain::{
-        AdapterOutcome, EventEvidence, EventKind, InvocationId, NormalizedAdapterEvent,
-        NormalizedEvent,
+        AdapterOutcome, ChildAgentRef, EventEvidence, EventKind, InvocationId,
+        NormalizedAdapterEvent, NormalizedEvent,
     },
 };
 use std::path::Path;
@@ -61,6 +61,10 @@ impl<D, C> HookAdapter<D, C> {
 }
 
 impl<D: HookDialect, C> HookAdapter<D, C> {
+    /// Assembles the event. A child-agent event carries only ordering
+    /// identity, its kind, and bounded tool activity; root session name,
+    /// start reason, metadata, usage, status reason, and collection context
+    /// are never read from a child payload.
     fn build(
         &self,
         id: &InvocationId,
@@ -68,11 +72,14 @@ impl<D: HookDialect, C> HookAdapter<D, C> {
         kind: EventKind,
         evidence: EventEvidence,
         context: &NormalizeContext<'_>,
+        child_agent: Option<ChildAgentRef>,
     ) -> NormalizedAdapterEvent {
         let dialect = &self.dialect;
+        let root = child_agent.is_none();
         let received_at = Utc::now();
         let provider_event_id = dialect.provider_event_id(raw);
         let status_reason = match kind {
+            _ if !root => None,
             EventKind::WaitingApproval => dialect.approval_reason(raw),
             EventKind::WaitingInput => dialect.input_reason(raw),
             EventKind::Completed => dialect.completed_reason(raw),
@@ -92,18 +99,19 @@ impl<D: HookDialect, C> HookAdapter<D, C> {
                 received_at,
                 evidence,
                 provider_session_id: dialect.provider_session_id(raw),
-                provider_session_name: dialect.session_name(raw),
-                provider_session_start_reason: (kind == EventKind::ProviderSessionStarted)
+                provider_session_name: root.then(|| dialect.session_name(raw)).flatten(),
+                provider_session_start_reason: (root && kind == EventKind::ProviderSessionStarted)
                     .then(|| dialect.start_reason(raw))
                     .flatten(),
-                provider_metadata: dialect.metadata(raw),
-                usage: dialect.inline_usage(raw),
+                provider_metadata: root.then(|| dialect.metadata(raw)).flatten(),
+                usage: root.then(|| dialect.inline_usage(raw)).flatten(),
                 turn_id: dialect.turn_id(raw),
                 tool_activity: dialect.tool_activity(raw, context),
+                child_agent,
                 kind,
             },
             status_reason,
-            collection_context: dialect.collection_context(raw),
+            collection_context: root.then(|| dialect.collection_context(raw)).flatten(),
         }
     }
 }
@@ -130,15 +138,18 @@ impl<D: HookDialect, C: SessionCollector + Clone> AgentAdapter for HookAdapter<D
         evidence: EventEvidence,
         context: &NormalizeContext<'_>,
     ) -> Result<AdapterOutcome> {
-        if self.dialect.is_subagent(raw) {
-            return Ok(AdapterOutcome::Ignored);
-        }
         let Some(kind) = self.dialect.classify(raw) else {
             return Ok(AdapterOutcome::Ignored);
         };
-        Ok(AdapterOutcome::Event(Box::new(
-            self.build(id, raw, kind, evidence, context),
-        )))
+        let child_agent = self.dialect.child_agent(raw);
+        Ok(AdapterOutcome::Event(Box::new(self.build(
+            id,
+            raw,
+            kind,
+            evidence,
+            context,
+            child_agent,
+        ))))
     }
 
     async fn collect_session_data(&self, request: CollectSessionDataRequest) -> CollectionOutcome {
@@ -187,7 +198,9 @@ mod tests {
         artifact::{NoCollector, check_cancelled},
     };
     use serde_json::json;
-    use sessiontap_core::domain::{ProviderMetadata, ToolActivityUpdate};
+    use sessiontap_core::domain::{
+        ArtifactCollectionContext, ProviderMetadata, ToolActivityUpdate, Usage,
+    };
     use std::path::PathBuf;
 
     struct TestDialect;
@@ -204,11 +217,39 @@ mod tests {
                 _ => None,
             }
         }
+        fn child_agent(&self, raw: &Value) -> Option<ChildAgentRef> {
+            Some(ChildAgentRef {
+                agent_id: raw.get("agent_id")?.as_str()?.to_owned(),
+                agent_type: "worker".into(),
+            })
+        }
         fn start_reason(&self, raw: &Value) -> Option<String> {
             raw.get("why").and_then(Value::as_str).map(str::to_owned)
         }
-        fn metadata(&self, _raw: &Value) -> Option<ProviderMetadata> {
-            None
+        fn session_name(&self, raw: &Value) -> Option<String> {
+            raw.get("name").and_then(Value::as_str).map(str::to_owned)
+        }
+        fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
+            Some(ProviderMetadata {
+                model: Some(raw.get("model")?.as_str()?.to_owned()),
+                ..ProviderMetadata::default()
+            })
+        }
+        fn inline_usage(&self, raw: &Value) -> Option<Usage> {
+            Some(Usage {
+                input_tokens: raw.get("tokens")?.as_u64(),
+                ..Usage::default()
+            })
+        }
+        fn turn_id(&self, raw: &Value) -> Option<String> {
+            raw.get("turn").and_then(Value::as_str).map(str::to_owned)
+        }
+        fn collection_context(&self, raw: &Value) -> Option<ArtifactCollectionContext> {
+            Some(ArtifactCollectionContext {
+                adapter_identity: ProviderId::Codex,
+                provider_session_id: raw.get("session_id")?.as_str()?.to_owned(),
+                locator: PathBuf::from("/private/locator"),
+            })
         }
         fn tool_activity(
             &self,
@@ -281,11 +322,10 @@ mod tests {
         assert_eq!(adapter.provider_id(), ProviderId::Codex);
         assert_eq!(adapter.dialect(), ProviderId::Codex.as_str());
 
-        let ignored = [
+        for raw in [
             json!({"kind": "other"}),
-            json!({"kind": "done", "agent_id": "child"}),
-        ];
-        for raw in ignored {
+            json!({"kind": "other", "agent_id": "child"}),
+        ] {
             assert_eq!(
                 AgentAdapter::normalize(&adapter, &id, &raw).unwrap(),
                 AdapterOutcome::Ignored
@@ -327,6 +367,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(done.status_reason.unwrap().summary, "finished");
+    }
+
+    #[test]
+    fn child_events_carry_only_ordering_identity_kind_and_tool_activity() {
+        let adapter = HookAdapter::new(TestDialect, NoCollector, setup);
+        let id = InvocationId::new();
+        let root_fields = json!({
+            "why": "resume",
+            "name": "Root name",
+            "model": "m",
+            "tokens": 5,
+            "turn": "t1",
+            "event_id": "e1",
+            "session_id": "s",
+            "last_assistant_message": "PRIVATE_MESSAGE",
+            "tool_name": "Bash"
+        });
+        for kind in ["start", "approve", "done"] {
+            let mut root = root_fields.clone();
+            root["kind"] = json!(kind);
+            let mut child = root.clone();
+            child["agent_id"] = json!("child");
+            let root = adapter.normalize(&id, &root).unwrap();
+            assert!(root.event.child_agent.is_none());
+            assert!(root.event.provider_metadata.is_some());
+            assert!(root.event.usage.is_some());
+            assert!(root.event.provider_session_name.is_some());
+            assert!(root.collection_context.is_some());
+
+            let child = adapter
+                .normalize_with_evidence(
+                    &id,
+                    &child,
+                    EventEvidence::managed_hook(1),
+                    &NormalizeContext {
+                        workspace: Some(Path::new("/work")),
+                    },
+                )
+                .unwrap()
+                .into_event()
+                .unwrap();
+            assert_eq!(child.event.kind, root.event.kind);
+            assert_eq!(
+                child.event.child_agent,
+                Some(ChildAgentRef {
+                    agent_id: "child".into(),
+                    agent_type: "worker".into(),
+                })
+            );
+            assert_eq!(child.event.provider_session_id.as_deref(), Some("s"));
+            assert_eq!(child.event.provider_event_id.as_deref(), Some("e1"));
+            assert_eq!(child.event.turn_id.as_deref(), Some("t1"));
+            assert_eq!(child.event.tool_activity.unwrap().label, "/work");
+            assert!(child.event.provider_session_name.is_none());
+            assert!(child.event.provider_session_start_reason.is_none());
+            assert!(child.event.provider_metadata.is_none());
+            assert!(child.event.usage.is_none());
+            assert!(child.status_reason.is_none());
+            assert!(child.collection_context.is_none());
+        }
     }
 
     #[test]

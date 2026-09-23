@@ -123,8 +123,9 @@ pub enum StreamEnvelope {
 mod tests {
     use super::*;
     use crate::domain::{
-        ProviderMetadata, PublicProviderSession, PublicReasonKind, PublicStatus,
-        PublicStatusReason, Repository, Usage,
+        ChildActivity, ChildAgentState, InvocationSnapshot, ProviderMetadata,
+        PublicChildAgentReason, PublicProviderSession, PublicReasonKind, PublicStatus,
+        PublicStatusReason, Repository, Usage, project_public,
     };
     use chrono::{TimeZone, Utc};
 
@@ -147,6 +148,7 @@ mod tests {
                 head: None,
                 dirty: Some(false),
             }),
+            children: None,
         }
     }
 
@@ -290,5 +292,88 @@ mod tests {
                 .unwrap();
         assert_eq!(serde_json::to_value(local).unwrap(), local_golden);
         assert_eq!(serde_json::to_value(source).unwrap(), source_golden);
+    }
+
+    #[test]
+    fn child_agent_update_matches_golden_json() {
+        let at = |minute, second| {
+            Utc.with_ymd_and_hms(2026, 8, 28, 12, minute, second)
+                .unwrap()
+        };
+        let child = |id: &str, kind: &str, activity, reason, started, updated| ChildAgentState {
+            agent_id: id.into(),
+            agent_type: kind.into(),
+            activity,
+            reason: Some(reason),
+            started_at: started,
+            updated_at: updated,
+        };
+        let mut snapshot: InvocationSnapshot =
+            serde_json::from_str(include_str!("../tests/golden/pre-enum-tmux-snapshot.json"))
+                .unwrap();
+        // Stored out of order; the projection sorts by start time then ID.
+        snapshot.children = vec![
+            child(
+                "agent-c",
+                "reviewer",
+                ChildActivity::Stopped,
+                PublicChildAgentReason {
+                    kind: Some(PublicReasonKind::Completed),
+                    summary: None,
+                },
+                at(0, 20),
+                at(1, 50),
+            ),
+            child(
+                "agent-b",
+                "general-purpose",
+                ChildActivity::Running,
+                PublicChildAgentReason {
+                    kind: None,
+                    summary: Some("read_file".into()),
+                },
+                at(0, 10),
+                at(1, 30),
+            ),
+            child(
+                "agent-a",
+                "Explore",
+                ChildActivity::Blocked,
+                PublicChildAgentReason {
+                    kind: Some(PublicReasonKind::Approval),
+                    summary: Some("shell".into()),
+                },
+                at(0, 10),
+                at(2, 0),
+            ),
+        ];
+        let mut rich = view();
+        rich.status = PublicStatus::Stopped;
+        rich.reason = Some(PublicStatusReason {
+            kind: PublicReasonKind::Completed,
+            summary: "All tests pass".into(),
+        });
+        rich.updated_at = at(2, 0);
+        rich.children = project_public(&snapshot, None).children;
+        let local = StreamEnvelope::Update {
+            schema_version: 1,
+            revision: 10,
+            delivery_id: "delivery-10".into(),
+            changed: BTreeSet::from([PublicField::Children]),
+            view: Box::new(rich),
+        };
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/golden/public-local-update-children.json"
+        ))
+        .unwrap();
+        assert_eq!(serde_json::to_value(&local).unwrap(), golden);
+        let json = serde_json::to_string(&local).unwrap();
+        for private in ["correlation_id", "detail", "transcript", "activity"] {
+            assert!(!json.contains(private), "{private}");
+        }
+        assert_eq!(
+            serde_json::from_value::<StreamEnvelope>(golden).unwrap(),
+            local
+        );
     }
 }

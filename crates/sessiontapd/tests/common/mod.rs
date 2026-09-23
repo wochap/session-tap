@@ -85,6 +85,7 @@ pub fn snapshot() -> InvocationSnapshot {
         capabilities: Capabilities::default(),
         turn_generation: 0,
         completed_generation: None,
+        children: Vec::new(),
     }
 }
 
@@ -106,6 +107,7 @@ pub fn event(initial: &InvocationSnapshot, id: &str, kind: EventKind) -> Normali
         usage: None,
         turn_id: None,
         tool_activity: None,
+        child_agent: None,
     }
 }
 

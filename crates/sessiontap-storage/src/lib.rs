@@ -766,8 +766,8 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use sessiontap_core::domain::{
-        Capabilities, EventEvidence, EventKind, EvidenceChannel, ProcessMetadata, PublicReasonKind,
-        PublicStatus, ToolActivityPhase,
+        Capabilities, ChildAgentRef, EventEvidence, EventKind, EvidenceChannel, ProcessMetadata,
+        PublicReasonKind, PublicStatus, ToolActivityPhase,
     };
 
     fn snapshot() -> InvocationSnapshot {
@@ -803,6 +803,7 @@ mod tests {
             capabilities: Capabilities::default(),
             turn_generation: 0,
             completed_generation: None,
+            children: Vec::new(),
         }
     }
 
@@ -824,6 +825,7 @@ mod tests {
             usage: None,
             turn_id: None,
             tool_activity: None,
+            child_agent: None,
         }
     }
 
@@ -854,6 +856,70 @@ mod tests {
         second.provider_session_id = Some("b".into());
         db.apply_event(&second, None).unwrap();
         assert!(db.invocation(&value.invocation_id).unwrap().usage.is_none());
+    }
+
+    #[test]
+    fn child_agents_persist_across_restart_and_project_sorted() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        let value = snapshot();
+        let child = |agent_id: &str, kind: EventKind, event_id: &str| {
+            let mut event = normalized_event(&value, kind, event_id);
+            event.child_agent = Some(ChildAgentRef {
+                agent_id: agent_id.into(),
+                agent_type: "Explore".into(),
+            });
+            event
+        };
+        let committed = {
+            let db = Storage::open(&path).unwrap();
+            db.register(&value, "credential", None).unwrap();
+            db.apply_event(&normalized_event(&value, EventKind::NewTurn, "turn"), None)
+                .unwrap();
+            db.apply_event(&child("b", EventKind::NewTurn, "b-start"), None)
+                .unwrap();
+            db.apply_event(&child("a", EventKind::NewTurn, "a-start"), None)
+                .unwrap();
+            db.apply_event(&child("b", EventKind::Completed, "b-stop"), None)
+                .unwrap();
+            let duplicate = db
+                .apply_event_with_context(&child("b", EventKind::Working, "b-stop"), None, None)
+                .unwrap();
+            assert!(duplicate.is_none());
+            db.invocation(&value.invocation_id).unwrap().children
+        };
+        assert_eq!(committed.len(), 2);
+
+        let db = Storage::open(&path).unwrap();
+        let restored = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(restored.children, committed);
+        let (_, views) = db.public_snapshot().unwrap();
+        let children = views[0].children.as_ref().unwrap();
+        let ordered: Vec<(&str, PublicStatus)> = children
+            .iter()
+            .map(|child| (child.agent_id.as_str(), child.status))
+            .collect();
+        assert_eq!(
+            ordered,
+            vec![("b", PublicStatus::Stopped), ("a", PublicStatus::Running)]
+        );
+        assert!(children[0].started_at <= children[1].started_at);
+
+        let next = db
+            .apply_event_with_context(
+                &normalized_event(&value, EventKind::NewTurn, "next-turn"),
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(next.changed.contains(&PublicField::Children));
+        assert!(next.view.children.is_none());
+        assert!(
+            !serde_json::to_string(&next.view)
+                .unwrap()
+                .contains("children")
+        );
     }
 
     #[test]
@@ -941,6 +1007,7 @@ mod tests {
             usage: None,
             turn_id: None,
             tool_activity: None,
+            child_agent: None,
         };
         let update = db
             .apply_event_with_context(
@@ -998,6 +1065,7 @@ mod tests {
             usage: None,
             turn_id: None,
             tool_activity: None,
+            child_agent: None,
         };
         assert!(
             db.apply_event_with_context(&event, None, None)

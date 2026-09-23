@@ -1,6 +1,6 @@
 use chrono::Utc;
 use sessiontap_core::{
-    domain::{InvocationId, PublicAgentView, PublicStatus},
+    domain::{InvocationId, PublicAgentView, PublicChildAgentView, PublicStatus},
     protocol::{SourceEnvelope, SourceIdentity},
 };
 use sessiontap_hub::store::HubStore;
@@ -18,6 +18,18 @@ fn view(id: InvocationId, provider: &str) -> PublicAgentView {
         metadata: None,
         usage: None,
         repository: None,
+        children: None,
+    }
+}
+
+fn child(agent_id: &str, status: PublicStatus) -> PublicChildAgentView {
+    PublicChildAgentView {
+        agent_id: agent_id.into(),
+        agent_type: "Explore".into(),
+        status,
+        reason: None,
+        started_at: Utc::now(),
+        updated_at: Utc::now(),
     }
 }
 
@@ -37,7 +49,11 @@ fn same_invocation_id_from_multiple_sources_remains_distinct_and_restores() {
                         display_name: None,
                     },
                     revision: 1,
-                    views: vec![view(id.clone(), provider)],
+                    views: vec![PublicAgentView {
+                        children: (provider == "claude")
+                            .then(|| vec![child("agent-1", PublicStatus::Running)]),
+                        ..view(id.clone(), provider)
+                    }],
                 })
                 .unwrap();
         }
@@ -46,6 +62,11 @@ fn same_invocation_id_from_multiple_sources_remains_distinct_and_restores() {
     let (_, _, agents) = store.merged().unwrap();
     assert_eq!(agents.len(), 2);
     assert_ne!(agents[0].source_id, agents[1].source_id);
+    let children: Vec<_> = agents
+        .iter()
+        .map(|agent| agent.view.children.as_ref().map(Vec::len))
+        .collect();
+    assert_eq!(children, vec![None, Some(1)]);
     let serialized = serde_json::to_string(&agents).unwrap();
     for private in [
         "process",

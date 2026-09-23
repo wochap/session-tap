@@ -14,8 +14,9 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use sessiontap_core::ProviderId;
 use sessiontap_core::domain::{
-    ArtifactCollectionContext, EventKind, ProviderMetadata, TOOL_CORRELATION_ID_MAX_CHARS,
-    ToolActivityPhase, ToolActivityUpdate, Usage,
+    ArtifactCollectionContext, CHILD_AGENT_ID_MAX_CHARS, CHILD_AGENT_TYPE_MAX_CHARS, ChildAgentRef,
+    EventKind, ProviderMetadata, TOOL_CORRELATION_ID_MAX_CHARS, ToolActivityPhase,
+    ToolActivityUpdate, Usage,
 };
 use std::{
     collections::BTreeSet,
@@ -37,6 +38,8 @@ pub const HOOK_EVENTS: &[&str] = &[
     "Stop",
     "StopFailure",
     "SessionEnd",
+    "SubagentStart",
+    "SubagentStop",
 ];
 
 pub type ClaudeAdapter = HookAdapter<ClaudeDialect, ClaudeCollector>;
@@ -67,8 +70,25 @@ impl HookDialect for ClaudeDialect {
     fn id(&self) -> ProviderId {
         ProviderId::Claude
     }
+    /// A child payload whose identity fails bounds, or a subagent lifecycle
+    /// hook without a child identity, is ignored rather than treated as root.
     fn classify(&self, raw: &Value) -> Option<EventKind> {
+        if self.child_agent(raw).is_none() && is_subagent_payload(raw) {
+            return None;
+        }
         classify(raw)
+    }
+    /// Subagent hooks carry a non-empty `agent_id`; the main session may carry
+    /// `agent_type` alone when it runs as a named agent.
+    fn child_agent(&self, raw: &Value) -> Option<ChildAgentRef> {
+        let agent_id = raw.get("agent_id")?.as_str()?;
+        if agent_id.trim().is_empty() {
+            return None;
+        }
+        Some(ChildAgentRef {
+            agent_id: sanitize_bounded(agent_id, CHILD_AGENT_ID_MAX_CHARS)?,
+            agent_type: bounded_field(raw, &["agent_type"], CHILD_AGENT_TYPE_MAX_CHARS)?,
+        })
     }
     fn start_reason(&self, raw: &Value) -> Option<String> {
         bounded_field(raw, &["source", "reason", "start_reason"], 32)
@@ -233,6 +253,16 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
     })
 }
 
+fn is_subagent_payload(raw: &Value) -> bool {
+    raw.get("agent_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
+        || raw
+            .get("hook_event_name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| matches!(name, "SubagentStart" | "SubagentStop"))
+}
+
 fn classify(raw: &Value) -> Option<EventKind> {
     let name = raw.get("hook_event_name")?.as_str()?;
     let ask_user = raw
@@ -261,6 +291,8 @@ fn classify(raw: &Value) -> Option<EventKind> {
         }
         "Stop" => Some(EventKind::Completed),
         "StopFailure" => Some(EventKind::Failed),
+        "SubagentStart" => Some(EventKind::NewTurn),
+        "SubagentStop" => Some(EventKind::Completed),
         _ => None,
     }
 }
@@ -628,5 +660,143 @@ mod tool_activity_tests {
         let event = ClaudeAdapter.normalize(&id, &payload).unwrap().event;
         assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
         assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
+    }
+}
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::*;
+    use crate::AgentAdapter;
+    use serde_json::json;
+    use sessiontap_core::domain::{AdapterOutcome, InvocationId, NormalizedAdapterEvent};
+
+    fn normalize(raw: &Value) -> AdapterOutcome {
+        AgentAdapter::normalize(&ClaudeAdapter, &InvocationId::new(), raw).unwrap()
+    }
+
+    fn child(raw: &Value) -> NormalizedAdapterEvent {
+        let normalized = normalize(raw).into_event().expect("child event");
+        assert!(normalized.event.provider_session_name.is_none());
+        assert!(normalized.event.provider_session_start_reason.is_none());
+        assert!(normalized.event.provider_metadata.is_none());
+        assert!(normalized.event.usage.is_none());
+        assert!(normalized.status_reason.is_none());
+        assert!(normalized.collection_context.is_none());
+        normalized
+    }
+
+    #[test]
+    fn subagent_start_is_a_child_new_turn() {
+        let normalized = child(&json!({
+            "hook_event_name": "SubagentStart",
+            "session_id": "root-session",
+            "transcript_path": "/private/root.jsonl",
+            "agent_id": "agent-1",
+            "agent_type": "Explore"
+        }));
+        assert_eq!(normalized.event.kind, EventKind::NewTurn);
+        assert_eq!(
+            normalized.event.child_agent,
+            Some(ChildAgentRef {
+                agent_id: "agent-1".into(),
+                agent_type: "Explore".into(),
+            })
+        );
+        assert_eq!(
+            normalized.event.provider_session_id.as_deref(),
+            Some("root-session")
+        );
+    }
+
+    #[test]
+    fn subagent_stop_is_a_child_completion_without_subagent_content() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/claude-subagent.json")).unwrap();
+        raw["agent_transcript_path"] = json!("/private/PRIVATE_SUBAGENT_TRANSCRIPT.jsonl");
+        raw["background_tasks"] = json!([{"id": "PRIVATE_BACKGROUND_TASK"}]);
+        let normalized = child(&raw);
+        assert_eq!(normalized.event.kind, EventKind::Completed);
+        assert_eq!(
+            normalized.event.child_agent.as_ref().unwrap().agent_id,
+            "agent-1"
+        );
+        let serialized = serde_json::to_string(&normalized).unwrap();
+        for private in [
+            "PRIVATE_SUBAGENT_MESSAGE",
+            "PRIVATE_SUBAGENT_TRANSCRIPT",
+            "PRIVATE_BACKGROUND_TASK",
+            "agent_transcript_path",
+            "last_assistant_message",
+            "background_tasks",
+            "dontAsk",
+        ] {
+            assert!(!serialized.contains(private), "{private}");
+        }
+    }
+
+    #[test]
+    fn child_permission_request_is_child_waiting_approval_with_tool_activity() {
+        let normalized = child(&json!({
+            "hook_event_name": "PermissionRequest",
+            "session_id": "root-session",
+            "agent_id": "agent-1",
+            "agent_type": "general-purpose",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_1",
+            "tool_input": {"command": "PRIVATE_COMMAND", "description": "Run tests"},
+            "permission_mode": "default"
+        }));
+        assert_eq!(normalized.event.kind, EventKind::WaitingApproval);
+        let tool = normalized.event.tool_activity.as_ref().unwrap();
+        assert_eq!(tool.phase, ToolActivityPhase::Attention);
+        assert_eq!(tool.label, "shell");
+        assert!(
+            !serde_json::to_string(&normalized)
+                .unwrap()
+                .contains("PRIVATE_COMMAND")
+        );
+    }
+
+    #[test]
+    fn unbounded_or_incomplete_child_identity_is_ignored() {
+        let long_id = "a".repeat(CHILD_AGENT_ID_MAX_CHARS + 1);
+        let long_type = "t".repeat(CHILD_AGENT_TYPE_MAX_CHARS + 1);
+        for raw in [
+            json!({"hook_event_name": "PreToolUse", "agent_id": long_id, "agent_type": "Explore", "tool_name": "Bash"}),
+            json!({"hook_event_name": "PreToolUse", "agent_id": "agent-1", "agent_type": long_type, "tool_name": "Bash"}),
+            json!({"hook_event_name": "PreToolUse", "agent_id": "agent-1", "tool_name": "Bash"}),
+            json!({"hook_event_name": "SubagentStart", "agent_type": "Explore"}),
+            json!({"hook_event_name": "SubagentStop", "agent_id": "", "agent_type": "Explore"}),
+        ] {
+            assert_eq!(normalize(&raw), AdapterOutcome::Ignored, "{raw}");
+        }
+        let sanitized = child(&json!({
+            "hook_event_name": "SubagentStart",
+            "agent_id": "agent\u{1b}[31m-1",
+            "agent_type": "Explore\nagent"
+        }));
+        assert_eq!(
+            sanitized.event.child_agent,
+            Some(ChildAgentRef {
+                agent_id: "agent-1".into(),
+                agent_type: "Explore agent".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn named_main_agent_without_agent_id_is_root() {
+        let normalized = normalize(&json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "root-session",
+            "agent_type": "general-purpose",
+            "agent_id": "  ",
+            "tool_name": "Bash",
+            "model": "claude-opus"
+        }))
+        .into_event()
+        .unwrap();
+        assert!(normalized.event.child_agent.is_none());
+        assert_eq!(normalized.event.kind, EventKind::Working);
     }
 }

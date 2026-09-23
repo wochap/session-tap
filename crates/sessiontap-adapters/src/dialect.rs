@@ -1,14 +1,12 @@
 //! Per-provider interpretation of raw hook payloads.
 
-use crate::{
-    completed_reason_context, failed_reason_context, is_subagent_payload, status_reason_context,
-};
+use crate::{completed_reason_context, failed_reason_context, status_reason_context};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sessiontap_core::{
     ProviderId,
     domain::{
-        ArtifactCollectionContext, EventKind, ProviderMetadata, StatusReasonContext,
+        ArtifactCollectionContext, ChildAgentRef, EventKind, ProviderMetadata, StatusReasonContext,
         ToolActivityUpdate, Usage,
     },
 };
@@ -29,9 +27,11 @@ pub trait HookDialect: Send + Sync + 'static {
     /// Maps a payload to an event kind, or `None` to ignore it.
     fn classify(&self, raw: &Value) -> Option<EventKind>;
 
-    /// Child-agent payloads are ignored before any other interpretation.
-    fn is_subagent(&self, raw: &Value) -> bool {
-        is_subagent_payload(raw)
+    /// Sanitized bounded identity of the child agent a payload belongs to.
+    /// `None` treats the payload as a root payload; a provider that does not
+    /// track child agents must ignore their payloads in `classify`.
+    fn child_agent(&self, _raw: &Value) -> Option<ChildAgentRef> {
+        None
     }
 
     /// Provider-assigned event id; the driver generates one when absent.

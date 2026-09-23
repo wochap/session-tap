@@ -387,6 +387,7 @@ mod tests {
             metadata: None,
             usage: None,
             repository: None,
+            children: None,
         }
     }
     fn snapshot(source: &str, revision: u64, views: Vec<PublicAgentView>) -> SourceEnvelope {

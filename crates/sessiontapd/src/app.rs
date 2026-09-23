@@ -307,11 +307,14 @@ pub(crate) mod tests {
     use sessiontap_core::{
         config::Config,
         domain::{
-            Activity, ActivityConfirmation, Capabilities, EventEvidence, EventKind, Lifecycle,
-            MultiplexerBackend, MultiplexerMetadata, ProcessMetadata, PublicStatus, derive_status,
+            Activity, ActivityConfirmation, Capabilities, ChildAgentRef, EventEvidence, EventKind,
+            Lifecycle, MultiplexerBackend, MultiplexerMetadata, ProcessMetadata, PublicField,
+            PublicReasonKind, PublicStatus, StatusReasonSource, ToolActivityPhase,
+            ToolActivityUpdate, derive_status,
         },
     };
     use sessiontap_infra::multiplexer::UnsupportedBackend;
+    use std::collections::BTreeSet;
 
     pub(crate) fn app(storage: Storage) -> App {
         App::new(
@@ -356,6 +359,7 @@ pub(crate) mod tests {
             capabilities: Capabilities::default(),
             turn_generation: 0,
             completed_generation: None,
+            children: Vec::new(),
         }
     }
 
@@ -381,6 +385,7 @@ pub(crate) mod tests {
             usage: None,
             turn_id: None,
             tool_activity: None,
+            child_agent: None,
         }
     }
 
@@ -393,7 +398,7 @@ pub(crate) mod tests {
         app.register(initial.clone(), "credential").unwrap();
         let update = receiver.recv().await.unwrap();
         assert_eq!(update.view.invocation_id, initial.invocation_id);
-        assert_eq!(update.changed.len(), 11);
+        assert_eq!(update.changed.len(), 12);
         assert_eq!(app.status().unwrap().1.len(), 1);
     }
 
@@ -475,6 +480,75 @@ pub(crate) mod tests {
             receiver.recv().await.unwrap().view.status,
             PublicStatus::Running
         );
+    }
+
+    #[tokio::test]
+    async fn child_change_while_root_is_stopped_publishes_children_only() {
+        let app = app(Storage::memory().unwrap());
+        let initial = snapshot();
+        app.register(initial.clone(), "credential").unwrap();
+        app.bind_child(&initial.invocation_id, "credential", 42, None)
+            .unwrap();
+        let ingest = |event: NormalizedEvent, reason: Option<StatusReasonContext>| {
+            app.ingest_hook(
+                initial.provider.clone(),
+                initial.invocation_id.clone(),
+                "credential".into(),
+                event,
+                reason,
+                None,
+            )
+            .unwrap();
+        };
+        let child = |id: &str, kind: EventKind| {
+            let mut value = event(&initial, id, kind);
+            value.child_agent = Some(ChildAgentRef {
+                agent_id: "agent-1".into(),
+                agent_type: "Explore".into(),
+            });
+            value
+        };
+        ingest(event(&initial, "turn", EventKind::NewTurn), None);
+        ingest(child("child-start", EventKind::NewTurn), None);
+        ingest(
+            event(&initial, "stop", EventKind::Completed),
+            Some(StatusReasonContext {
+                summary: "Done".into(),
+                source: StatusReasonSource::AssistantMessage,
+            }),
+        );
+        let (_, _, mut receiver) = app.subscribe().unwrap();
+
+        let mut approval = child("child-approval", EventKind::WaitingApproval);
+        approval.tool_activity = Some(ToolActivityUpdate {
+            phase: ToolActivityPhase::Attention,
+            label: "shell".into(),
+            correlation_id: Some("toolu_1".into()),
+            detail: None,
+        });
+        ingest(approval.clone(), None);
+        let update = receiver.recv().await.unwrap();
+        assert_eq!(
+            update.changed,
+            BTreeSet::from([PublicField::UpdatedAt, PublicField::Children])
+        );
+        assert_eq!(update.view.status, PublicStatus::Stopped);
+        assert_eq!(update.view.reason.as_ref().unwrap().summary, "Done");
+        let children = update.view.children.as_ref().unwrap();
+        assert_eq!(children[0].status, PublicStatus::Blocked);
+        assert_eq!(
+            children[0].reason.as_ref().unwrap().kind,
+            Some(PublicReasonKind::Approval)
+        );
+
+        ingest(approval, None);
+        assert!(receiver.try_recv().is_err());
+
+        ingest(event(&initial, "next-turn", EventKind::NewTurn), None);
+        let update = receiver.recv().await.unwrap();
+        assert!(update.changed.contains(&PublicField::Children));
+        assert!(update.view.children.is_none());
+        assert_eq!(update.view.status, PublicStatus::Running);
     }
 
     #[tokio::test]

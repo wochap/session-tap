@@ -490,23 +490,6 @@ fn field<'a>(raw: &'a Value, names: &[&str]) -> Option<&'a str> {
         .find_map(|name| raw.get(*name).and_then(Value::as_str))
 }
 
-pub(crate) fn is_subagent_payload(raw: &Value) -> bool {
-    if raw
-        .get("agent_id")
-        .and_then(Value::as_str)
-        .is_some_and(|id| !id.trim().is_empty())
-    {
-        return true;
-    }
-    raw.get("hook_event_name")
-        .or_else(|| raw.get("event_name"))
-        .or_else(|| raw.get("type"))
-        .and_then(Value::as_str)
-        .is_some_and(|name| {
-            name.eq_ignore_ascii_case("SubagentStart") || name.eq_ignore_ascii_case("SubagentStop")
-        })
-}
-
 pub(crate) fn status_excerpt(value: &str) -> Option<String> {
     let mut escaped = false;
     let mut clean = String::new();
@@ -1054,6 +1037,14 @@ mod tests {
         .unwrap();
         let v: Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
         assert!(v["hooks"]["Stop"].to_string().contains("mine"));
+        for event in ["SubagentStart", "SubagentStop"] {
+            assert!(
+                v["hooks"][event]
+                    .to_string()
+                    .contains("SessionTap observability"),
+                "{event} is not installed"
+            );
+        }
         let once = fs::read(&p).unwrap();
         let report = merge_hook_config(
             &p,
@@ -1076,6 +1067,13 @@ mod tests {
         let v: Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
         assert!(v.to_string().contains("mine"));
         assert!(!v.to_string().contains("SessionTap observability"));
+        for event in ["SubagentStart", "SubagentStop"] {
+            assert!(
+                !v["hooks"][event]
+                    .to_string()
+                    .contains("SessionTap observability")
+            );
+        }
     }
 
     #[test]
@@ -1528,11 +1526,6 @@ mod tests {
         let id = InvocationId::new();
         let fixtures = [
             (
-                "claude",
-                serde_json::from_str(include_str!("../tests/fixtures/claude-subagent.json"))
-                    .unwrap(),
-            ),
-            (
                 "codex",
                 serde_json::from_str(include_str!("../tests/fixtures/codex-subagent.json"))
                     .unwrap(),
@@ -1544,7 +1537,6 @@ mod tests {
         ];
         for (provider, raw) in fixtures {
             let outcome = match provider {
-                "claude" => AgentAdapter::normalize(&claude::ClaudeAdapter, &id, &raw),
                 "codex" => AgentAdapter::normalize(&codex::CodexAdapter, &id, &raw),
                 "qwen" => AgentAdapter::normalize(&qwen::QwenAdapter, &id, &raw),
                 _ => unreachable!(),
@@ -1562,8 +1554,10 @@ mod tests {
                 "last_assistant_message": "root response"
             }),
         )
+        .unwrap()
+        .into_event()
         .unwrap();
-        assert!(matches!(root, AdapterOutcome::Event(_)));
+        assert!(root.event.child_agent.is_none());
     }
 
     #[test]
