@@ -322,6 +322,48 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn children_is_a_selectable_public_field() {
+        let sinks = config(
+            "version=1\n[sinks.out]\ntype='stdout'\nenabled=true\nfields=['status','children']\n",
+        );
+        assert_eq!(
+            sinks["out"].public_fields().unwrap(),
+            BTreeSet::from([PublicField::Status, PublicField::Children])
+        );
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "type": "update",
+            "schema_version": 1,
+            "source_id": "local",
+            "delivery_id": "d2",
+            "revision": 4,
+            "changed": ["updated_at", "children"],
+            "view": {
+                "invocation_id": "00000000-0000-4000-8000-000000000001",
+                "provider": "claude",
+                "status": "stopped",
+                "cwd": "/work",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:01Z",
+                "children": [{
+                    "agent_id": "agent-1",
+                    "agent_type": "Explore",
+                    "status": "running",
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:01Z"
+                }]
+            }
+        }))
+        .unwrap();
+        let projected: serde_json::Value = serde_json::from_slice(
+            &project_fields(&payload, &BTreeSet::from([PublicField::Children])).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(projected["changed"], serde_json::json!(["children"]));
+        assert_eq!(projected["view"]["children"][0]["agent_id"], "agent-1");
+        assert!(projected["view"].get("status").is_none());
+    }
+
+    #[test]
     fn token_source_prefers_private_file_and_rejects_open_or_linked_files() {
         use std::{
             fs,

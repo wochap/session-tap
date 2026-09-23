@@ -55,6 +55,7 @@ fn registered(index: usize, provider: &str) -> InvocationSnapshot {
         capabilities: Capabilities::default(),
         turn_generation: 0,
         completed_generation: None,
+        children: Vec::new(),
     }
 }
 
@@ -323,6 +324,7 @@ fn fixture_replay_matches_snapshot() {
             correlation_id: Some("long".into()),
             detail: None,
         }),
+        child_agent: None,
     };
     db.apply_event_with_context(&working, None, Some(&publish))
         .unwrap();

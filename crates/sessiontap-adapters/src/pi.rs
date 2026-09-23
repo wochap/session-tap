@@ -72,10 +72,6 @@ impl HookDialect for PiDialect {
     fn classify(&self, raw: &Value) -> Option<EventKind> {
         classify(raw)
     }
-    /// The managed extension forwards root-session events only.
-    fn is_subagent(&self, _raw: &Value) -> bool {
-        false
-    }
     fn provider_event_id(&self, _raw: &Value) -> Option<String> {
         None
     }

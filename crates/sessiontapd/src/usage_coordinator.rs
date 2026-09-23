@@ -358,6 +358,7 @@ impl UsageCoordinator {
                 usage: enrichment.usage.clone(),
                 turn_id: None,
                 tool_activity: None,
+                child_agent: None,
             };
             if let Err(error) =
                 self.inner

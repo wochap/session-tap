@@ -28,6 +28,7 @@ fn view(status: PublicStatus) -> PublicAgentView {
         metadata: None,
         usage: None,
         repository: None,
+        children: None,
     }
 }
 

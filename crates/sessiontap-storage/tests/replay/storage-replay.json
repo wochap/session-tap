@@ -291,6 +291,75 @@
       "update": null
     },
     {
+      "call": "apply_event",
+      "event_id": "claude-events-19",
+      "update": {
+        "changed": [
+          "updated_at",
+          "children"
+        ],
+        "delivery_id": "claude-events-19",
+        "revision": 22,
+        "view": {
+          "children": [
+            {
+              "agent_id": "agent-1",
+              "agent_type": "Explore",
+              "started_at": "2000-01-01T00:00:20Z",
+              "status": "running",
+              "updated_at": "2000-01-01T00:00:20Z"
+            }
+          ],
+          "created_at": "2000-01-01T00:00:00Z",
+          "cwd": "/work/project",
+          "invocation_id": "00000000-0000-4000-8000-000000000001",
+          "provider": "claude",
+          "session": {
+            "id": "s",
+            "start_reason": "startup"
+          },
+          "status": "stopped",
+          "updated_at": "<wall-clock>"
+        }
+      }
+    },
+    {
+      "call": "apply_event",
+      "event_id": "claude-events-20",
+      "update": {
+        "changed": [
+          "updated_at",
+          "children"
+        ],
+        "delivery_id": "claude-events-20",
+        "revision": 23,
+        "view": {
+          "children": [
+            {
+              "agent_id": "agent-1",
+              "agent_type": "Explore",
+              "reason": {
+                "kind": "completed"
+              },
+              "started_at": "2000-01-01T00:00:20Z",
+              "status": "stopped",
+              "updated_at": "2000-01-01T00:00:21Z"
+            }
+          ],
+          "created_at": "2000-01-01T00:00:00Z",
+          "cwd": "/work/project",
+          "invocation_id": "00000000-0000-4000-8000-000000000001",
+          "provider": "claude",
+          "session": {
+            "id": "s",
+            "start_reason": "startup"
+          },
+          "status": "stopped",
+          "updated_at": "<wall-clock>"
+        }
+      }
+    },
+    {
       "call": "duplicate",
       "event_id": "claude-events-0",
       "update": null
@@ -298,12 +367,31 @@
     {
       "call": "mark_exit",
       "fixture": "claude-events",
-      "update": null
+      "update": {
+        "changed": [
+          "updated_at",
+          "children"
+        ],
+        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000001:24",
+        "revision": 24,
+        "view": {
+          "created_at": "2000-01-01T00:00:00Z",
+          "cwd": "/work/project",
+          "invocation_id": "00000000-0000-4000-8000-000000000001",
+          "provider": "claude",
+          "session": {
+            "id": "s",
+            "start_reason": "startup"
+          },
+          "status": "stopped",
+          "updated_at": "<wall-clock>"
+        }
+      }
     },
     {
       "call": "register",
       "fixture": "claude-permission",
-      "revision": 23
+      "revision": 25
     },
     {
       "call": "bind_child",
@@ -321,7 +409,7 @@
           "session"
         ],
         "delivery_id": "claude-permission-0",
-        "revision": 25,
+        "revision": 27,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -347,7 +435,7 @@
     {
       "call": "register",
       "fixture": "claude-question",
-      "revision": 26
+      "revision": 28
     },
     {
       "call": "bind_child",
@@ -366,7 +454,7 @@
           "metadata"
         ],
         "delivery_id": "claude-question-0",
-        "revision": 28,
+        "revision": 30,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -397,11 +485,48 @@
     {
       "call": "register",
       "fixture": "claude-subagent",
-      "revision": 29
+      "revision": 31
     },
     {
       "call": "bind_child",
       "fixture": "claude-subagent",
+      "update": null
+    },
+    {
+      "call": "apply_event",
+      "event_id": "claude-subagent-0",
+      "update": {
+        "changed": [
+          "updated_at",
+          "children"
+        ],
+        "delivery_id": "claude-subagent-0",
+        "revision": 33,
+        "view": {
+          "children": [
+            {
+              "agent_id": "agent-1",
+              "agent_type": "Explore",
+              "reason": {
+                "kind": "completed"
+              },
+              "started_at": "2000-01-01T00:00:01Z",
+              "status": "stopped",
+              "updated_at": "2000-01-01T00:00:01Z"
+            }
+          ],
+          "created_at": "2000-01-01T00:00:00Z",
+          "cwd": "/work/project",
+          "invocation_id": "00000000-0000-4000-8000-000000000004",
+          "provider": "claude",
+          "status": "idle",
+          "updated_at": "<wall-clock>"
+        }
+      }
+    },
+    {
+      "call": "duplicate",
+      "event_id": "claude-subagent-0",
       "update": null
     },
     {
@@ -410,10 +535,11 @@
       "update": {
         "changed": [
           "status",
-          "updated_at"
+          "updated_at",
+          "children"
         ],
-        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:31",
-        "revision": 31,
+        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:34",
+        "revision": 34,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -427,7 +553,7 @@
     {
       "call": "register",
       "fixture": "claude-tools",
-      "revision": 32
+      "revision": 35
     },
     {
       "call": "bind_child",
@@ -444,7 +570,7 @@
           "session"
         ],
         "delivery_id": "claude-tools-0",
-        "revision": 34,
+        "revision": 37,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -488,7 +614,7 @@
           "updated_at"
         ],
         "delivery_id": "claude-tools-5",
-        "revision": 39,
+        "revision": 42,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -516,7 +642,7 @@
           "updated_at"
         ],
         "delivery_id": "claude-tools-6",
-        "revision": 40,
+        "revision": 43,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -538,7 +664,7 @@
     {
       "call": "register",
       "fixture": "codex-clear",
-      "revision": 41
+      "revision": 44
     },
     {
       "call": "bind_child",
@@ -555,7 +681,7 @@
           "metadata"
         ],
         "delivery_id": "codex-clear-0",
-        "revision": 43,
+        "revision": 46,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -582,7 +708,7 @@
     {
       "call": "register",
       "fixture": "codex-events",
-      "revision": 44
+      "revision": 47
     },
     {
       "call": "bind_child",
@@ -598,7 +724,7 @@
           "session"
         ],
         "delivery_id": "codex-events-0",
-        "revision": 46,
+        "revision": 49,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -622,7 +748,7 @@
           "metadata"
         ],
         "delivery_id": "codex-events-1",
-        "revision": 47,
+        "revision": 50,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -654,7 +780,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-events-3",
-        "revision": 49,
+        "revision": 52,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -685,7 +811,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-events-4",
-        "revision": 50,
+        "revision": 53,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -712,7 +838,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-events-5",
-        "revision": 51,
+        "revision": 54,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -742,7 +868,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-events-6",
-        "revision": 52,
+        "revision": 55,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -773,7 +899,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-events-7",
-        "revision": 53,
+        "revision": 56,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -804,7 +930,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-events-9",
-        "revision": 55,
+        "revision": 58,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -844,7 +970,7 @@
     {
       "call": "register",
       "fixture": "codex-question",
-      "revision": 59
+      "revision": 62
     },
     {
       "call": "bind_child",
@@ -863,7 +989,7 @@
           "metadata"
         ],
         "delivery_id": "codex-question-0",
-        "revision": 61,
+        "revision": 64,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -892,7 +1018,7 @@
     {
       "call": "register",
       "fixture": "codex-subagent",
-      "revision": 62
+      "revision": 65
     },
     {
       "call": "bind_child",
@@ -902,7 +1028,7 @@
     {
       "call": "register",
       "fixture": "codex-tools",
-      "revision": 64
+      "revision": 67
     },
     {
       "call": "bind_child",
@@ -920,7 +1046,7 @@
           "metadata"
         ],
         "delivery_id": "codex-tools-0",
-        "revision": 66,
+        "revision": 69,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -957,7 +1083,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-tools-3",
-        "revision": 69,
+        "revision": 72,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -988,7 +1114,7 @@
           "updated_at"
         ],
         "delivery_id": "codex-tools-4",
-        "revision": 70,
+        "revision": 73,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1018,8 +1144,8 @@
           "status",
           "updated_at"
         ],
-        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:71",
-        "revision": 71,
+        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:74",
+        "revision": 74,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1039,7 +1165,7 @@
     {
       "call": "register",
       "fixture": "pi-events",
-      "revision": 72
+      "revision": 75
     },
     {
       "call": "bind_child",
@@ -1055,7 +1181,7 @@
           "session"
         ],
         "delivery_id": "pi-events-0",
-        "revision": 74,
+        "revision": 77,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1084,7 +1210,7 @@
           "session"
         ],
         "delivery_id": "pi-events-2",
-        "revision": 76,
+        "revision": 79,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1109,7 +1235,7 @@
           "metadata"
         ],
         "delivery_id": "pi-events-3",
-        "revision": 77,
+        "revision": 80,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1137,7 +1263,7 @@
           "metadata"
         ],
         "delivery_id": "pi-events-4",
-        "revision": 78,
+        "revision": 81,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1166,7 +1292,7 @@
           "updated_at"
         ],
         "delivery_id": "pi-events-5",
-        "revision": 79,
+        "revision": 82,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1212,7 +1338,7 @@
           "usage"
         ],
         "delivery_id": "pi-events-9",
-        "revision": 83,
+        "revision": 86,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1260,7 +1386,7 @@
     {
       "call": "register",
       "fixture": "pi-settled",
-      "revision": 86
+      "revision": 89
     },
     {
       "call": "bind_child",
@@ -1280,7 +1406,7 @@
           "usage"
         ],
         "delivery_id": "pi-settled-0",
-        "revision": 88,
+        "revision": 91,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1317,7 +1443,7 @@
     {
       "call": "register",
       "fixture": "qwen-events",
-      "revision": 89
+      "revision": 92
     },
     {
       "call": "bind_child",
@@ -1333,7 +1459,7 @@
           "session"
         ],
         "delivery_id": "qwen-events-0",
-        "revision": 91,
+        "revision": 94,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1356,7 +1482,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-1",
-        "revision": 92,
+        "revision": 95,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1400,7 +1526,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-6",
-        "revision": 97,
+        "revision": 100,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1432,7 +1558,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-8",
-        "revision": 99,
+        "revision": 102,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1459,7 +1585,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-9",
-        "revision": 100,
+        "revision": 103,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1482,7 +1608,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-10",
-        "revision": 101,
+        "revision": 104,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1515,7 +1641,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-12",
-        "revision": 103,
+        "revision": 106,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1538,7 +1664,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-events-13",
-        "revision": 104,
+        "revision": 107,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1580,7 +1706,7 @@
     {
       "call": "register",
       "fixture": "qwen-question",
-      "revision": 109
+      "revision": 112
     },
     {
       "call": "bind_child",
@@ -1599,7 +1725,7 @@
           "metadata"
         ],
         "delivery_id": "qwen-question-0",
-        "revision": 111,
+        "revision": 114,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1628,7 +1754,7 @@
     {
       "call": "register",
       "fixture": "qwen-stop",
-      "revision": 112
+      "revision": 115
     },
     {
       "call": "bind_child",
@@ -1646,7 +1772,7 @@
           "usage"
         ],
         "delivery_id": "qwen-stop-0",
-        "revision": 114,
+        "revision": 117,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1674,7 +1800,7 @@
     {
       "call": "register",
       "fixture": "qwen-subagent",
-      "revision": 115
+      "revision": 118
     },
     {
       "call": "bind_child",
@@ -1689,8 +1815,8 @@
           "status",
           "updated_at"
         ],
-        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:117",
-        "revision": 117,
+        "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:120",
+        "revision": 120,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1704,7 +1830,7 @@
     {
       "call": "register",
       "fixture": "qwen-tools",
-      "revision": 118
+      "revision": 121
     },
     {
       "call": "bind_child",
@@ -1721,7 +1847,7 @@
           "session"
         ],
         "delivery_id": "qwen-tools-0",
-        "revision": 120,
+        "revision": 123,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1760,7 +1886,7 @@
           "updated_at"
         ],
         "delivery_id": "qwen-tools-4",
-        "revision": 124,
+        "revision": 127,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1789,7 +1915,7 @@
           "session"
         ],
         "delivery_id": "qwen-tools-5",
-        "revision": 125,
+        "revision": 128,
         "view": {
           "created_at": "2000-01-01T00:00:00Z",
           "cwd": "/work/project",
@@ -1823,8 +1949,8 @@
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:130",
-          "revision": 130,
+          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:133",
+          "revision": 133,
           "view": {
             "created_at": "2000-01-01T00:00:00Z",
             "cwd": "/work/project",
@@ -1842,8 +1968,8 @@
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:131",
-          "revision": 131,
+          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:134",
+          "revision": 134,
           "view": {
             "created_at": "2000-01-01T00:00:00Z",
             "cwd": "/work/project",
@@ -1914,7 +2040,7 @@
             "start_reason": "startup"
           },
           "repository": null,
-          "revision": 22,
+          "revision": 24,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:16Z",
@@ -1964,7 +2090,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 132,
+          "revision": 135,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2019,7 +2145,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 139,
+          "revision": 142,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2065,7 +2191,7 @@
           "provider": "claude",
           "provider_session": null,
           "repository": null,
-          "revision": 31,
+          "revision": 34,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:00Z",
@@ -2115,7 +2241,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 134,
+          "revision": 137,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:40:00Z",
@@ -2170,7 +2296,7 @@
             "start_reason": "clear"
           },
           "repository": null,
-          "revision": 140,
+          "revision": 143,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2223,7 +2349,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 58,
+          "revision": 61,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:10Z",
@@ -2276,7 +2402,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 135,
+          "revision": 138,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2322,7 +2448,7 @@
           "provider": "codex",
           "provider_session": null,
           "repository": null,
-          "revision": 141,
+          "revision": 144,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:00Z",
@@ -2375,7 +2501,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 71,
+          "revision": 74,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:05Z",
@@ -2430,7 +2556,7 @@
             "start_reason": "startup"
           },
           "repository": null,
-          "revision": 136,
+          "revision": 139,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:10Z",
@@ -2489,7 +2615,7 @@
             "name": "adapter work"
           },
           "repository": null,
-          "revision": 142,
+          "revision": 145,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2544,7 +2670,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 108,
+          "revision": 111,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:14Z",
@@ -2597,7 +2723,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 137,
+          "revision": 140,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2647,7 +2773,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 143,
+          "revision": 146,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:01Z",
@@ -2698,7 +2824,7 @@
           "provider": "qwen",
           "provider_session": null,
           "repository": null,
-          "revision": 117,
+          "revision": 120,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:00Z",
@@ -2749,7 +2875,7 @@
             "start_reason": "resume"
           },
           "repository": null,
-          "revision": 138,
+          "revision": 141,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:00:06Z",
@@ -2799,7 +2925,7 @@
             "name": null
           },
           "repository": null,
-          "revision": 144,
+          "revision": 147,
           "schema_version": 1,
           "source_ordering": [],
           "state_started_at": "2000-01-01T00:40:00Z",
@@ -3319,6 +3445,62 @@
       },
       {
         "event": {
+          "child_agent": {
+            "agent_id": "agent-1",
+            "agent_type": "Explore"
+          },
+          "event_id": "claude-events-19",
+          "evidence": {
+            "channel": "managed_hook",
+            "collector_revision": 1,
+            "trust": "authenticated_invocation"
+          },
+          "invocation_id": "00000000-0000-4000-8000-000000000001",
+          "kind": "new_turn",
+          "observed_at": "2000-01-01T00:00:20Z",
+          "provider": "claude",
+          "provider_event_id": null,
+          "provider_session_id": "s",
+          "received_at": "2000-01-01T00:00:20Z",
+          "schema_version": 1,
+          "turn_id": null,
+          "usage": null
+        },
+        "event_id": "claude-events-19",
+        "invocation_id": "00000000-0000-4000-8000-000000000001",
+        "received_at": "2000-01-01T00:00:20+00:00",
+        "revision": 22
+      },
+      {
+        "event": {
+          "child_agent": {
+            "agent_id": "agent-1",
+            "agent_type": "Explore"
+          },
+          "event_id": "claude-events-20",
+          "evidence": {
+            "channel": "managed_hook",
+            "collector_revision": 1,
+            "trust": "authenticated_invocation"
+          },
+          "invocation_id": "00000000-0000-4000-8000-000000000001",
+          "kind": "completed",
+          "observed_at": "2000-01-01T00:00:21Z",
+          "provider": "claude",
+          "provider_event_id": null,
+          "provider_session_id": "s",
+          "received_at": "2000-01-01T00:00:21Z",
+          "schema_version": 1,
+          "turn_id": null,
+          "usage": null
+        },
+        "event_id": "claude-events-20",
+        "invocation_id": "00000000-0000-4000-8000-000000000001",
+        "received_at": "2000-01-01T00:00:21+00:00",
+        "revision": 23
+      },
+      {
+        "event": {
           "event_id": "claude-permission-0",
           "evidence": {
             "channel": "managed_hook",
@@ -3343,7 +3525,7 @@
         "event_id": "claude-permission-0",
         "invocation_id": "00000000-0000-4000-8000-000000000002",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 25
+        "revision": 27
       },
       {
         "event": {
@@ -3376,7 +3558,35 @@
         "event_id": "claude-question-0",
         "invocation_id": "00000000-0000-4000-8000-000000000003",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 28
+        "revision": 30
+      },
+      {
+        "event": {
+          "child_agent": {
+            "agent_id": "agent-1",
+            "agent_type": "Explore"
+          },
+          "event_id": "claude-subagent-0",
+          "evidence": {
+            "channel": "managed_hook",
+            "collector_revision": 1,
+            "trust": "authenticated_invocation"
+          },
+          "invocation_id": "00000000-0000-4000-8000-000000000004",
+          "kind": "completed",
+          "observed_at": "2000-01-01T00:00:01Z",
+          "provider": "claude",
+          "provider_event_id": null,
+          "provider_session_id": "root-session",
+          "received_at": "2000-01-01T00:00:01Z",
+          "schema_version": 1,
+          "turn_id": null,
+          "usage": null
+        },
+        "event_id": "claude-subagent-0",
+        "invocation_id": "00000000-0000-4000-8000-000000000004",
+        "received_at": "2000-01-01T00:00:01+00:00",
+        "revision": 33
       },
       {
         "event": {
@@ -3406,7 +3616,7 @@
         "event_id": "claude-tools-0",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 34
+        "revision": 37
       },
       {
         "event": {
@@ -3436,7 +3646,7 @@
         "event_id": "claude-tools-1",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:02+00:00",
-        "revision": 35
+        "revision": 38
       },
       {
         "event": {
@@ -3465,7 +3675,7 @@
         "event_id": "claude-tools-2",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:03+00:00",
-        "revision": 36
+        "revision": 39
       },
       {
         "event": {
@@ -3495,7 +3705,7 @@
         "event_id": "claude-tools-3",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:04+00:00",
-        "revision": 37
+        "revision": 40
       },
       {
         "event": {
@@ -3524,7 +3734,7 @@
         "event_id": "claude-tools-4",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:05+00:00",
-        "revision": 38
+        "revision": 41
       },
       {
         "event": {
@@ -3553,7 +3763,7 @@
         "event_id": "claude-tools-5",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:06+00:00",
-        "revision": 39
+        "revision": 42
       },
       {
         "event": {
@@ -3582,7 +3792,7 @@
         "event_id": "claude-tools-6",
         "invocation_id": "00000000-0000-4000-8000-000000000005",
         "received_at": "2000-01-01T00:00:07+00:00",
-        "revision": 40
+        "revision": 43
       },
       {
         "event": {
@@ -3611,7 +3821,7 @@
         "event_id": "codex-clear-0",
         "invocation_id": "00000000-0000-4000-8000-000000000006",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 43
+        "revision": 46
       },
       {
         "event": {
@@ -3635,7 +3845,7 @@
         "event_id": "codex-events-0",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 46
+        "revision": 49
       },
       {
         "event": {
@@ -3662,7 +3872,7 @@
         "event_id": "codex-events-1",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:02+00:00",
-        "revision": 47
+        "revision": 50
       },
       {
         "event": {
@@ -3693,7 +3903,7 @@
         "event_id": "codex-events-2",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:03+00:00",
-        "revision": 48
+        "revision": 51
       },
       {
         "event": {
@@ -3724,7 +3934,7 @@
         "event_id": "codex-events-3",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:04+00:00",
-        "revision": 49
+        "revision": 52
       },
       {
         "event": {
@@ -3755,7 +3965,7 @@
         "event_id": "codex-events-4",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:05+00:00",
-        "revision": 50
+        "revision": 53
       },
       {
         "event": {
@@ -3786,7 +3996,7 @@
         "event_id": "codex-events-5",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:06+00:00",
-        "revision": 51
+        "revision": 54
       },
       {
         "event": {
@@ -3813,7 +4023,7 @@
         "event_id": "codex-events-6",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:07+00:00",
-        "revision": 52
+        "revision": 55
       },
       {
         "event": {
@@ -3840,7 +4050,7 @@
         "event_id": "codex-events-7",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:08+00:00",
-        "revision": 53
+        "revision": 56
       },
       {
         "event": {
@@ -3867,7 +4077,7 @@
         "event_id": "codex-events-8",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:09+00:00",
-        "revision": 54
+        "revision": 57
       },
       {
         "event": {
@@ -3894,7 +4104,7 @@
         "event_id": "codex-events-9",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:10+00:00",
-        "revision": 55
+        "revision": 58
       },
       {
         "event": {
@@ -3921,7 +4131,7 @@
         "event_id": "codex-events-10",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:11+00:00",
-        "revision": 56
+        "revision": 59
       },
       {
         "event": {
@@ -3945,7 +4155,7 @@
         "event_id": "codex-events-11",
         "invocation_id": "00000000-0000-4000-8000-000000000007",
         "received_at": "2000-01-01T00:00:12+00:00",
-        "revision": 57
+        "revision": 60
       },
       {
         "event": {
@@ -3972,7 +4182,7 @@
         "event_id": "codex-question-0",
         "invocation_id": "00000000-0000-4000-8000-000000000008",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 61
+        "revision": 64
       },
       {
         "event": {
@@ -4005,7 +4215,7 @@
         "event_id": "codex-tools-0",
         "invocation_id": "00000000-0000-4000-8000-00000000000a",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 66
+        "revision": 69
       },
       {
         "event": {
@@ -4038,7 +4248,7 @@
         "event_id": "codex-tools-1",
         "invocation_id": "00000000-0000-4000-8000-00000000000a",
         "received_at": "2000-01-01T00:00:02+00:00",
-        "revision": 67
+        "revision": 70
       },
       {
         "event": {
@@ -4071,7 +4281,7 @@
         "event_id": "codex-tools-2",
         "invocation_id": "00000000-0000-4000-8000-00000000000a",
         "received_at": "2000-01-01T00:00:03+00:00",
-        "revision": 68
+        "revision": 71
       },
       {
         "event": {
@@ -4103,7 +4313,7 @@
         "event_id": "codex-tools-3",
         "invocation_id": "00000000-0000-4000-8000-00000000000a",
         "received_at": "2000-01-01T00:00:04+00:00",
-        "revision": 69
+        "revision": 72
       },
       {
         "event": {
@@ -4134,7 +4344,7 @@
         "event_id": "codex-tools-4",
         "invocation_id": "00000000-0000-4000-8000-00000000000a",
         "received_at": "2000-01-01T00:00:05+00:00",
-        "revision": 70
+        "revision": 73
       },
       {
         "event": {
@@ -4159,7 +4369,7 @@
         "event_id": "pi-events-0",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 74
+        "revision": 77
       },
       {
         "event": {
@@ -4183,7 +4393,7 @@
         "event_id": "pi-events-1",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:02+00:00",
-        "revision": 75
+        "revision": 78
       },
       {
         "event": {
@@ -4208,7 +4418,7 @@
         "event_id": "pi-events-2",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:03+00:00",
-        "revision": 76
+        "revision": 79
       },
       {
         "event": {
@@ -4235,7 +4445,7 @@
         "event_id": "pi-events-3",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:04+00:00",
-        "revision": 77
+        "revision": 80
       },
       {
         "event": {
@@ -4262,7 +4472,7 @@
         "event_id": "pi-events-4",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:05+00:00",
-        "revision": 78
+        "revision": 81
       },
       {
         "event": {
@@ -4286,7 +4496,7 @@
         "event_id": "pi-events-5",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:06+00:00",
-        "revision": 79
+        "revision": 82
       },
       {
         "event": {
@@ -4310,7 +4520,7 @@
         "event_id": "pi-events-6",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:07+00:00",
-        "revision": 80
+        "revision": 83
       },
       {
         "event": {
@@ -4339,7 +4549,7 @@
         "event_id": "pi-events-7",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:08+00:00",
-        "revision": 81
+        "revision": 84
       },
       {
         "event": {
@@ -4368,7 +4578,7 @@
         "event_id": "pi-events-8",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:09+00:00",
-        "revision": 82
+        "revision": 85
       },
       {
         "event": {
@@ -4397,7 +4607,7 @@
         "event_id": "pi-events-9",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:10+00:00",
-        "revision": 83
+        "revision": 86
       },
       {
         "event": {
@@ -4425,7 +4635,7 @@
         "event_id": "pi-events-10",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:11+00:00",
-        "revision": 84
+        "revision": 87
       },
       {
         "event": {
@@ -4449,7 +4659,7 @@
         "event_id": "pi-events-11",
         "invocation_id": "00000000-0000-4000-8000-00000000000b",
         "received_at": "2000-01-01T00:00:12+00:00",
-        "revision": 85
+        "revision": 88
       },
       {
         "event": {
@@ -4483,7 +4693,7 @@
         "event_id": "pi-settled-0",
         "invocation_id": "00000000-0000-4000-8000-00000000000c",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 88
+        "revision": 91
       },
       {
         "event": {
@@ -4507,7 +4717,7 @@
         "event_id": "qwen-events-0",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 91
+        "revision": 94
       },
       {
         "event": {
@@ -4531,7 +4741,7 @@
         "event_id": "qwen-events-1",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:02+00:00",
-        "revision": 92
+        "revision": 95
       },
       {
         "event": {
@@ -4555,7 +4765,7 @@
         "event_id": "qwen-events-2",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:03+00:00",
-        "revision": 93
+        "revision": 96
       },
       {
         "event": {
@@ -4583,7 +4793,7 @@
         "event_id": "qwen-events-3",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:04+00:00",
-        "revision": 94
+        "revision": 97
       },
       {
         "event": {
@@ -4611,7 +4821,7 @@
         "event_id": "qwen-events-4",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:05+00:00",
-        "revision": 95
+        "revision": 98
       },
       {
         "event": {
@@ -4639,7 +4849,7 @@
         "event_id": "qwen-events-5",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:06+00:00",
-        "revision": 96
+        "revision": 99
       },
       {
         "event": {
@@ -4667,7 +4877,7 @@
         "event_id": "qwen-events-6",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:07+00:00",
-        "revision": 97
+        "revision": 100
       },
       {
         "event": {
@@ -4695,7 +4905,7 @@
         "event_id": "qwen-events-7",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:08+00:00",
-        "revision": 98
+        "revision": 101
       },
       {
         "event": {
@@ -4723,7 +4933,7 @@
         "event_id": "qwen-events-8",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:09+00:00",
-        "revision": 99
+        "revision": 102
       },
       {
         "event": {
@@ -4747,7 +4957,7 @@
         "event_id": "qwen-events-9",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:10+00:00",
-        "revision": 100
+        "revision": 103
       },
       {
         "event": {
@@ -4771,7 +4981,7 @@
         "event_id": "qwen-events-10",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:11+00:00",
-        "revision": 101
+        "revision": 104
       },
       {
         "event": {
@@ -4795,7 +5005,7 @@
         "event_id": "qwen-events-11",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:12+00:00",
-        "revision": 102
+        "revision": 105
       },
       {
         "event": {
@@ -4819,7 +5029,7 @@
         "event_id": "qwen-events-12",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:13+00:00",
-        "revision": 103
+        "revision": 106
       },
       {
         "event": {
@@ -4843,7 +5053,7 @@
         "event_id": "qwen-events-13",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:14+00:00",
-        "revision": 104
+        "revision": 107
       },
       {
         "event": {
@@ -4867,7 +5077,7 @@
         "event_id": "qwen-events-14",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:15+00:00",
-        "revision": 105
+        "revision": 108
       },
       {
         "event": {
@@ -4891,7 +5101,7 @@
         "event_id": "qwen-events-15",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:16+00:00",
-        "revision": 106
+        "revision": 109
       },
       {
         "event": {
@@ -4915,7 +5125,7 @@
         "event_id": "qwen-events-16",
         "invocation_id": "00000000-0000-4000-8000-00000000000d",
         "received_at": "2000-01-01T00:00:17+00:00",
-        "revision": 107
+        "revision": 110
       },
       {
         "event": {
@@ -4946,7 +5156,7 @@
         "event_id": "qwen-question-0",
         "invocation_id": "00000000-0000-4000-8000-00000000000e",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 111
+        "revision": 114
       },
       {
         "event": {
@@ -4975,7 +5185,7 @@
         "event_id": "qwen-stop-0",
         "invocation_id": "00000000-0000-4000-8000-00000000000f",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 114
+        "revision": 117
       },
       {
         "event": {
@@ -5005,7 +5215,7 @@
         "event_id": "qwen-tools-0",
         "invocation_id": "00000000-0000-4000-8000-000000000011",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 120
+        "revision": 123
       },
       {
         "event": {
@@ -5035,7 +5245,7 @@
         "event_id": "qwen-tools-1",
         "invocation_id": "00000000-0000-4000-8000-000000000011",
         "received_at": "2000-01-01T00:00:02+00:00",
-        "revision": 121
+        "revision": 124
       },
       {
         "event": {
@@ -5065,7 +5275,7 @@
         "event_id": "qwen-tools-2",
         "invocation_id": "00000000-0000-4000-8000-000000000011",
         "received_at": "2000-01-01T00:00:03+00:00",
-        "revision": 122
+        "revision": 125
       },
       {
         "event": {
@@ -5094,7 +5304,7 @@
         "event_id": "qwen-tools-3",
         "invocation_id": "00000000-0000-4000-8000-000000000011",
         "received_at": "2000-01-01T00:00:04+00:00",
-        "revision": 123
+        "revision": 126
       },
       {
         "event": {
@@ -5123,7 +5333,7 @@
         "event_id": "qwen-tools-4",
         "invocation_id": "00000000-0000-4000-8000-000000000011",
         "received_at": "2000-01-01T00:00:05+00:00",
-        "revision": 124
+        "revision": 127
       },
       {
         "event": {
@@ -5148,7 +5358,7 @@
         "event_id": "qwen-tools-5",
         "invocation_id": "00000000-0000-4000-8000-000000000011",
         "received_at": "2000-01-01T00:00:06+00:00",
-        "revision": 125
+        "revision": 128
       },
       {
         "event": {
@@ -5177,7 +5387,7 @@
         "event_id": "stale-working",
         "invocation_id": "00000000-0000-4000-8000-000000000012",
         "received_at": "2000-01-01T00:00:01+00:00",
-        "revision": 128
+        "revision": 131
       },
       {
         "event": {
@@ -5206,10 +5416,10 @@
         "event_id": "stale-working-refresh",
         "invocation_id": "00000000-0000-4000-8000-000000000012",
         "received_at": "2000-01-01T00:10:00+00:00",
-        "revision": 129
+        "revision": 132
       }
     ],
-    "revision": 144,
+    "revision": 147,
     "sink_outbox": [
       {
         "attempts": 0,
@@ -5226,7 +5436,8 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000001:1",
           "revision": 1,
@@ -5260,7 +5471,8 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000001:1",
           "revision": 1,
@@ -5831,33 +6043,116 @@
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000002:23",
+        "event_id": "claude-events-19",
         "payload": {
           "changed": [
-            "invocation_id",
-            "provider",
-            "status",
-            "reason",
-            "cwd",
-            "created_at",
             "updated_at",
-            "session",
-            "metadata",
-            "usage",
-            "repository"
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000002:23",
+          "delivery_id": "claude-events-19",
+          "revision": 22,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "children": [
+              {
+                "agent_id": "agent-1",
+                "agent_type": "Explore",
+                "started_at": "2000-01-01T00:00:20Z",
+                "status": "running",
+                "updated_at": "2000-01-01T00:00:20Z"
+              }
+            ],
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000001",
+            "provider": "claude",
+            "session": {
+              "id": "s",
+              "start_reason": "startup"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 22,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "claude-events-19",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "claude-events-19",
+          "revision": 22,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "children": [
+              {
+                "agent_id": "agent-1",
+                "agent_type": "Explore",
+                "started_at": "2000-01-01T00:00:20Z",
+                "status": "running",
+                "updated_at": "2000-01-01T00:00:20Z"
+              }
+            ],
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000001",
+            "provider": "claude",
+            "session": {
+              "id": "s",
+              "start_reason": "startup"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 22,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "claude-events-20",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "claude-events-20",
           "revision": 23,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
           "view": {
+            "children": [
+              {
+                "agent_id": "agent-1",
+                "agent_type": "Explore",
+                "reason": {
+                  "kind": "completed"
+                },
+                "started_at": "2000-01-01T00:00:20Z",
+                "status": "stopped",
+                "updated_at": "2000-01-01T00:00:21Z"
+              }
+            ],
             "created_at": "2000-01-01T00:00:00Z",
             "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000002",
+            "invocation_id": "00000000-0000-4000-8000-000000000001",
             "provider": "claude",
-            "status": "idle",
-            "updated_at": "2000-01-01T00:00:00Z"
+            "session": {
+              "id": "s",
+              "start_reason": "startup"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
           }
         },
         "revision": 23,
@@ -5865,7 +6160,106 @@
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000002:23",
+        "event_id": "claude-events-20",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "claude-events-20",
+          "revision": 23,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "children": [
+              {
+                "agent_id": "agent-1",
+                "agent_type": "Explore",
+                "reason": {
+                  "kind": "completed"
+                },
+                "started_at": "2000-01-01T00:00:20Z",
+                "status": "stopped",
+                "updated_at": "2000-01-01T00:00:21Z"
+              }
+            ],
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000001",
+            "provider": "claude",
+            "session": {
+              "id": "s",
+              "start_reason": "startup"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 23,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000001:24",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000001:24",
+          "revision": 24,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000001",
+            "provider": "claude",
+            "session": {
+              "id": "s",
+              "start_reason": "startup"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 24,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000001:24",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000001:24",
+          "revision": 24,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000001",
+            "provider": "claude",
+            "session": {
+              "id": "s",
+              "start_reason": "startup"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 24,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000002:25",
         "payload": {
           "changed": [
             "invocation_id",
@@ -5878,10 +6272,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000002:23",
-          "revision": 23,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000002:25",
+          "revision": 25,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -5894,7 +6289,42 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 23,
+        "revision": 25,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000002:25",
+        "payload": {
+          "changed": [
+            "invocation_id",
+            "provider",
+            "status",
+            "reason",
+            "cwd",
+            "created_at",
+            "updated_at",
+            "session",
+            "metadata",
+            "usage",
+            "repository",
+            "children"
+          ],
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000002:25",
+          "revision": 25,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000002",
+            "provider": "claude",
+            "status": "idle",
+            "updated_at": "2000-01-01T00:00:00Z"
+          }
+        },
+        "revision": 25,
         "sink_name": "observer"
       },
       {
@@ -5908,7 +6338,7 @@
             "session"
           ],
           "delivery_id": "claude-permission-0",
-          "revision": 25,
+          "revision": 27,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -5928,7 +6358,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 25,
+        "revision": 27,
         "sink_name": "hub"
       },
       {
@@ -5942,7 +6372,7 @@
             "session"
           ],
           "delivery_id": "claude-permission-0",
-          "revision": 25,
+          "revision": 27,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -5962,12 +6392,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 25,
+        "revision": 27,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000003:26",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000003:28",
         "payload": {
           "changed": [
             "invocation_id",
@@ -5980,10 +6410,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000003:26",
-          "revision": 26,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000003:28",
+          "revision": 28,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -5996,12 +6427,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 26,
+        "revision": 28,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000003:26",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000003:28",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6014,10 +6445,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000003:26",
-          "revision": 26,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000003:28",
+          "revision": 28,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6030,7 +6462,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 26,
+        "revision": 28,
         "sink_name": "observer"
       },
       {
@@ -6045,7 +6477,7 @@
             "metadata"
           ],
           "delivery_id": "claude-question-0",
-          "revision": 28,
+          "revision": 30,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6070,7 +6502,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 28,
+        "revision": 30,
         "sink_name": "hub"
       },
       {
@@ -6085,7 +6517,7 @@
             "metadata"
           ],
           "delivery_id": "claude-question-0",
-          "revision": 28,
+          "revision": 30,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6110,12 +6542,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 28,
+        "revision": 30,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000004:29",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000004:31",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6128,10 +6560,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000004:29",
-          "revision": 29,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000004:31",
+          "revision": 31,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6144,12 +6577,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 29,
+        "revision": 31,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000004:29",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000004:31",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6162,10 +6595,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000004:29",
-          "revision": 29,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000004:31",
+          "revision": 31,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6178,19 +6612,94 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 29,
+        "revision": 31,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:31",
+        "event_id": "claude-subagent-0",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "claude-subagent-0",
+          "revision": 33,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "children": [
+              {
+                "agent_id": "agent-1",
+                "agent_type": "Explore",
+                "reason": {
+                  "kind": "completed"
+                },
+                "started_at": "2000-01-01T00:00:01Z",
+                "status": "stopped",
+                "updated_at": "2000-01-01T00:00:01Z"
+              }
+            ],
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000004",
+            "provider": "claude",
+            "status": "idle",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 33,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "claude-subagent-0",
+        "payload": {
+          "changed": [
+            "updated_at",
+            "children"
+          ],
+          "delivery_id": "claude-subagent-0",
+          "revision": 33,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "children": [
+              {
+                "agent_id": "agent-1",
+                "agent_type": "Explore",
+                "reason": {
+                  "kind": "completed"
+                },
+                "started_at": "2000-01-01T00:00:01Z",
+                "status": "stopped",
+                "updated_at": "2000-01-01T00:00:01Z"
+              }
+            ],
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000004",
+            "provider": "claude",
+            "status": "idle",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 33,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:34",
         "payload": {
           "changed": [
             "status",
-            "updated_at"
+            "updated_at",
+            "children"
           ],
-          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:31",
-          "revision": 31,
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:34",
+          "revision": 34,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6203,19 +6712,20 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 31,
+        "revision": 34,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:31",
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:34",
         "payload": {
           "changed": [
             "status",
-            "updated_at"
+            "updated_at",
+            "children"
           ],
-          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:31",
-          "revision": 31,
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000004:34",
+          "revision": 34,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6228,12 +6738,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 31,
+        "revision": 34,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000005:32",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000005:35",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6246,10 +6756,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000005:32",
-          "revision": 32,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000005:35",
+          "revision": 35,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6262,12 +6773,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 32,
+        "revision": 35,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000005:32",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000005:35",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6280,10 +6791,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000005:32",
-          "revision": 32,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000005:35",
+          "revision": 35,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6296,7 +6808,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 32,
+        "revision": 35,
         "sink_name": "observer"
       },
       {
@@ -6309,7 +6821,7 @@
             "session"
           ],
           "delivery_id": "claude-tools-0",
-          "revision": 34,
+          "revision": 37,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6325,7 +6837,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 34,
+        "revision": 37,
         "sink_name": "hub"
       },
       {
@@ -6338,7 +6850,7 @@
             "session"
           ],
           "delivery_id": "claude-tools-0",
-          "revision": 34,
+          "revision": 37,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6354,7 +6866,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 34,
+        "revision": 37,
         "sink_name": "observer"
       },
       {
@@ -6367,7 +6879,7 @@
             "updated_at"
           ],
           "delivery_id": "claude-tools-5",
-          "revision": 39,
+          "revision": 42,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6387,7 +6899,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 39,
+        "revision": 42,
         "sink_name": "hub"
       },
       {
@@ -6400,7 +6912,7 @@
             "updated_at"
           ],
           "delivery_id": "claude-tools-5",
-          "revision": 39,
+          "revision": 42,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6420,7 +6932,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 39,
+        "revision": 42,
         "sink_name": "observer"
       },
       {
@@ -6433,7 +6945,7 @@
             "updated_at"
           ],
           "delivery_id": "claude-tools-6",
-          "revision": 40,
+          "revision": 43,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6449,7 +6961,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 40,
+        "revision": 43,
         "sink_name": "hub"
       },
       {
@@ -6462,7 +6974,7 @@
             "updated_at"
           ],
           "delivery_id": "claude-tools-6",
-          "revision": 40,
+          "revision": 43,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6478,12 +6990,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 40,
+        "revision": 43,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000006:41",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000006:44",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6496,10 +7008,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000006:41",
-          "revision": 41,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000006:44",
+          "revision": 44,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6512,12 +7025,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 41,
+        "revision": 44,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000006:41",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000006:44",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6530,10 +7043,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000006:41",
-          "revision": 41,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000006:44",
+          "revision": 44,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6546,7 +7060,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 41,
+        "revision": 44,
         "sink_name": "observer"
       },
       {
@@ -6559,7 +7073,7 @@
             "metadata"
           ],
           "delivery_id": "codex-clear-0",
-          "revision": 43,
+          "revision": 46,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6580,7 +7094,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 43,
+        "revision": 46,
         "sink_name": "hub"
       },
       {
@@ -6593,7 +7107,7 @@
             "metadata"
           ],
           "delivery_id": "codex-clear-0",
-          "revision": 43,
+          "revision": 46,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6614,12 +7128,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 43,
+        "revision": 46,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000007:44",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000007:47",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6632,10 +7146,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000007:44",
-          "revision": 44,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000007:47",
+          "revision": 47,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6648,12 +7163,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 44,
+        "revision": 47,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000007:44",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000007:47",
         "payload": {
           "changed": [
             "invocation_id",
@@ -6666,10 +7181,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000007:44",
-          "revision": 44,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000007:47",
+          "revision": 47,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6682,7 +7198,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 44,
+        "revision": 47,
         "sink_name": "observer"
       },
       {
@@ -6694,7 +7210,7 @@
             "session"
           ],
           "delivery_id": "codex-events-0",
-          "revision": 46,
+          "revision": 49,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6710,7 +7226,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 46,
+        "revision": 49,
         "sink_name": "hub"
       },
       {
@@ -6722,7 +7238,7 @@
             "session"
           ],
           "delivery_id": "codex-events-0",
-          "revision": 46,
+          "revision": 49,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -6738,7 +7254,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 46,
+        "revision": 49,
         "sink_name": "observer"
       },
       {
@@ -6751,142 +7267,6 @@
             "metadata"
           ],
           "delivery_id": "codex-events-1",
-          "revision": 47,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000007",
-            "metadata": {
-              "current_turn_id": "t"
-            },
-            "provider": "codex",
-            "session": {
-              "id": "s"
-            },
-            "status": "running",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 47,
-        "sink_name": "hub"
-      },
-      {
-        "attempts": 0,
-        "event_id": "codex-events-1",
-        "payload": {
-          "changed": [
-            "status",
-            "updated_at",
-            "metadata"
-          ],
-          "delivery_id": "codex-events-1",
-          "revision": 47,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000007",
-            "metadata": {
-              "current_turn_id": "t"
-            },
-            "provider": "codex",
-            "session": {
-              "id": "s"
-            },
-            "status": "running",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 47,
-        "sink_name": "observer"
-      },
-      {
-        "attempts": 0,
-        "event_id": "codex-events-3",
-        "payload": {
-          "changed": [
-            "status",
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "codex-events-3",
-          "revision": 49,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000007",
-            "metadata": {
-              "current_turn_id": "t"
-            },
-            "provider": "codex",
-            "reason": {
-              "kind": "input",
-              "summary": "Input requested"
-            },
-            "session": {
-              "id": "s"
-            },
-            "status": "blocked",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 49,
-        "sink_name": "hub"
-      },
-      {
-        "attempts": 0,
-        "event_id": "codex-events-3",
-        "payload": {
-          "changed": [
-            "status",
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "codex-events-3",
-          "revision": 49,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000007",
-            "metadata": {
-              "current_turn_id": "t"
-            },
-            "provider": "codex",
-            "reason": {
-              "kind": "input",
-              "summary": "Input requested"
-            },
-            "session": {
-              "id": "s"
-            },
-            "status": "blocked",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 49,
-        "sink_name": "observer"
-      },
-      {
-        "attempts": 0,
-        "event_id": "codex-events-4",
-        "payload": {
-          "changed": [
-            "status",
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "codex-events-4",
           "revision": 50,
           "schema_version": 1,
           "source_id": "replay",
@@ -6911,14 +7291,14 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-4",
+        "event_id": "codex-events-1",
         "payload": {
           "changed": [
             "status",
-            "reason",
-            "updated_at"
+            "updated_at",
+            "metadata"
           ],
-          "delivery_id": "codex-events-4",
+          "delivery_id": "codex-events-1",
           "revision": 50,
           "schema_version": 1,
           "source_id": "replay",
@@ -6943,85 +7323,14 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-5",
+        "event_id": "codex-events-3",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "codex-events-5",
-          "revision": 51,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000007",
-            "metadata": {
-              "current_turn_id": "t"
-            },
-            "provider": "codex",
-            "reason": {
-              "kind": "approval",
-              "summary": "bash"
-            },
-            "session": {
-              "id": "s"
-            },
-            "status": "blocked",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 51,
-        "sink_name": "hub"
-      },
-      {
-        "attempts": 0,
-        "event_id": "codex-events-5",
-        "payload": {
-          "changed": [
-            "status",
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "codex-events-5",
-          "revision": 51,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000007",
-            "metadata": {
-              "current_turn_id": "t"
-            },
-            "provider": "codex",
-            "reason": {
-              "kind": "approval",
-              "summary": "bash"
-            },
-            "session": {
-              "id": "s"
-            },
-            "status": "blocked",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 51,
-        "sink_name": "observer"
-      },
-      {
-        "attempts": 0,
-        "event_id": "codex-events-6",
-        "payload": {
-          "changed": [
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "codex-events-6",
+          "delivery_id": "codex-events-3",
           "revision": 52,
           "schema_version": 1,
           "source_id": "replay",
@@ -7050,13 +7359,14 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-6",
+        "event_id": "codex-events-3",
         "payload": {
           "changed": [
+            "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "codex-events-6",
+          "delivery_id": "codex-events-3",
           "revision": 52,
           "schema_version": 1,
           "source_id": "replay",
@@ -7085,14 +7395,14 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-7",
+        "event_id": "codex-events-4",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "codex-events-7",
+          "delivery_id": "codex-events-4",
           "revision": 53,
           "schema_version": 1,
           "source_id": "replay",
@@ -7117,14 +7427,14 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-7",
+        "event_id": "codex-events-4",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "codex-events-7",
+          "delivery_id": "codex-events-4",
           "revision": 53,
           "schema_version": 1,
           "source_id": "replay",
@@ -7149,13 +7459,85 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-9",
+        "event_id": "codex-events-5",
         "payload": {
           "changed": [
             "status",
+            "reason",
             "updated_at"
           ],
-          "delivery_id": "codex-events-9",
+          "delivery_id": "codex-events-5",
+          "revision": 54,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000007",
+            "metadata": {
+              "current_turn_id": "t"
+            },
+            "provider": "codex",
+            "reason": {
+              "kind": "approval",
+              "summary": "bash"
+            },
+            "session": {
+              "id": "s"
+            },
+            "status": "blocked",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 54,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "codex-events-5",
+        "payload": {
+          "changed": [
+            "status",
+            "reason",
+            "updated_at"
+          ],
+          "delivery_id": "codex-events-5",
+          "revision": 54,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000007",
+            "metadata": {
+              "current_turn_id": "t"
+            },
+            "provider": "codex",
+            "reason": {
+              "kind": "approval",
+              "summary": "bash"
+            },
+            "session": {
+              "id": "s"
+            },
+            "status": "blocked",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 54,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "codex-events-6",
+        "payload": {
+          "changed": [
+            "reason",
+            "updated_at"
+          ],
+          "delivery_id": "codex-events-6",
           "revision": 55,
           "schema_version": 1,
           "source_id": "replay",
@@ -7168,10 +7550,14 @@
               "current_turn_id": "t"
             },
             "provider": "codex",
+            "reason": {
+              "kind": "input",
+              "summary": "Input requested"
+            },
             "session": {
               "id": "s"
             },
-            "status": "stopped",
+            "status": "blocked",
             "updated_at": "<wall-clock>"
           }
         },
@@ -7180,13 +7566,13 @@
       },
       {
         "attempts": 0,
-        "event_id": "codex-events-9",
+        "event_id": "codex-events-6",
         "payload": {
           "changed": [
-            "status",
+            "reason",
             "updated_at"
           ],
-          "delivery_id": "codex-events-9",
+          "delivery_id": "codex-events-6",
           "revision": 55,
           "schema_version": 1,
           "source_id": "replay",
@@ -7199,10 +7585,14 @@
               "current_turn_id": "t"
             },
             "provider": "codex",
+            "reason": {
+              "kind": "input",
+              "summary": "Input requested"
+            },
             "session": {
               "id": "s"
             },
-            "status": "stopped",
+            "status": "blocked",
             "updated_at": "<wall-clock>"
           }
         },
@@ -7211,41 +7601,133 @@
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000008:59",
+        "event_id": "codex-events-7",
         "payload": {
           "changed": [
-            "invocation_id",
-            "provider",
             "status",
             "reason",
-            "cwd",
-            "created_at",
-            "updated_at",
-            "session",
-            "metadata",
-            "usage",
-            "repository"
+            "updated_at"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000008:59",
-          "revision": 59,
+          "delivery_id": "codex-events-7",
+          "revision": 56,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
           "view": {
             "created_at": "2000-01-01T00:00:00Z",
             "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000008",
+            "invocation_id": "00000000-0000-4000-8000-000000000007",
+            "metadata": {
+              "current_turn_id": "t"
+            },
             "provider": "codex",
-            "status": "idle",
-            "updated_at": "2000-01-01T00:00:00Z"
+            "session": {
+              "id": "s"
+            },
+            "status": "running",
+            "updated_at": "<wall-clock>"
           }
         },
-        "revision": 59,
+        "revision": 56,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000008:59",
+        "event_id": "codex-events-7",
+        "payload": {
+          "changed": [
+            "status",
+            "reason",
+            "updated_at"
+          ],
+          "delivery_id": "codex-events-7",
+          "revision": 56,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000007",
+            "metadata": {
+              "current_turn_id": "t"
+            },
+            "provider": "codex",
+            "session": {
+              "id": "s"
+            },
+            "status": "running",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 56,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "codex-events-9",
+        "payload": {
+          "changed": [
+            "status",
+            "updated_at"
+          ],
+          "delivery_id": "codex-events-9",
+          "revision": 58,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000007",
+            "metadata": {
+              "current_turn_id": "t"
+            },
+            "provider": "codex",
+            "session": {
+              "id": "s"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 58,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "codex-events-9",
+        "payload": {
+          "changed": [
+            "status",
+            "updated_at"
+          ],
+          "delivery_id": "codex-events-9",
+          "revision": 58,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000007",
+            "metadata": {
+              "current_turn_id": "t"
+            },
+            "provider": "codex",
+            "session": {
+              "id": "s"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 58,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000008:62",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7258,10 +7740,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000008:59",
-          "revision": 59,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000008:62",
+          "revision": 62,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7274,7 +7757,42 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 59,
+        "revision": 62,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000008:62",
+        "payload": {
+          "changed": [
+            "invocation_id",
+            "provider",
+            "status",
+            "reason",
+            "cwd",
+            "created_at",
+            "updated_at",
+            "session",
+            "metadata",
+            "usage",
+            "repository",
+            "children"
+          ],
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000008:62",
+          "revision": 62,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000008",
+            "provider": "codex",
+            "status": "idle",
+            "updated_at": "2000-01-01T00:00:00Z"
+          }
+        },
+        "revision": 62,
         "sink_name": "observer"
       },
       {
@@ -7289,7 +7807,7 @@
             "metadata"
           ],
           "delivery_id": "codex-question-0",
-          "revision": 61,
+          "revision": 64,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7312,7 +7830,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 61,
+        "revision": 64,
         "sink_name": "hub"
       },
       {
@@ -7327,7 +7845,7 @@
             "metadata"
           ],
           "delivery_id": "codex-question-0",
-          "revision": 61,
+          "revision": 64,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7350,12 +7868,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 61,
+        "revision": 64,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000009:62",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000009:65",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7368,10 +7886,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000009:62",
-          "revision": 62,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000009:65",
+          "revision": 65,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7384,12 +7903,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 62,
+        "revision": 65,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000009:62",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000009:65",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7402,10 +7921,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000009:62",
-          "revision": 62,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000009:65",
+          "revision": 65,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7418,12 +7938,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 62,
+        "revision": 65,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:64",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:67",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7436,10 +7956,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:64",
-          "revision": 64,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:67",
+          "revision": 67,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7452,12 +7973,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 64,
+        "revision": 67,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:64",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:67",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7470,10 +7991,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:64",
-          "revision": 64,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:67",
+          "revision": 67,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7486,7 +8008,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 64,
+        "revision": 67,
         "sink_name": "observer"
       },
       {
@@ -7500,7 +8022,7 @@
             "metadata"
           ],
           "delivery_id": "codex-tools-0",
-          "revision": 66,
+          "revision": 69,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7519,7 +8041,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 66,
+        "revision": 69,
         "sink_name": "hub"
       },
       {
@@ -7533,7 +8055,7 @@
             "metadata"
           ],
           "delivery_id": "codex-tools-0",
-          "revision": 66,
+          "revision": 69,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7552,7 +8074,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 66,
+        "revision": 69,
         "sink_name": "observer"
       },
       {
@@ -7565,7 +8087,7 @@
             "updated_at"
           ],
           "delivery_id": "codex-tools-3",
-          "revision": 69,
+          "revision": 72,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7588,7 +8110,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 69,
+        "revision": 72,
         "sink_name": "hub"
       },
       {
@@ -7601,7 +8123,7 @@
             "updated_at"
           ],
           "delivery_id": "codex-tools-3",
-          "revision": 69,
+          "revision": 72,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7624,7 +8146,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 69,
+        "revision": 72,
         "sink_name": "observer"
       },
       {
@@ -7637,7 +8159,7 @@
             "updated_at"
           ],
           "delivery_id": "codex-tools-4",
-          "revision": 70,
+          "revision": 73,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7656,7 +8178,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 70,
+        "revision": 73,
         "sink_name": "hub"
       },
       {
@@ -7669,7 +8191,7 @@
             "updated_at"
           ],
           "delivery_id": "codex-tools-4",
-          "revision": 70,
+          "revision": 73,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7688,19 +8210,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 70,
+        "revision": 73,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:71",
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:74",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:71",
-          "revision": 71,
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:74",
+          "revision": 74,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7719,19 +8241,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 71,
+        "revision": 74,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:71",
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:74",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:71",
-          "revision": 71,
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-00000000000a:74",
+          "revision": 74,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7750,12 +8272,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 71,
+        "revision": 74,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:72",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:75",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7768,10 +8290,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:72",
-          "revision": 72,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:75",
+          "revision": 75,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7784,12 +8307,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 72,
+        "revision": 75,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:72",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:75",
         "payload": {
           "changed": [
             "invocation_id",
@@ -7802,10 +8325,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:72",
-          "revision": 72,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:75",
+          "revision": 75,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7818,7 +8342,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 72,
+        "revision": 75,
         "sink_name": "observer"
       },
       {
@@ -7830,7 +8354,7 @@
             "session"
           ],
           "delivery_id": "pi-events-0",
-          "revision": 74,
+          "revision": 77,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7847,7 +8371,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 74,
+        "revision": 77,
         "sink_name": "hub"
       },
       {
@@ -7859,7 +8383,7 @@
             "session"
           ],
           "delivery_id": "pi-events-0",
-          "revision": 74,
+          "revision": 77,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7876,7 +8400,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 74,
+        "revision": 77,
         "sink_name": "observer"
       },
       {
@@ -7888,7 +8412,7 @@
             "session"
           ],
           "delivery_id": "pi-events-2",
-          "revision": 76,
+          "revision": 79,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7906,7 +8430,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 76,
+        "revision": 79,
         "sink_name": "hub"
       },
       {
@@ -7918,7 +8442,7 @@
             "session"
           ],
           "delivery_id": "pi-events-2",
-          "revision": 76,
+          "revision": 79,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7936,7 +8460,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 76,
+        "revision": 79,
         "sink_name": "observer"
       },
       {
@@ -7948,7 +8472,7 @@
             "metadata"
           ],
           "delivery_id": "pi-events-3",
-          "revision": 77,
+          "revision": 80,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -7969,7 +8493,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 77,
+        "revision": 80,
         "sink_name": "hub"
       },
       {
@@ -7981,7 +8505,7 @@
             "metadata"
           ],
           "delivery_id": "pi-events-3",
-          "revision": 77,
+          "revision": 80,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8002,7 +8526,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 77,
+        "revision": 80,
         "sink_name": "observer"
       },
       {
@@ -8014,7 +8538,7 @@
             "metadata"
           ],
           "delivery_id": "pi-events-4",
-          "revision": 78,
+          "revision": 81,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8036,7 +8560,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 78,
+        "revision": 81,
         "sink_name": "hub"
       },
       {
@@ -8048,7 +8572,7 @@
             "metadata"
           ],
           "delivery_id": "pi-events-4",
-          "revision": 78,
+          "revision": 81,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8070,7 +8594,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 78,
+        "revision": 81,
         "sink_name": "observer"
       },
       {
@@ -8082,7 +8606,7 @@
             "updated_at"
           ],
           "delivery_id": "pi-events-5",
-          "revision": 79,
+          "revision": 82,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8104,7 +8628,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 79,
+        "revision": 82,
         "sink_name": "hub"
       },
       {
@@ -8116,7 +8640,7 @@
             "updated_at"
           ],
           "delivery_id": "pi-events-5",
-          "revision": 79,
+          "revision": 82,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8138,7 +8662,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 79,
+        "revision": 82,
         "sink_name": "observer"
       },
       {
@@ -8152,7 +8676,7 @@
             "usage"
           ],
           "delivery_id": "pi-events-9",
-          "revision": 83,
+          "revision": 86,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8184,7 +8708,7 @@
             }
           }
         },
-        "revision": 83,
+        "revision": 86,
         "sink_name": "hub"
       },
       {
@@ -8198,7 +8722,7 @@
             "usage"
           ],
           "delivery_id": "pi-events-9",
-          "revision": 83,
+          "revision": 86,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8230,12 +8754,12 @@
             }
           }
         },
-        "revision": 83,
+        "revision": 86,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:86",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:89",
         "payload": {
           "changed": [
             "invocation_id",
@@ -8248,10 +8772,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:86",
-          "revision": 86,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:89",
+          "revision": 89,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8264,12 +8789,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 86,
+        "revision": 89,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:86",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:89",
         "payload": {
           "changed": [
             "invocation_id",
@@ -8282,10 +8807,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:86",
-          "revision": 86,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:89",
+          "revision": 89,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8298,7 +8824,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 86,
+        "revision": 89,
         "sink_name": "observer"
       },
       {
@@ -8314,7 +8840,7 @@
             "usage"
           ],
           "delivery_id": "pi-settled-0",
-          "revision": 88,
+          "revision": 91,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8345,7 +8871,7 @@
             }
           }
         },
-        "revision": 88,
+        "revision": 91,
         "sink_name": "hub"
       },
       {
@@ -8361,7 +8887,7 @@
             "usage"
           ],
           "delivery_id": "pi-settled-0",
-          "revision": 88,
+          "revision": 91,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8392,12 +8918,12 @@
             }
           }
         },
-        "revision": 88,
+        "revision": 91,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:89",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:92",
         "payload": {
           "changed": [
             "invocation_id",
@@ -8410,10 +8936,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:89",
-          "revision": 89,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:92",
+          "revision": 92,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8426,12 +8953,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 89,
+        "revision": 92,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:89",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:92",
         "payload": {
           "changed": [
             "invocation_id",
@@ -8444,10 +8971,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:89",
-          "revision": 89,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:92",
+          "revision": 92,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8460,7 +8988,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 89,
+        "revision": 92,
         "sink_name": "observer"
       },
       {
@@ -8472,7 +9000,7 @@
             "session"
           ],
           "delivery_id": "qwen-events-0",
-          "revision": 91,
+          "revision": 94,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8488,7 +9016,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 91,
+        "revision": 94,
         "sink_name": "hub"
       },
       {
@@ -8500,7 +9028,7 @@
             "session"
           ],
           "delivery_id": "qwen-events-0",
-          "revision": 91,
+          "revision": 94,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8516,7 +9044,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 91,
+        "revision": 94,
         "sink_name": "observer"
       },
       {
@@ -8528,7 +9056,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-1",
-          "revision": 92,
+          "revision": 95,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8544,7 +9072,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 92,
+        "revision": 95,
         "sink_name": "hub"
       },
       {
@@ -8556,7 +9084,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-1",
-          "revision": 92,
+          "revision": 95,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8572,7 +9100,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 92,
+        "revision": 95,
         "sink_name": "observer"
       },
       {
@@ -8585,7 +9113,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-6",
-          "revision": 97,
+          "revision": 100,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8605,7 +9133,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 97,
+        "revision": 100,
         "sink_name": "hub"
       },
       {
@@ -8618,7 +9146,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-6",
-          "revision": 97,
+          "revision": 100,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8638,7 +9166,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 97,
+        "revision": 100,
         "sink_name": "observer"
       },
       {
@@ -8650,7 +9178,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-8",
-          "revision": 99,
+          "revision": 102,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8670,7 +9198,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 99,
+        "revision": 102,
         "sink_name": "hub"
       },
       {
@@ -8682,7 +9210,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-8",
-          "revision": 99,
+          "revision": 102,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8702,7 +9230,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 99,
+        "revision": 102,
         "sink_name": "observer"
       },
       {
@@ -8714,7 +9242,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-9",
-          "revision": 100,
+          "revision": 103,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8730,7 +9258,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 100,
+        "revision": 103,
         "sink_name": "hub"
       },
       {
@@ -8742,7 +9270,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-9",
-          "revision": 100,
+          "revision": 103,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8758,7 +9286,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 100,
+        "revision": 103,
         "sink_name": "observer"
       },
       {
@@ -8770,7 +9298,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-10",
-          "revision": 101,
+          "revision": 104,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8790,7 +9318,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 101,
+        "revision": 104,
         "sink_name": "hub"
       },
       {
@@ -8802,7 +9330,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-10",
-          "revision": 101,
+          "revision": 104,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8822,7 +9350,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 101,
+        "revision": 104,
         "sink_name": "observer"
       },
       {
@@ -8835,7 +9363,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-12",
-          "revision": 103,
+          "revision": 106,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8851,7 +9379,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 103,
+        "revision": 106,
         "sink_name": "hub"
       },
       {
@@ -8864,7 +9392,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-12",
-          "revision": 103,
+          "revision": 106,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8880,7 +9408,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 103,
+        "revision": 106,
         "sink_name": "observer"
       },
       {
@@ -8892,7 +9420,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-13",
-          "revision": 104,
+          "revision": 107,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8908,7 +9436,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 104,
+        "revision": 107,
         "sink_name": "hub"
       },
       {
@@ -8920,7 +9448,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-events-13",
-          "revision": 104,
+          "revision": 107,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8936,12 +9464,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 104,
+        "revision": 107,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:109",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:112",
         "payload": {
           "changed": [
             "invocation_id",
@@ -8954,10 +9482,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:109",
-          "revision": 109,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:112",
+          "revision": 112,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -8970,12 +9499,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 109,
+        "revision": 112,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:109",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:112",
         "payload": {
           "changed": [
             "invocation_id",
@@ -8988,10 +9517,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:109",
-          "revision": 109,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:112",
+          "revision": 112,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9004,7 +9534,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 109,
+        "revision": 112,
         "sink_name": "observer"
       },
       {
@@ -9019,7 +9549,7 @@
             "metadata"
           ],
           "delivery_id": "qwen-question-0",
-          "revision": 111,
+          "revision": 114,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9042,7 +9572,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 111,
+        "revision": 114,
         "sink_name": "hub"
       },
       {
@@ -9057,7 +9587,7 @@
             "metadata"
           ],
           "delivery_id": "qwen-question-0",
-          "revision": 111,
+          "revision": 114,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9080,12 +9610,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 111,
+        "revision": 114,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:112",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:115",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9098,10 +9628,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:112",
-          "revision": 112,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:115",
+          "revision": 115,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9114,12 +9645,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 112,
+        "revision": 115,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:112",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:115",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9132,10 +9663,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:112",
-          "revision": 112,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:115",
+          "revision": 115,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9148,7 +9680,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 112,
+        "revision": 115,
         "sink_name": "observer"
       },
       {
@@ -9162,7 +9694,7 @@
             "usage"
           ],
           "delivery_id": "qwen-stop-0",
-          "revision": 114,
+          "revision": 117,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9184,7 +9716,7 @@
             }
           }
         },
-        "revision": 114,
+        "revision": 117,
         "sink_name": "hub"
       },
       {
@@ -9198,7 +9730,7 @@
             "usage"
           ],
           "delivery_id": "qwen-stop-0",
-          "revision": 114,
+          "revision": 117,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9220,12 +9752,12 @@
             }
           }
         },
-        "revision": 114,
+        "revision": 117,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000010:115",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000010:118",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9238,10 +9770,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000010:115",
-          "revision": 115,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000010:118",
+          "revision": 118,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9254,12 +9787,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 115,
+        "revision": 118,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000010:115",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000010:118",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9272,10 +9805,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000010:115",
-          "revision": 115,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000010:118",
+          "revision": 118,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9288,19 +9822,19 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 115,
+        "revision": 118,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:117",
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:120",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:117",
-          "revision": 117,
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:120",
+          "revision": 120,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9313,19 +9847,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 117,
+        "revision": 120,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:117",
+        "event_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:120",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:117",
-          "revision": 117,
+          "delivery_id": "synthetic:lifecycle_exit:00000000-0000-4000-8000-000000000010:120",
+          "revision": 120,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9338,12 +9872,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 117,
+        "revision": 120,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000011:118",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000011:121",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9356,10 +9890,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000011:118",
-          "revision": 118,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000011:121",
+          "revision": 121,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9372,12 +9907,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 118,
+        "revision": 121,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000011:118",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000011:121",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9390,10 +9925,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000011:118",
-          "revision": 118,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000011:121",
+          "revision": 121,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9406,7 +9942,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 118,
+        "revision": 121,
         "sink_name": "observer"
       },
       {
@@ -9419,7 +9955,7 @@
             "session"
           ],
           "delivery_id": "qwen-tools-0",
-          "revision": 120,
+          "revision": 123,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9435,7 +9971,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 120,
+        "revision": 123,
         "sink_name": "hub"
       },
       {
@@ -9448,7 +9984,7 @@
             "session"
           ],
           "delivery_id": "qwen-tools-0",
-          "revision": 120,
+          "revision": 123,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9464,7 +10000,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 120,
+        "revision": 123,
         "sink_name": "observer"
       },
       {
@@ -9477,7 +10013,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-tools-4",
-          "revision": 124,
+          "revision": 127,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9497,7 +10033,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 124,
+        "revision": 127,
         "sink_name": "hub"
       },
       {
@@ -9510,7 +10046,7 @@
             "updated_at"
           ],
           "delivery_id": "qwen-tools-4",
-          "revision": 124,
+          "revision": 127,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9530,7 +10066,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 124,
+        "revision": 127,
         "sink_name": "observer"
       },
       {
@@ -9544,7 +10080,7 @@
             "session"
           ],
           "delivery_id": "qwen-tools-5",
-          "revision": 125,
+          "revision": 128,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9561,7 +10097,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 125,
+        "revision": 128,
         "sink_name": "hub"
       },
       {
@@ -9575,7 +10111,7 @@
             "session"
           ],
           "delivery_id": "qwen-tools-5",
-          "revision": 125,
+          "revision": 128,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9592,12 +10128,12 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 125,
+        "revision": 128,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000012:126",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000012:129",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9610,10 +10146,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000012:126",
-          "revision": 126,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000012:129",
+          "revision": 129,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9626,12 +10163,12 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 126,
+        "revision": 129,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000012:126",
+        "event_id": "synthetic:register:00000000-0000-4000-8000-000000000012:129",
         "payload": {
           "changed": [
             "invocation_id",
@@ -9644,10 +10181,11 @@
             "session",
             "metadata",
             "usage",
-            "repository"
+            "repository",
+            "children"
           ],
-          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000012:126",
-          "revision": 126,
+          "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000012:129",
+          "revision": 129,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9660,7 +10198,7 @@
             "updated_at": "2000-01-01T00:00:00Z"
           }
         },
-        "revision": 126,
+        "revision": 129,
         "sink_name": "observer"
       },
       {
@@ -9673,7 +10211,7 @@
             "session"
           ],
           "delivery_id": "stale-working",
-          "revision": 128,
+          "revision": 131,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9689,7 +10227,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 128,
+        "revision": 131,
         "sink_name": "hub"
       },
       {
@@ -9702,7 +10240,7 @@
             "session"
           ],
           "delivery_id": "stale-working",
-          "revision": 128,
+          "revision": 131,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9718,19 +10256,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 128,
+        "revision": 131,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:130",
+        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:133",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:130",
-          "revision": 130,
+          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:133",
+          "revision": 133,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9746,19 +10284,19 @@
             "updated_at": "2000-01-01T00:40:00Z"
           }
         },
-        "revision": 130,
+        "revision": 133,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:130",
+        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:133",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:130",
-          "revision": 130,
+          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000005:133",
+          "revision": 133,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9774,19 +10312,19 @@
             "updated_at": "2000-01-01T00:40:00Z"
           }
         },
-        "revision": 130,
+        "revision": 133,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:131",
+        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:134",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:131",
-          "revision": 131,
+          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:134",
+          "revision": 134,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9802,19 +10340,19 @@
             "updated_at": "2000-01-01T00:40:00Z"
           }
         },
-        "revision": 131,
+        "revision": 134,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:131",
+        "event_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:134",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:131",
-          "revision": 131,
+          "delivery_id": "synthetic:stale_working:00000000-0000-4000-8000-000000000012:134",
+          "revision": 134,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9830,134 +10368,134 @@
             "updated_at": "2000-01-01T00:40:00Z"
           }
         },
-        "revision": 131,
-        "sink_name": "observer"
-      },
-      {
-        "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:132",
-        "payload": {
-          "changed": [
-            "status",
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:132",
-          "revision": 132,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000002",
-            "provider": "claude",
-            "session": {
-              "id": "session-fixture"
-            },
-            "status": "stopped",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 132,
-        "sink_name": "hub"
-      },
-      {
-        "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:132",
-        "payload": {
-          "changed": [
-            "status",
-            "reason",
-            "updated_at"
-          ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:132",
-          "revision": 132,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000002",
-            "provider": "claude",
-            "session": {
-              "id": "session-fixture"
-            },
-            "status": "stopped",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 132,
-        "sink_name": "observer"
-      },
-      {
-        "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:134",
-        "payload": {
-          "changed": [
-            "status",
-            "updated_at"
-          ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:134",
-          "revision": 134,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000005",
-            "provider": "claude",
-            "session": {
-              "id": "s"
-            },
-            "status": "stopped",
-            "updated_at": "<wall-clock>"
-          }
-        },
-        "revision": 134,
-        "sink_name": "hub"
-      },
-      {
-        "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:134",
-        "payload": {
-          "changed": [
-            "status",
-            "updated_at"
-          ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:134",
-          "revision": 134,
-          "schema_version": 1,
-          "source_id": "replay",
-          "type": "update",
-          "view": {
-            "created_at": "2000-01-01T00:00:00Z",
-            "cwd": "/work/project",
-            "invocation_id": "00000000-0000-4000-8000-000000000005",
-            "provider": "claude",
-            "session": {
-              "id": "s"
-            },
-            "status": "stopped",
-            "updated_at": "<wall-clock>"
-          }
-        },
         "revision": 134,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:135",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:135",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:135",
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:135",
           "revision": 135,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000002",
+            "provider": "claude",
+            "session": {
+              "id": "session-fixture"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 135,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:135",
+        "payload": {
+          "changed": [
+            "status",
+            "reason",
+            "updated_at"
+          ],
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000002:135",
+          "revision": 135,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000002",
+            "provider": "claude",
+            "session": {
+              "id": "session-fixture"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 135,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:137",
+        "payload": {
+          "changed": [
+            "status",
+            "updated_at"
+          ],
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:137",
+          "revision": 137,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000005",
+            "provider": "claude",
+            "session": {
+              "id": "s"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 137,
+        "sink_name": "hub"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:137",
+        "payload": {
+          "changed": [
+            "status",
+            "updated_at"
+          ],
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000005:137",
+          "revision": 137,
+          "schema_version": 1,
+          "source_id": "replay",
+          "type": "update",
+          "view": {
+            "created_at": "2000-01-01T00:00:00Z",
+            "cwd": "/work/project",
+            "invocation_id": "00000000-0000-4000-8000-000000000005",
+            "provider": "claude",
+            "session": {
+              "id": "s"
+            },
+            "status": "stopped",
+            "updated_at": "<wall-clock>"
+          }
+        },
+        "revision": 137,
+        "sink_name": "observer"
+      },
+      {
+        "attempts": 0,
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:138",
+        "payload": {
+          "changed": [
+            "status",
+            "reason",
+            "updated_at"
+          ],
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:138",
+          "revision": 138,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -9976,20 +10514,20 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 135,
+        "revision": 138,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:135",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:138",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:135",
-          "revision": 135,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000008:138",
+          "revision": 138,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10008,20 +10546,20 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 135,
+        "revision": 138,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:137",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:140",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:137",
-          "revision": 137,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:140",
+          "revision": 140,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10040,20 +10578,20 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 137,
+        "revision": 140,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:137",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:140",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:137",
-          "revision": 137,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-00000000000e:140",
+          "revision": 140,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10072,19 +10610,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 137,
+        "revision": 140,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:138",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:141",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:138",
-          "revision": 138,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:141",
+          "revision": 141,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10101,19 +10639,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 138,
+        "revision": 141,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:138",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:141",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:138",
-          "revision": 138,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000011:141",
+          "revision": 141,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10130,20 +10668,20 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 138,
+        "revision": 141,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:139",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:142",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:139",
-          "revision": 139,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:142",
+          "revision": 142,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10164,20 +10702,20 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 139,
+        "revision": 142,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:139",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:142",
         "payload": {
           "changed": [
             "status",
             "reason",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:139",
-          "revision": 139,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000003:142",
+          "revision": 142,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10198,19 +10736,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 139,
+        "revision": 142,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:140",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:143",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:140",
-          "revision": 140,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:143",
+          "revision": 143,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10231,19 +10769,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 140,
+        "revision": 143,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:140",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:143",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:140",
-          "revision": 140,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000006:143",
+          "revision": 143,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10264,19 +10802,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 140,
+        "revision": 143,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:141",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:144",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:141",
-          "revision": 141,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:144",
+          "revision": 144,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10289,19 +10827,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 141,
+        "revision": 144,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:141",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:144",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:141",
-          "revision": 141,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000009:144",
+          "revision": 144,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10314,19 +10852,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 141,
+        "revision": 144,
         "sink_name": "observer"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:144",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:147",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:144",
-          "revision": 144,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:147",
+          "revision": 147,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10342,19 +10880,19 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 144,
+        "revision": 147,
         "sink_name": "hub"
       },
       {
         "attempts": 0,
-        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:144",
+        "event_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:147",
         "payload": {
           "changed": [
             "status",
             "updated_at"
           ],
-          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:144",
-          "revision": 144,
+          "delivery_id": "synthetic:reconcile_lost:00000000-0000-4000-8000-000000000012:147",
+          "revision": 147,
           "schema_version": 1,
           "source_id": "replay",
           "type": "update",
@@ -10370,7 +10908,7 @@
             "updated_at": "<wall-clock>"
           }
         },
-        "revision": 144,
+        "revision": 147,
         "sink_name": "observer"
       }
     ]

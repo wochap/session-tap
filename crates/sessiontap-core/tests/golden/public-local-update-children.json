@@ -1,0 +1,43 @@
+{
+  "type": "update",
+  "schema_version": 1,
+  "revision": 10,
+  "delivery_id": "delivery-10",
+  "changed": ["children"],
+  "view": {
+    "invocation_id": "00000000-0000-4000-8000-000000000001",
+    "provider": "company-claude",
+    "status": "stopped",
+    "reason": { "kind": "completed", "summary": "All tests pass" },
+    "cwd": "/work/project",
+    "created_at": "2026-08-28T12:00:00Z",
+    "updated_at": "2026-08-28T12:02:00Z",
+    "repository": { "root": "/work/project", "branch": "main", "head": null, "dirty": false },
+    "children": [
+      {
+        "agent_id": "agent-a",
+        "agent_type": "Explore",
+        "status": "blocked",
+        "reason": { "kind": "approval", "summary": "shell" },
+        "started_at": "2026-08-28T12:00:10Z",
+        "updated_at": "2026-08-28T12:02:00Z"
+      },
+      {
+        "agent_id": "agent-b",
+        "agent_type": "general-purpose",
+        "status": "running",
+        "reason": { "summary": "read_file" },
+        "started_at": "2026-08-28T12:00:10Z",
+        "updated_at": "2026-08-28T12:01:30Z"
+      },
+      {
+        "agent_id": "agent-c",
+        "agent_type": "reviewer",
+        "status": "stopped",
+        "reason": { "kind": "completed" },
+        "started_at": "2026-08-28T12:00:20Z",
+        "updated_at": "2026-08-28T12:01:50Z"
+      }
+    ]
+  }
+}

@@ -12,7 +12,20 @@ TARGET_PROVIDER: AUTO
 IMPLEMENT_CHANGES: YES
 ALLOW_PUBLIC_SCHEMA_CHANGE: NO
 ALLOW_NEW_DEPENDENCIES: NO
+SUBAGENT_POLICY: AUTO
 ```
+
+`SUBAGENT_POLICY` selects how subagent payloads are treated:
+
+- `IGNORE`: reject subagent payloads before normalization, as the built-in
+  adapters historically did;
+- `RECORD_LINKED`: normalize subagent payloads as their own invocation or
+  session-like objects that carry a link to their parent, so a consumer can
+  tell that an object is a subagent and find which agent spawned it;
+- `AUTO`: inspect `crates/sessiontap-core/src/domain.rs`, the OpenSpec specs,
+  and the provider docs; use `RECORD_LINKED` if the domain model already has a
+  parent-link field for subagents, otherwise use `IGNORE` and report what the
+  `RECORD_LINKED` path would require.
 
 ## Prompt
 
@@ -76,7 +89,8 @@ Evaluate at least these discrepancy classes:
 - confusion between turn completion, provider-session end, and process exit;
 - missing interrupt/failure/idle handling;
 - unsafe handling of delayed, duplicate, or out-of-order events;
-- wrong root-agent/subagent filtering or parent/child correlation;
+- wrong root-agent/subagent detection, filtering, or parent/child correlation
+  (see the subagent rules below);
 - missing or invalid session, turn, event, model, effort, permission, usage, or
   context fields;
 - field aliases, optional/null behavior, malformed values, and bounds;
@@ -103,6 +117,39 @@ Apply these decision rules:
    safe work.
 7. Do not add dependencies when `ALLOW_NEW_DEPENDENCIES` is `NO`.
 
+Subagent handling deserves its own gap-matrix rows. Read the report's
+`Subagent identity and parent correlation` section, and its decision procedure
+for classifying a payload as `root` or `subagent`, before touching any
+filtering code. Then:
+
+- confirm how the current adapter detects a subagent payload, and compare that
+  with the report's identity fields; a stale or over-broad check (for example
+  treating `agent_type` alone as a subagent marker) is a discrepancy;
+- record which report field or fields resolve the parent (immediate parent
+  versus root), and whether they are `documented`, `observed`, `inferred`, or
+  `unknown`;
+- check whether SessionTap's domain model already has a field that links a
+  child object to its parent (a parent invocation, parent session, or similar);
+  use the existing field name if one exists, and never invent a second one;
+- when `SUBAGENT_POLICY` resolves to `RECORD_LINKED`, normalize subagent
+  payloads into their own object with the parent link populated from the
+  report's parent field, keep the subagent's identity and parent identity as
+  bounded sanitized values, and keep root state unaffected by subagent events
+  unless the specs say otherwise. A subagent whose parent cannot be resolved
+  from `documented` or acceptable `observed` evidence must not receive a
+  guessed parent; keep the link absent and report the gap;
+- when `SUBAGENT_POLICY` resolves to `IGNORE`, keep rejecting subagent
+  payloads, but make sure the rejection uses the report's actual identity
+  fields and does not drop root payloads that only carry an agent type or name;
+- treat adding or changing a public parent-link field as a public-schema change
+  governed by `ALLOW_PUBLIC_SCHEMA_CHANGE`; adapter-internal detection and
+  tests can still proceed when that flag is `NO`, with the public projection
+  left as a reported decision;
+- add fixtures for a root payload, a subagent-start payload, a subagent
+  payload with a resolvable parent, a subagent payload without a parent link,
+  and a root payload with an agent type but no subagent identity, and assert
+  the detection, parent resolution, and root-isolation behavior for each.
+
 Maintain SessionTap's privacy boundary. Raw hooks are transient. Do not retain
 or publish complete prompts, assistant messages, transcripts, transcript paths,
 arbitrary tool inputs, credentials, account data, process/control identities,
@@ -118,7 +165,10 @@ Be conservative with lifecycle meaning:
 - provider-session end is not automatically wrapper invocation end;
 - an approval request and a user question are different waiting states;
 - subagent events must not regress or block root-agent state unless SessionTap
-  explicitly models that behavior;
+  explicitly models that behavior, even when subagents are recorded as their
+  own linked objects;
+- a subagent's start, stop, or failure is not a root turn boundary, and a root
+  turn completing does not by itself end a still-running subagent;
 - delayed work must not resurrect a terminal turn without reliable new-turn
   evidence;
 - an event that only enriches metadata must not manufacture activity;
@@ -158,6 +208,9 @@ Finish with a concise implementation report containing:
 - provider and report version/revision;
 - files changed;
 - mappings or behaviors fixed;
+- the resolved `SUBAGENT_POLICY`, how subagent payloads are detected, which
+  field resolves the parent, and whether the link is populated, absent, or
+  blocked;
 - tests and validation run with outcomes;
 - every report change classified as implemented, already supported,
   intentionally ignored, deferred, or provenance/evidence blocked;

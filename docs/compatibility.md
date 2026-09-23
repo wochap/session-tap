@@ -2,11 +2,11 @@
 
 | Provider | Minimum tested | Hooks | Usage | Notes |
 | --- | --- | --- | --- | --- |
-| Claude Code | 2.1.241 | Yes | Transcript totals + latest verified context tokens | Context percentage is absent without a verified denominator |
+| Claude Code | 2.1.241 | Yes | Transcript totals + latest verified context tokens | Context percentage is absent without a verified denominator; subagents are reported as `children` |
 | Codex CLI | 0.149.1 | Yes, after `/hooks` trust | Latest cumulative rollout snapshot | Nullable locators are harmless |
 | Qwen Code | Not yet established | Contract implemented | Summed assistant usage + latest context | Telemetry is ignored |
 
-Usage, context, provider metadata, repository, provider-session, and tmux fields are optional.
+Usage, context, provider metadata, repository, provider-session, children, and tmux fields are optional.
 Absence means unavailable, not zero. This matrix makes no compatibility promise
 beyond tested contracts.
 
@@ -30,6 +30,17 @@ validation, parser, cursor, and accounting: Claude deduplicates response
 identities, Codex selects the latest cumulative snapshot, and Qwen sums
 assistant records. Collection is trailing-edge debounced per provider-qualified
 agent session; equal raw IDs from different providers remain isolated.
+
+The `children` field is additive: it is absent when no child agent is
+retained, so views without children serialize exactly as before and the wire
+schema stays at version 1. Only Claude reports children; Codex and Qwen
+payloads that carry a child-agent identity are still ignored, and the Pi
+extension forwards root-session events only. Children are
+current-turn state and clear on the next prompt, a new provider session, or
+process exit; a subagent killed without `SubagentStop` stays `running` until
+then. Claude installations must re-run `sessiontap setup claude` to install
+the `SubagentStart` and `SubagentStop` hooks.
+
 A public lifecycle field and remote control remain deferred. Internal
 lifecycle, activity, normalized event kinds, process identities, and
 multiplexer state remain reducer/control-only data.

@@ -78,6 +78,9 @@ impl HookDialect for CodexDialect {
         ProviderId::Codex
     }
     fn classify(&self, raw: &Value) -> Option<EventKind> {
+        if is_subagent_payload(raw) {
+            return None;
+        }
         classify(raw)
     }
     fn start_reason(&self, raw: &Value) -> Option<String> {
@@ -340,6 +343,14 @@ fn scan_index(
         bail!("Codex session index changed identity during collection");
     }
     Ok(latest)
+}
+
+/// Codex does not track child agents, so a payload carrying a child-agent
+/// identity is ignored before any root interpretation.
+fn is_subagent_payload(raw: &Value) -> bool {
+    raw.get("agent_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
 }
 
 fn classify(raw: &Value) -> Option<EventKind> {

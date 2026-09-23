@@ -212,6 +212,28 @@ pub struct PublicStatusReason {
     pub summary: String,
 }
 
+/// Observer-facing reason for one child agent. A running child may carry a
+/// summary without a kind; a stopped child may carry a kind without a summary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicChildAgentReason {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<PublicReasonKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+/// Bounded observer-facing view of one child agent of the root invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicChildAgentView {
+    pub agent_id: String,
+    pub agent_type: String,
+    pub status: PublicStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<PublicChildAgentReason>,
+    pub started_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicProviderSession {
     pub id: String,
@@ -242,6 +264,8 @@ pub struct PublicAgentView {
     pub usage: Option<Usage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<Repository>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<PublicChildAgentView>>,
 }
 
 /// Typed public field paths, ordered by declaration for deterministic JSON.
@@ -259,6 +283,7 @@ pub enum PublicField {
     Metadata,
     Usage,
     Repository,
+    Children,
 }
 
 impl PublicField {
@@ -277,6 +302,7 @@ impl PublicField {
             Self::Metadata => "metadata",
             Self::Usage => "usage",
             Self::Repository => "repository",
+            Self::Children => "children",
         }
     }
 }
@@ -333,7 +359,32 @@ pub fn project_public(
         metadata: snapshot.provider_metadata.clone(),
         usage: snapshot.usage.clone(),
         repository: snapshot.repository.clone(),
+        children: project_children(&snapshot.children),
     }
+}
+
+/// Children sorted by start time then agent ID; `None` when none are retained.
+fn project_children(children: &[ChildAgentState]) -> Option<Vec<PublicChildAgentView>> {
+    if children.is_empty() {
+        return None;
+    }
+    let mut views = children
+        .iter()
+        .map(|child| PublicChildAgentView {
+            agent_id: child.agent_id.clone(),
+            agent_type: child.agent_type.clone(),
+            status: child.activity.public_status(),
+            reason: child.reason.clone(),
+            started_at: child.started_at,
+            updated_at: child.updated_at,
+        })
+        .collect::<Vec<_>>();
+    views.sort_by(|a, b| {
+        a.started_at
+            .cmp(&b.started_at)
+            .then_with(|| a.agent_id.cmp(&b.agent_id))
+    });
+    Some(views)
 }
 
 #[must_use]
@@ -354,6 +405,7 @@ pub fn changed_public_fields(
             PublicField::Metadata,
             PublicField::Usage,
             PublicField::Repository,
+            PublicField::Children,
         ]);
     };
     let mut changed = BTreeSet::new();
@@ -375,6 +427,7 @@ pub fn changed_public_fields(
     field!(metadata, Metadata);
     field!(usage, Usage);
     field!(repository, Repository);
+    field!(children, Children);
     changed
 }
 
@@ -486,6 +539,49 @@ pub struct Capabilities {
     pub usage: bool,
 }
 
+pub const CHILD_AGENTS_MAX: usize = 32;
+pub const CHILD_AGENT_ID_MAX_CHARS: usize = TOOL_CORRELATION_ID_MAX_CHARS;
+pub const CHILD_AGENT_TYPE_MAX_CHARS: usize = TOOL_LABEL_MAX_CHARS;
+
+/// Provider-owned identity of the child agent a payload belongs to. Both
+/// values are sanitized and bounded by the adapter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildAgentRef {
+    pub agent_id: String,
+    pub agent_type: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildActivity {
+    Running,
+    Blocked,
+    Stopped,
+}
+
+impl ChildActivity {
+    #[must_use]
+    pub const fn public_status(self) -> PublicStatus {
+        match self {
+            Self::Running => PublicStatus::Running,
+            Self::Blocked => PublicStatus::Blocked,
+            Self::Stopped => PublicStatus::Stopped,
+        }
+    }
+}
+
+/// Retained state of one child agent within the current root turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildAgentState {
+    pub agent_id: String,
+    pub agent_type: String,
+    pub activity: ChildActivity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<PublicChildAgentReason>,
+    pub started_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InvocationSnapshot {
     pub schema_version: u32,
@@ -514,6 +610,8 @@ pub struct InvocationSnapshot {
     pub repository: Option<Repository>,
     pub multiplexer: Option<MultiplexerMetadata>,
     pub capabilities: Capabilities,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ChildAgentState>,
     #[serde(skip)]
     pub turn_generation: u64,
     #[serde(skip)]
@@ -622,6 +720,9 @@ pub struct NormalizedEvent {
     pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_activity: Option<ToolActivityUpdate>,
+    /// Present when the event belongs to a child agent rather than the root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_agent: Option<ChildAgentRef>,
 }
 
 #[cfg(test)]
@@ -666,6 +767,7 @@ mod tests {
             PublicField::Metadata,
             PublicField::Usage,
             PublicField::Repository,
+            PublicField::Children,
         ] {
             assert_eq!(field.as_str(), serde_name(field));
         }
@@ -691,6 +793,69 @@ mod tests {
         );
         let unknown = raw.replace("\"backend\": \"tmux\"", "\"backend\": \"kitty\"");
         assert!(serde_json::from_str::<InvocationSnapshot>(&unknown).is_err());
+    }
+
+    #[test]
+    fn snapshot_without_children_keeps_its_serialized_keys() {
+        let raw = include_str!("../tests/golden/pre-enum-tmux-snapshot.json");
+        let snapshot: InvocationSnapshot = serde_json::from_str(raw).unwrap();
+        assert!(snapshot.children.is_empty());
+        let value = serde_json::to_value(&snapshot).unwrap();
+        let keys: Vec<String> =
+            serde_json::from_str(include_str!("../tests/golden/snapshot-keys.json")).unwrap();
+        for key in keys {
+            assert!(value.get(&key).is_some(), "{key}");
+        }
+        assert!(value.get("children").is_none());
+        let view = serde_json::to_value(project_public(&snapshot, None)).unwrap();
+        assert!(view.get("children").is_none());
+    }
+
+    #[test]
+    fn child_agent_types_round_trip() {
+        let now = Utc::now();
+        let reference = ChildAgentRef {
+            agent_id: "agent-1".into(),
+            agent_type: "Explore".into(),
+        };
+        let state = ChildAgentState {
+            agent_id: "agent-1".into(),
+            agent_type: "Explore".into(),
+            activity: ChildActivity::Blocked,
+            reason: Some(PublicChildAgentReason {
+                kind: Some(PublicReasonKind::Approval),
+                summary: Some("bash".into()),
+            }),
+            started_at: now,
+            updated_at: now,
+        };
+        let view = PublicChildAgentView {
+            agent_id: "agent-1".into(),
+            agent_type: "Explore".into(),
+            status: PublicStatus::Running,
+            reason: None,
+            started_at: now,
+            updated_at: now,
+        };
+        fn round_trip<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
+            value: &T,
+        ) {
+            let json = serde_json::to_string(value).unwrap();
+            assert_eq!(&serde_json::from_str::<T>(&json).unwrap(), value);
+        }
+        round_trip(&reference);
+        round_trip(&state);
+        round_trip(&view);
+        assert!(!serde_json::to_string(&view).unwrap().contains("reason"));
+        for activity in [
+            ChildActivity::Running,
+            ChildActivity::Blocked,
+            ChildActivity::Stopped,
+        ] {
+            assert_eq!(serde_name(activity), activity.public_status().as_str());
+        }
+        assert_eq!(CHILD_AGENT_ID_MAX_CHARS, TOOL_CORRELATION_ID_MAX_CHARS);
+        assert_eq!(CHILD_AGENT_TYPE_MAX_CHARS, TOOL_LABEL_MAX_CHARS);
     }
 
     #[test]
@@ -769,6 +934,7 @@ mod tests {
             capabilities: Capabilities::default(),
             turn_generation: 1,
             completed_generation: Some(1),
+            children: Vec::new(),
         };
         let completed = CurrentStatusReason {
             kind: EventKind::Completed,
@@ -849,6 +1015,7 @@ mod tests {
             metadata: None,
             usage: None,
             repository: None,
+            children: None,
         };
         let mut blocked = base.clone();
         blocked.status = PublicStatus::Blocked;
@@ -940,6 +1107,7 @@ mod tests {
             capabilities: Capabilities::default(),
             turn_generation: 0,
             completed_generation: None,
+            children: Vec::new(),
         };
         let public = project_public(&snapshot, None);
         let value = serde_json::to_string(&public).unwrap();

@@ -140,7 +140,7 @@ The broker SHALL persist at most one bounded current status-reason object per in
 - **THEN** its current status-reason row is deleted as well
 
 ### Requirement: Status payload uses typed structured fields
-Each `PublicAgentView` SHALL contain public invocation identity, configured provider identity, derived status, timestamps, working directory, optional provider session identity/name/start reason, optional sanitized provider metadata, optional verified usage and context measurements, optional repository metadata, and an optional bounded status-compatible reason. Reason kinds SHALL be `input`, `approval`, `completed`, or `failed`. The public type SHALL NOT contain adapter dialect, credentials, raw hooks, executable arguments, private process identities, multiplexer details, internal lifecycle or activity, internal normalized event kinds, reducer bookkeeping, or control authority. Working directories, repository paths, session names, and bounded reasons SHALL be treated as potentially sensitive observer data intentionally shared with the single operator and configured sinks.
+Each `PublicAgentView` SHALL contain public invocation identity, configured provider identity, derived status, timestamps, working directory, optional provider session identity/name/start reason, optional sanitized provider metadata, optional verified usage and context measurements, optional repository metadata, an optional bounded status-compatible reason, and an optional `children` list of bounded child-agent views. Reason kinds SHALL be `input`, `approval`, `completed`, or `failed`. Each child-agent view SHALL contain a bounded child agent ID, a bounded agent type, a child status of `running`, `blocked`, or `stopped`, an optional bounded reason using the same reason kinds, a start time, and an updated time. The `children` field SHALL be absent when no child is retained. The public type SHALL NOT contain adapter dialect, credentials, raw hooks, executable arguments, private process identities, multiplexer details, internal lifecycle or activity, internal normalized event kinds, reducer bookkeeping, or control authority. Working directories, repository paths, session names, and bounded reasons SHALL be treated as potentially sensitive observer data intentionally shared with the single operator and configured sinks.
 
 #### Scenario: Enrichment is unavailable
 - **WHEN** usage, context utilization, provider metadata, repository information, session name, or status reason cannot be determined
@@ -155,8 +155,16 @@ Each `PublicAgentView` SHALL contain public invocation identity, configured prov
 - **THEN** the public view may expose that bounded identifier only as explicitly defined safe provider metadata
 
 #### Scenario: Repeated metadata is unchanged
-- **WHEN** consecutive hooks repeat identical projected model, effort, permission, turn, session, usage, repository, reason, and status values
+- **WHEN** consecutive hooks repeat identical projected model, effort, permission, turn, session, usage, repository, reason, status, and children values
 - **THEN** the broker does not create a listener- or sink-visible metadata-only change
+
+#### Scenario: No child agents are retained
+- **WHEN** an invocation has no retained child agent
+- **THEN** the serialized public view contains no `children` key and is byte-identical to the view of a provider without child support
+
+#### Scenario: Child agents are retained
+- **WHEN** an invocation retains one or more child agents
+- **THEN** the public view lists them in a deterministic order by start time and then child agent ID
 
 ### Requirement: Public agent status has four values
 Every `PublicAgentView` SHALL expose exactly one of `running`, `blocked`, `idle`, or `stopped`. The projection SHALL map working activity on a live process to running, either waiting activity on a live process to blocked, stopped activity on a live process to stopped, unknown or idle activity on a live process to idle, and exited or lost lifecycle to stopped regardless of activity.
@@ -190,7 +198,7 @@ Every `PublicAgentView` SHALL expose exactly one of `running`, `blocked`, `idle`
 - **THEN** public status is stopped with no blocked reason
 
 ### Requirement: Public changed fields are distinct from current status
-A public update envelope SHALL contain a deterministic non-empty set of typed public field paths describing every material projected field changed by the transaction, while the embedded view status SHALL describe current agent state. An update SHALL NOT choose one cause when several fields change. Internal activity and normalized event-kind enums SHALL remain internal reduction concepts.
+A public update envelope SHALL contain a deterministic non-empty set of typed public field paths describing every material projected field changed by the transaction, while the embedded view status SHALL describe current agent state. An update SHALL NOT choose one cause when several fields change. `children` SHALL be a typed public field path. Internal activity and normalized event-kind enums SHALL remain internal reduction concepts.
 
 #### Scenario: Metadata changes during work
 - **WHEN** verified usage changes while public status remains running
@@ -204,8 +212,12 @@ A public update envelope SHALL contain a deterministic non-empty set of typed pu
 - **WHEN** one transaction changes both the public status and provider session
 - **THEN** the changed set contains both `status` and `session` without applying cause precedence
 
+#### Scenario: Child state changes while the root is stopped
+- **WHEN** a child-agent event changes a projected child status or reason while the root public status remains stopped
+- **THEN** the changed set contains `children` and not `status`, and the complete resulting view still reports the root as stopped
+
 ### Requirement: Public projection is an explicit privacy boundary
-The daemon SHALL construct public views field-by-field from normalized state and current bounded status reason read at the same committed revision before local serialization or sink enqueueing. It SHALL compare and publish the exact projected view associated with that revision. Raw provider data, complete prompts or assistant messages, transcripts, and internal control metadata SHALL remain inaccessible through status, listen, sink, hub ingestion, and hub listening protocols. Selected bounded status summaries SHALL be intentionally observer-facing and MAY be delivered to sinks explicitly configured by the operator.
+The daemon SHALL construct public views field-by-field from normalized state and current bounded status reason read at the same committed revision before local serialization or sink enqueueing. It SHALL compare and publish the exact projected view associated with that revision. Raw provider data, complete prompts or assistant messages, transcripts, subagent transcripts, subagent final messages, and internal control metadata SHALL remain inaccessible through status, listen, sink, hub ingestion, and hub listening protocols. Selected bounded status summaries and bounded child-agent views SHALL be intentionally observer-facing and MAY be delivered to sinks explicitly configured by the operator.
 
 #### Scenario: Invocation runs inside tmux
 - **WHEN** internal state contains a tmux socket, session, window, pane, TTY, and process identities
@@ -222,6 +234,10 @@ The daemon SHALL construct public views field-by-field from normalized state and
 #### Scenario: Canonical envelope is serialized
 - **WHEN** a local snapshot or update is serialized
 - **THEN** its shape matches the shared golden public-envelope fixtures used by daemon, sink, hub, and receiver tests
+
+#### Scenario: Child view is serialized
+- **WHEN** a public view containing children is serialized
+- **THEN** each child contains only its bounded agent ID, bounded agent type, status, optional bounded reason, and timestamps, and no correlation ID, tool detail, transcript path, or message text
 
 ### Requirement: Interrupted turns are terminal without being completed
 The broker SHALL reduce `Interrupted` to stopped activity for the current live turn and mark that turn terminal. It SHALL expose public status `stopped` without a completed or failed reason and SHALL NOT treat interruption as a completion-reactive cause.
@@ -412,3 +428,84 @@ The broker SHALL apply provider-artifact collection results only as complete typ
 #### Scenario: Collection result is unchanged
 - **WHEN** a complete normalized collection result projects the same public values already stored
 - **THEN** the broker creates no listener-, sink-, or hub-visible update
+
+### Requirement: Child-agent events reduce into bounded per-child state
+The broker SHALL retain, per invocation, a bounded list of child-agent states keyed by child agent ID within the current provider session. A child-agent event SHALL update only the matching child's state and SHALL NOT change root lifecycle, activity, status, status reason, turn generation, provider session, provider metadata, usage, or root tool activity. A child new-turn or working event SHALL make the child running, a child waiting-input or waiting-approval event SHALL make it blocked with a matching reason kind, and a child completed, failed, or interrupted event SHALL make it stopped with a completed or failed reason. A child's reason summary SHALL be the bounded tool label from the event's tool activity when present. A working, waiting, or terminal event for an unknown child SHALL create that child. When the list exceeds its bound, the broker SHALL evict the oldest stopped child first and SHALL otherwise ignore the new child.
+
+#### Scenario: Subagent starts and works
+- **WHEN** a child new-turn event is followed by a child working event carrying a tool label
+- **THEN** the child appears as running with that tool label as its reason summary and the root status is unchanged
+
+#### Scenario: Subagent awaits approval while the root is stopped
+- **WHEN** the root has reached stopped activity for the current turn and a child waiting-approval event arrives
+- **THEN** the child becomes blocked with an approval reason and the root remains stopped with its completed reason intact
+
+#### Scenario: Subagent completes
+- **WHEN** a child completed event arrives for a running child
+- **THEN** the child becomes stopped with a completed reason and remains listed
+
+#### Scenario: Tool event precedes lifecycle start
+- **WHEN** a child working event arrives for a child agent ID that has no retained state
+- **THEN** the broker creates the child as running from that event
+
+#### Scenario: Child event arrives after root terminal turn
+- **WHEN** the root turn is terminal and a child working event arrives for the current provider session
+- **THEN** the child event is applied and the root activity is not resurrected
+
+### Requirement: Child-agent state follows root retention boundaries
+The broker SHALL clear all retained child-agent state when it accepts a root new turn, a new provider session, a lifecycle exit, or a lifecycle loss. Child-agent events SHALL be subject to the same duplicate event ID, stale source-order, and older-provider-session guards as root events, and a suppressed child event SHALL produce no public update.
+
+#### Scenario: Next prompt begins
+- **WHEN** a root new-turn event is accepted while children are retained
+- **THEN** the children list becomes empty, `children` is absent from the public view, and the changed set contains `children`
+
+#### Scenario: Provider session changes
+- **WHEN** a provider session start introduces a different provider session ID
+- **THEN** retained children from the prior session are cleared
+
+#### Scenario: Process exits with live children
+- **WHEN** lifecycle becomes exited or lost while children are retained
+- **THEN** the children list is cleared and the root public status is stopped
+
+#### Scenario: Child event from an older provider session
+- **WHEN** a child-agent event carries a provider session ID different from the current provider session
+- **THEN** the broker does not change any child state and publishes no update
+
+#### Scenario: Duplicate child event
+- **WHEN** a child-agent event repeats an already committed event ID
+- **THEN** the broker does not apply or publish it twice
+
+#### Scenario: Broker restarts with retained children
+- **WHEN** the broker restarts after committing child-agent state
+- **THEN** it restores the retained children with their statuses and timestamps
+
+### Requirement: Stale running child agents expire without a terminal cause
+The broker SHALL remove a retained child agent whose status is running when 30 minutes pass without an accepted child-agent event for that child. Expiry SHALL NOT emit a completed, failed, or interrupted cause for the child, SHALL NOT change root lifecycle, activity, status, or status reason, and SHALL NOT expire a blocked or stopped child. A child's updated time SHALL be the time of its last accepted child-agent event and SHALL be the basis for the stale check. Expiry SHALL be applied by the same periodic sweep that expires stale root working activity and SHALL publish one update whose changed set contains `children`.
+
+#### Scenario: Killed subagent goes silent
+- **WHEN** a running child receives no accepted child-agent event for 30 minutes while the invocation remains alive
+- **THEN** the sweep removes that child, the changed set contains `children`, and the root status and reason are unchanged
+
+#### Scenario: Last child expires
+- **WHEN** the only retained child is removed by expiry
+- **THEN** the public view no longer contains the `children` key and the update's changed set contains `children`
+
+#### Scenario: Blocked child stays silent
+- **WHEN** a blocked child receives no further event for longer than the stale interval
+- **THEN** the sweep leaves that child blocked with its reason intact
+
+#### Scenario: Stopped child is not expired
+- **WHEN** a stopped child remains retained past the stale interval
+- **THEN** the sweep leaves it in place until a retention boundary clears it
+
+#### Scenario: Child event resets the clock
+- **WHEN** a child working or waiting event is accepted for a running child before the interval elapses
+- **THEN** the child's updated time advances and the stale interval restarts from that event
+
+#### Scenario: Root and child expire together
+- **WHEN** one sweep finds both stale root working activity and a stale running child
+- **THEN** it applies both in one committed revision and the changed set contains `status` and `children`
+
+#### Scenario: Only the child is stale
+- **WHEN** the root is stopped for the current turn and a running child becomes stale
+- **THEN** the sweep removes the child and the root remains stopped with its completed reason intact

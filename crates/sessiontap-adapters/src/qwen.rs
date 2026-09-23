@@ -169,6 +169,9 @@ impl HookDialect for QwenDialect {
         ProviderId::Qwen
     }
     fn classify(&self, raw: &Value) -> Option<EventKind> {
+        if is_subagent_payload(raw) {
+            return None;
+        }
         classify(raw)
     }
     fn observed_at(&self, raw: &Value) -> Option<DateTime<Utc>> {
@@ -346,6 +349,14 @@ fn context_percent(value: u64, window: u64) -> Result<u8> {
         .context("Qwen context percentage overflow")?
         / u128::from(window);
     Ok(u8::try_from(rounded.min(100))?)
+}
+
+/// Qwen does not track child agents, so a payload carrying a child-agent
+/// identity is ignored before any root interpretation.
+fn is_subagent_payload(raw: &Value) -> bool {
+    raw.get("agent_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.trim().is_empty())
 }
 
 fn classify(raw: &Value) -> Option<EventKind> {

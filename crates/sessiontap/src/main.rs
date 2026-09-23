@@ -330,6 +330,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
             capabilities: multiplexers.capabilities(multiplexer.as_ref()),
             turn_generation: 0,
             completed_generation: None,
+            children: Vec::new(),
         };
         match request(
             paths,
