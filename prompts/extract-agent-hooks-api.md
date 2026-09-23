@@ -84,13 +84,56 @@ Investigate all of the following when available:
   retries, timeouts, and delivery guarantees;
 - hook exit-code, stdout, stderr, response-payload, cancellation, mutation,
   permission, or allow/deny semantics;
-- root-agent versus subagent behavior and parent/child correlation;
+- root-agent versus subagent behavior and parent/child correlation (see the
+  dedicated subagent investigation below);
 - session start/resume/clear/compact/end and turn start/stop/failure/interrupt;
 - tool start/success/failure, approval requests, user questions, idle signals,
   notifications, usage/context data, model and permission metadata;
 - payload size or string limits, security-sensitive fields, secrets, prompts,
   transcript paths, arbitrary tool input, and other privacy concerns;
 - platform or version differences and known gaps.
+
+Subagents need their own investigation because a consumer must be able to
+detect that an event belongs to a subagent and resolve which agent spawned it.
+Treat the harness as possibly running nested agents (a root agent that spawns
+subagents, which may spawn further subagents) even if the repository only
+documents one level. Establish, with evidence and confidence labels:
+
+- how a subagent is started and stopped (tool call, task, worker, fork, team,
+  or another mechanism) and which events fire around that boundary;
+- every field that marks an event as coming from a subagent (for example an
+  agent identifier, agent type, agent name, role, depth, or a flag), and how a
+  root-agent event looks in the same field (missing key, empty string, `null`,
+  or a root sentinel);
+- every field that links a subagent to its parent (for example a parent agent
+  ID, parent session ID, spawning tool-call ID, root session ID, or a nested
+  session/transcript identity), whether the link points to the immediate parent
+  or to the root, and whether a subagent can be its own parent's sibling;
+- whether a subagent shares the parent's session ID, turn ID, transcript path,
+  cwd, process, hook configuration, and environment, or receives its own;
+- whether the subagent's own hooks (session start/end, turn boundaries, tool
+  events, notifications, usage) fire at all, which events fire only for the
+  root, which fire only for subagents, and which fire for both;
+- whether the subagent-start and subagent-stop payloads carry enough identity
+  to correlate them with the tool call or prompt that spawned the subagent and
+  with the subagent's own later events;
+- whether root and subagent events interleave, whether a root turn can
+  complete while a subagent is still running, and whether a subagent can
+  outlive its root turn or session;
+- how usage, context size, model, effort, and permission metadata are
+  attributed between root and subagent events;
+- whether a resumed, forked, or background subagent reuses the same
+  identifiers, and whether identifiers are unique per process, per session, or
+  globally;
+- whether the harness exposes a configurable or documented maximum depth or
+  concurrency, and how identifiers change with depth.
+
+Write the answer as a decision procedure that a downstream consumer can apply
+to a single raw payload without additional state: which fields to read, in
+which order, to decide `root` versus `subagent`, and which field or fields
+yield the parent identity. If no parent identity is available, state which
+field or side channel is the closest substitute (for example the root session
+ID plus the spawning tool-call ID) and label it `inferred` or `unknown`.
 
 Represent schemas precisely. Start with a common-envelope table, then add one
 event table per event or one explicitly factored event-family table when events
@@ -143,6 +186,7 @@ Write `OUTPUT_FILE` with exactly this top-level structure:
 ## Event catalog
 ## Event payload schemas
 ## Correlation and lifecycle model
+## Subagent identity and parent correlation
 ## Ordering, concurrency, retries, and failure behavior
 ## Security and privacy notes
 ## Version and platform compatibility
@@ -155,9 +199,16 @@ Write `OUTPUT_FILE` with exactly this top-level structure:
 Under `Event catalog`, include a compact table with event name, trigger,
 transport, root/subagent scope, lifecycle meaning, confidence, and best evidence.
 Under `Correlation and lifecycle model`, include a provider-event-to-neutral-
-meaning table, but do not invent a universal state machine. Under `Consumer
+meaning table, but do not invent a universal state machine. Under `Subagent identity
+and parent correlation`, include the root/subagent decision procedure, a table
+of identity and parent-link fields (field, present on which events, root value,
+subagent value, points to immediate parent or root, confidence, evidence), a
+table of which events fire for root only, subagent only, or both, and a short
+synthetic example showing one root event, one subagent-start event, and one
+subagent event with a resolvable parent link. Under `Consumer
 implementation checklist`, call out which facts are safe to rely on and which
-need feature detection or defensive parsing.
+need feature detection or defensive parsing, including how to detect a subagent
+payload and how to resolve its parent.
 
 If no hook or lifecycle API exists, still create `OUTPUT_FILE`. Explain what
 was searched, document the closest available mechanisms, and state that no
@@ -166,7 +217,10 @@ supported hook contract was found.
 Before finishing, audit the report for internal contradictions, unsupported
 certainty, accidentally copied source, unsafe sample data, and missing event
 families. Confirm that every event in the catalog has either a payload schema or
-an explicit `schema unavailable` entry. In your final response, report the
-output path, identified product/version/revision, event count, whether a prior
-document was compared, and the most important remaining unknowns.
+an explicit `schema unavailable` entry, and that every event in the catalog
+states its root/subagent scope. In your final response, report the
+output path, identified product/version/revision, event count, whether
+subagent detection and parent resolution are `documented`, `observed`,
+`inferred`, or `unknown`, whether a prior document was compared, and the most
+important remaining unknowns.
 
