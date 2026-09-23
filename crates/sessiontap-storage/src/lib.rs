@@ -10,7 +10,7 @@ use sessiontap_core::{
     },
     protocol::{HUB_SCHEMA_VERSION, SourceEnvelope, SourceIdentity},
     reducer::{
-        self, Prior, ReasonEffect, Transition, expire_stale_working, finalize, is_stale_working,
+        self, Prior, ReasonEffect, Transition, expire_stale_working, finalize, is_stale,
         local_mutation, mark_lost, validate_event,
     },
 };
@@ -515,7 +515,7 @@ impl Storage {
         let (_, snapshots) = self.snapshot()?;
         let mut updates = Vec::new();
         for snapshot in snapshots {
-            if !is_stale_working(&snapshot, now) {
+            if !is_stale(&snapshot, now) {
                 continue;
             }
             if let Some(update) = self
@@ -919,6 +919,79 @@ mod tests {
             !serde_json::to_string(&next.view)
                 .unwrap()
                 .contains("children")
+        );
+    }
+
+    #[test]
+    fn stale_running_child_expires_and_publishes_children() {
+        let db = Storage::memory().unwrap();
+        let value = snapshot();
+        db.register(&value, "credential", None).unwrap();
+        let child = |agent_id: &str, kind: EventKind, event_id: &str, minutes: i64| {
+            let mut event = normalized_event(&value, kind, event_id);
+            event.received_at = value.created_at + chrono::Duration::minutes(minutes);
+            event.child_agent = Some(ChildAgentRef {
+                agent_id: agent_id.into(),
+                agent_type: "Explore".into(),
+            });
+            event
+        };
+        db.apply_event(&normalized_event(&value, EventKind::NewTurn, "turn"), None)
+            .unwrap();
+        db.apply_event(&child("a", EventKind::NewTurn, "a-start", 0), None)
+            .unwrap();
+        db.apply_event(&child("b", EventKind::NewTurn, "b-start", 10), None)
+            .unwrap();
+        db.apply_event(
+            &normalized_event(&value, EventKind::Completed, "done"),
+            None,
+        )
+        .unwrap();
+        let root = db.invocation(&value.invocation_id).unwrap();
+
+        let first = db
+            .expire_stale_working_at(
+                value.created_at + chrono::Duration::minutes(STALE_WORKING_MINUTES),
+                None,
+            )
+            .unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            first[0].changed,
+            BTreeSet::from([PublicField::UpdatedAt, PublicField::Children])
+        );
+        let remaining = first[0].view.children.as_ref().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].agent_id, "b");
+        let persisted = db.invocation(&value.invocation_id).unwrap();
+        assert_eq!(persisted.children.len(), 1);
+        assert_eq!(persisted.activity, root.activity);
+        assert_eq!(persisted.status, PublicStatus::Stopped);
+
+        let last = db
+            .expire_stale_working_at(
+                value.created_at + chrono::Duration::minutes(10 + STALE_WORKING_MINUTES),
+                None,
+            )
+            .unwrap();
+        assert_eq!(last.len(), 1);
+        assert!(last[0].changed.contains(&PublicField::Children));
+        assert!(last[0].view.children.is_none());
+        assert!(
+            !serde_json::to_string(&last[0].view)
+                .unwrap()
+                .contains("children")
+        );
+        assert!(
+            db.invocation(&value.invocation_id)
+                .unwrap()
+                .children
+                .is_empty()
+        );
+        assert!(
+            db.expire_stale_working_at(value.created_at + chrono::Duration::hours(8), None)
+                .unwrap()
+                .is_empty()
         );
     }
 

@@ -287,22 +287,55 @@ pub fn mark_lost(prior: Prior<'_>) -> Transition {
 }
 
 /// Downgrades working state that has not been asserted for
-/// [`STALE_WORKING_MINUTES`]; returns `None` when the state is not stale.
+/// [`STALE_WORKING_MINUTES`] and drops running children silent for as long;
+/// returns `None` when nothing is stale. Child expiry claims no outcome and
+/// leaves the root lifecycle, activity, and reason untouched.
 #[must_use]
 pub fn expire_stale_working(prior: Prior<'_>, now: DateTime<Utc>) -> Option<Transition> {
-    if !is_stale_working(prior.snapshot, now) {
+    let root_stale = is_stale_working(prior.snapshot, now);
+    if !root_stale && !has_stale_children(prior.snapshot, now) {
         return None;
     }
     let mut snapshot = prior.snapshot.clone();
-    snapshot.activity = Activity::Unknown;
-    snapshot.state_started_at = now;
-    snapshot.current_tool_activity = None;
-    snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
+    snapshot
+        .children
+        .retain(|child| !is_stale_child(child, now));
+    if root_stale {
+        snapshot.activity = Activity::Unknown;
+        snapshot.state_started_at = now;
+        snapshot.current_tool_activity = None;
+        snapshot.status = derive_status(snapshot.lifecycle, snapshot.activity);
+    }
     Some(Transition {
         snapshot,
-        reason: ReasonEffect::Clear,
+        reason: if root_stale {
+            ReasonEffect::Clear
+        } else {
+            ReasonEffect::Keep
+        },
         suppressed: false,
     })
+}
+
+/// Whether [`expire_stale_working`] would change `snapshot` at `now`.
+#[must_use]
+pub fn is_stale(snapshot: &InvocationSnapshot, now: DateTime<Utc>) -> bool {
+    is_stale_working(snapshot, now) || has_stale_children(snapshot, now)
+}
+
+fn has_stale_children(snapshot: &InvocationSnapshot, now: DateTime<Utc>) -> bool {
+    snapshot
+        .children
+        .iter()
+        .any(|child| is_stale_child(child, now))
+}
+
+/// Whether `child` is running with no accepted child event for too long.
+/// Blocked children wait indefinitely; stopped children clear at the next
+/// retention boundary.
+fn is_stale_child(child: &ChildAgentState, now: DateTime<Utc>) -> bool {
+    child.activity == ChildActivity::Running
+        && now.signed_duration_since(child.updated_at) >= Duration::minutes(STALE_WORKING_MINUTES)
 }
 
 /// Whether `snapshot` is alive, working, and unasserted for too long.
@@ -1309,6 +1342,121 @@ mod tests {
             )
             .is_some()
         );
+    }
+
+    fn child_state(agent_id: &str, activity: ChildActivity, updated_at: i64) -> ChildAgentState {
+        ChildAgentState {
+            agent_id: agent_id.into(),
+            agent_type: "Explore".into(),
+            activity,
+            reason: match activity {
+                ChildActivity::Running => None,
+                ChildActivity::Blocked => child_reason(Some(PublicReasonKind::Approval), None),
+                ChildActivity::Stopped => child_reason(Some(PublicReasonKind::Completed), None),
+            },
+            started_at: at(0),
+            updated_at: at(updated_at),
+        }
+    }
+
+    #[test]
+    fn stale_running_children_expire_and_others_are_kept() {
+        let mut prior = snapshot();
+        prior.children = vec![
+            child_state("stale", ChildActivity::Running, 0),
+            child_state("blocked", ChildActivity::Blocked, 0),
+            child_state("stopped", ChildActivity::Stopped, 0),
+            child_state("fresh", ChildActivity::Running, 60),
+        ];
+        let view = Prior {
+            snapshot: &prior,
+            reason: None,
+        };
+        let threshold = at(0) + Duration::minutes(STALE_WORKING_MINUTES);
+        assert!(!is_stale(&prior, threshold - Duration::seconds(1)));
+        assert!(expire_stale_working(view, threshold - Duration::seconds(1)).is_none());
+        assert!(is_stale(&prior, threshold));
+        let transition = expire_stale_working(view, threshold).unwrap();
+        let kept: Vec<_> = transition
+            .snapshot
+            .children
+            .iter()
+            .map(|child| child.agent_id.as_str())
+            .collect();
+        assert_eq!(kept, ["blocked", "stopped", "fresh"]);
+        assert_eq!(transition.snapshot.children[0], prior.children[1]);
+        assert_eq!(transition.snapshot.children[1], prior.children[2]);
+        assert_eq!(transition.reason, ReasonEffect::Keep);
+    }
+
+    #[test]
+    fn child_event_resets_the_child_stale_clock() {
+        let mut state = State::new();
+        state.apply(&child_event(EventKind::NewTurn, "a"), None);
+        let mut working = child_event(EventKind::Working, "a");
+        working.received_at = at(600);
+        state.apply(&working, None);
+        let threshold = at(1) + Duration::minutes(STALE_WORKING_MINUTES);
+        assert!(expire_stale_working(state.prior(), threshold).is_none());
+        let transition = expire_stale_working(
+            state.prior(),
+            at(600) + Duration::minutes(STALE_WORKING_MINUTES),
+        )
+        .unwrap();
+        assert!(transition.snapshot.children.is_empty());
+    }
+
+    #[test]
+    fn stale_child_under_stopped_root_leaves_root_intact() {
+        let mut state = State::new();
+        state.apply(&event(EventKind::NewTurn), None);
+        state.apply(&child_event(EventKind::NewTurn, "a"), None);
+        state.apply(&event(EventKind::Completed), Some(&context("Done")));
+        let root = state.snapshot.clone();
+        let now = at(1) + Duration::minutes(STALE_WORKING_MINUTES);
+        let transition = expire_stale_working(state.prior(), now).unwrap();
+        assert_eq!(transition.reason, ReasonEffect::Keep);
+        state.commit(&transition);
+        assert!(state.snapshot.children.is_empty());
+        assert_eq!(state.snapshot.activity, root.activity);
+        assert_eq!(state.snapshot.activity, Activity::Stopped);
+        assert_eq!(state.snapshot.status, PublicStatus::Stopped);
+        assert_eq!(state.snapshot.state_started_at, root.state_started_at);
+        assert_eq!(state.reason, Some(reason(EventKind::Completed, "Done")));
+        let prior_view = project_public(&root, state.reason.as_ref());
+        let mut next = state.snapshot.clone();
+        let (view, changed) = finalize(&prior_view, &mut next, state.reason.as_ref(), now);
+        assert!(view.children.is_none());
+        assert_eq!(
+            changed,
+            BTreeSet::from([PublicField::UpdatedAt, PublicField::Children])
+        );
+    }
+
+    #[test]
+    fn stale_root_and_child_expire_in_one_transition() {
+        let mut prior = snapshot();
+        prior.activity = Activity::Working;
+        prior.status = PublicStatus::Running;
+        prior.last_state_asserted_at = Some(at(0));
+        prior.children = vec![child_state("a", ChildActivity::Running, 0)];
+        let now = at(0) + Duration::minutes(STALE_WORKING_MINUTES);
+        let transition = expire_stale_working(
+            Prior {
+                snapshot: &prior,
+                reason: None,
+            },
+            now,
+        )
+        .unwrap();
+        assert_eq!(transition.snapshot.activity, Activity::Unknown);
+        assert!(transition.snapshot.children.is_empty());
+        assert_eq!(transition.reason, ReasonEffect::Clear);
+        let prior_view = project_public(&prior, None);
+        let mut next = transition.snapshot;
+        let (_, changed) = finalize(&prior_view, &mut next, None, now);
+        assert!(changed.contains(&PublicField::Status));
+        assert!(changed.contains(&PublicField::Children));
     }
 
     #[test]

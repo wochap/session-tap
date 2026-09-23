@@ -61,7 +61,11 @@ A background subagent can keep working after the root `Stop`, so the root may
 report `stopped` while a child is `running` or `blocked`. Check `children`
 before the root status to derive an effective status. Children are cleared on
 the next prompt, a new provider session, or process exit. A killed subagent
-that never emits `SubagentStop` stays `running` until one of those clears it.
+never emits `SubagentStop`, so a `running` child with no accepted child event
+for 30 minutes is removed from `children` by the stale sweep, if nothing else
+clears it first. Removal claims no outcome: the child gets no completed or
+failed reason and the root status is unchanged. A `blocked` child is never
+expired, and a later event for a removed child recreates it as running.
 
 `SubagentStart` and `SubagentStop` are managed hooks. Existing installations
 must re-run `sessiontap setup claude` to install them; until then, children

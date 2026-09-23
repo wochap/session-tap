@@ -314,6 +314,7 @@ pub(crate) mod tests {
         },
     };
     use sessiontap_infra::multiplexer::UnsupportedBackend;
+    use sessiontap_storage::STALE_WORKING_MINUTES;
     use std::collections::BTreeSet;
 
     pub(crate) fn app(storage: Storage) -> App {
@@ -549,6 +550,78 @@ pub(crate) mod tests {
         assert!(update.changed.contains(&PublicField::Children));
         assert!(update.view.children.is_none());
         assert_eq!(update.view.status, PublicStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn stale_child_sweep_publishes_children_once() {
+        let config: Config = toml::from_str(
+            "version=1\n[sinks.local]\ntype='http'\nenabled=true\nurl='http://127.0.0.1:9/hook'\n",
+        )
+        .unwrap();
+        let app = App::new(
+            Arc::new(Storage::memory().unwrap()),
+            PublishConfig {
+                sinks: config.sinks,
+                source_id: String::new(),
+                source_name: None,
+            },
+            &DaemonConfig::default(),
+            Arc::new(MultiplexerRegistry::empty()),
+            Collection {
+                home: PathBuf::from("/nonexistent"),
+                registry: Arc::new(AdapterRegistry::new(&Config::default())),
+            },
+        );
+        let initial = snapshot();
+        app.register(initial.clone(), "credential").unwrap();
+        app.bind_child(&initial.invocation_id, "credential", 42, None)
+            .unwrap();
+        let ingest = |event: NormalizedEvent| {
+            app.ingest_hook(
+                initial.provider.clone(),
+                initial.invocation_id.clone(),
+                "credential".into(),
+                event,
+                None,
+                None,
+            )
+            .unwrap();
+        };
+        ingest(event(&initial, "turn", EventKind::NewTurn));
+        let mut child = event(&initial, "child-start", EventKind::NewTurn);
+        child.child_agent = Some(ChildAgentRef {
+            agent_id: "agent-1".into(),
+            agent_type: "Explore".into(),
+        });
+        ingest(child);
+        ingest(event(&initial, "stop", EventKind::Completed));
+        let drain = || {
+            for record in app.storage().due_outbox(100).unwrap() {
+                app.storage()
+                    .acknowledge(&record.sink_name, &record.event_id)
+                    .unwrap();
+            }
+        };
+        drain();
+        let (_, _, mut receiver) = app.subscribe().unwrap();
+
+        let stale_at = Utc::now() + chrono::Duration::minutes(STALE_WORKING_MINUTES);
+        app.expire_stale_working(stale_at).unwrap();
+        let update = receiver.recv().await.unwrap();
+        assert_eq!(
+            update.changed,
+            BTreeSet::from([PublicField::UpdatedAt, PublicField::Children])
+        );
+        assert!(update.view.children.is_none());
+        assert_eq!(update.view.status, PublicStatus::Stopped);
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(app.storage().due_outbox(100).unwrap().len(), 1);
+        drain();
+
+        app.expire_stale_working(stale_at + chrono::Duration::hours(1))
+            .unwrap();
+        assert!(receiver.try_recv().is_err());
+        assert!(app.storage().due_outbox(100).unwrap().is_empty());
     }
 
     #[tokio::test]

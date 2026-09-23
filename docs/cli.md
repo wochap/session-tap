@@ -212,6 +212,14 @@ update_buffer = 1024        # listen broadcast capacity before a listener lags
 max_rejected_attempts = 16  # attempts before a rejected delivery is dropped
 ```
 
+The stale sweep runs every `stale_sweep_secs`. It downgrades root working
+activity that has not been asserted for 30 minutes to unknown, and removes a
+`running` child agent with no accepted child event for 30 minutes from
+`children`. Child expiry claims no outcome: it sets no completed or failed
+reason and leaves the root status and reason unchanged. `blocked` children are
+never expired; `stopped` children clear at the next prompt, provider session,
+or process exit.
+
 ## Shell completions
 
 `sessiontap completions zsh` prints the zsh completion script to stdout.
