@@ -49,6 +49,51 @@ fn returning_terminal_control_does_not_stop_the_parent_job() {
     assert!(stdout.contains("job-status:0"), "stdout: {stdout}");
 }
 
+// A caller that renders its own UI keeps reading the terminal while it runs
+// the provider headless (stdin not a terminal). The wrapper must leave the
+// terminal to the caller, or the caller's read stops it with SIGTTIN.
+#[test]
+fn headless_launch_leaves_the_terminal_to_the_caller() {
+    let temp = tempfile::tempdir().unwrap();
+    let provider = temp.path().join("fake-provider");
+    write_executable(&provider, "#!/bin/sh\nsleep 2\necho provider-ran\n");
+    let config_dir = temp.path().join("config/sessiontap");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "version = 1\n\n[adapters.fake]\nexecutable = {:?}\ninherits = \"claude\"\n",
+            provider.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let caller = format!(
+        "'{}' fake </dev/null & sleep 0.5; read -t 1 line; wait; exit 0",
+        env!("CARGO_BIN_EXE_sessiontap")
+    );
+    let job = format!(
+        "set -m; bash -c {}; echo \"job-status:$?\"",
+        shell_quote(&caller)
+    );
+    let output = Command::new("timeout")
+        .args(["20", "script", "-qec"])
+        .arg(format!("bash -c {}", shell_quote(&job)))
+        .arg("/dev/null")
+        .env("HOME", temp.path().join("home"))
+        .env("XDG_CONFIG_HOME", temp.path().join("config"))
+        .env("XDG_STATE_HOME", temp.path().join("state"))
+        .env("XDG_DATA_HOME", temp.path().join("data"))
+        .env("XDG_RUNTIME_DIR", temp.path().join("runtime"))
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("provider-ran"), "stdout: {stdout}");
+    // 149 = 128 + SIGTTIN: the caller was stopped reading its own terminal.
+    assert!(stdout.contains("job-status:0"), "stdout: {stdout}");
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }

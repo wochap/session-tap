@@ -22,7 +22,7 @@ use sessiontap_infra::{
 };
 use std::{
     env, fs,
-    io::{Read, Write},
+    io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -383,12 +383,20 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     for (k, v) in &prep.environment {
         command.env(k, v);
     }
-    command.process_group(0);
+    // Only an interactive launch takes the terminal. A headless one (stdin not
+    // a terminal) stays in the caller's process group, so a caller that shows
+    // its own UI while the provider runs keeps the terminal and its keys.
+    let interactive = std::io::stdin().is_terminal();
+    if interactive {
+        command.process_group(0);
+    }
     let mut child = command
         .spawn()
         .with_context(|| format!("launch {executable}"))?;
     let pid = child.id().context("child PID unavailable")?;
-    let terminal = std::fs::File::open("/dev/tty").ok();
+    let terminal = interactive
+        .then(|| std::fs::File::open("/dev/tty").ok())
+        .flatten();
     if let Some(tty) = &terminal {
         match set_terminal_foreground(tty, nix::unistd::Pid::from_raw(pid as i32)) {
             Ok(()) | Err(nix::errno::Errno::EINVAL) => {}
@@ -423,7 +431,7 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     } else {
         None
     };
-    let wait_result = wait_with_signal_forwarding(&mut child, pid).await;
+    let wait_result = wait_with_signal_forwarding(&mut child, pid, interactive).await;
     if let Some(task) = side_channel_task {
         task.abort();
         let _ = task.await;
@@ -532,22 +540,30 @@ fn set_terminal_foreground(tty: &std::fs::File, group: nix::unistd::Pid) -> nix:
 async fn wait_with_signal_forwarding(
     child: &mut tokio::process::Child,
     pid: u32,
+    own_group: bool,
 ) -> Result<std::process::ExitStatus> {
     use nix::{
-        sys::signal::{Signal, killpg},
+        sys::signal::{Signal, kill, killpg},
         unistd::Pid,
     };
     use tokio::signal::unix::{SignalKind, signal};
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut hangup = signal(SignalKind::hangup())?;
-    let group = Pid::from_raw(pid as i32);
+    let target = Pid::from_raw(pid as i32);
+    let forward = |signal| {
+        let _ = if own_group {
+            killpg(target, signal)
+        } else {
+            kill(target, signal)
+        };
+    };
     loop {
         tokio::select! {
             status = child.wait() => return Ok(status?),
-            _ = interrupt.recv() => { let _ = killpg(group, Signal::SIGINT); }
-            _ = terminate.recv() => { let _ = killpg(group, Signal::SIGTERM); }
-            _ = hangup.recv() => { let _ = killpg(group, Signal::SIGHUP); }
+            _ = interrupt.recv() => forward(Signal::SIGINT),
+            _ = terminate.recv() => forward(Signal::SIGTERM),
+            _ = hangup.recv() => forward(Signal::SIGHUP),
         }
     }
 }
