@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/styles.css">
+<script src="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:color-mix(in oklab,var(--color-bg) 85%,#000);color:var(--color-text);font-family:var(--font-body)}
+a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
+.dv-turn{padding:40px 44px 36px;scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-accent-800);color:var(--color-accent-100);border-radius:4px;text-decoration:none}
+.dv-tname{font:500 15px/1.2 var(--font-body);color:var(--color-text)}
+.dv-tsub{font:400 12px/1.4 var(--font-body);color:var(--color-neutral-500)}
+.dv-opts{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:10px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:var(--color-neutral-800);color:var(--color-neutral-100);border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 12px/1.3 var(--font-body);color:var(--color-neutral-400)}
+.dv-opt:target .dv-oid{background:var(--color-accent);color:var(--color-bg)}
+.dv-next{margin:24px 0 0;font:12px/1.5 var(--font-body);color:var(--color-neutral-500)}
+</style>
+</helmet>
+
+<section class="dv-turn" id="t0" style="padding-bottom:8px">
+<div style="max-width:880px;display:flex;flex-direction:column;gap:10px">
+<div style="font-size:30px;font-weight:500;letter-spacing:-0.02em">SessionTap</div>
+<div style="font-size:14px;color:var(--color-neutral-400);text-wrap:pretty">Read-only Android monitor for coding agents across paired hubs. Material 3 structure (top app bar, chips, nav bar, switches, dialogs, notification templates) skinned with Nocturne tokens; status color is the only saturated color. Every phone is live — tap rows, chips, section headers, the agent badge, swipe stopped rows left, and use the nav bar.</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--color-neutral-500)">
+<span>Assumptions: amber/red/green status hues added in OKLCH (not in Nocturne)</span><span>Provider marks are letter placeholders until real icons</span><span>Light theme derived from Nocturne neutral ramps</span>
+</div>
+</div>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Dark · core flow</span><span class="dv-tsub">3 hubs: MacBook live, Desktop reconnecting, Sandbox-VM offline</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="1a"><div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Onboarding · no hubs</div><dc-import name="STPhone" screen="welcome" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1b"><div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Permission checklist</div><dc-import name="STPhone" screen="perms" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1c"><div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Scan · tap viewfinder to continue</div><dc-import name="STPhone" screen="scan" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1d"><div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Waiting for approval</div><dc-import name="STPhone" screen="pair" pair="waiting" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1e"><div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a>Sessions · multi-hub, child expanded</div><dc-import name="STPhone" screen="sessions" theme="dark" hubs="{{ three }}" expand="s1" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1f"><div class="dv-olabel"><a class="dv-oid" href="#1f">1f</a>Sessions · single hub (no chips, no hub headers)</div><dc-import name="STPhone" screen="sessions" theme="dark" hubs="{{ one }}" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1g"><div class="dv-olabel"><a class="dv-oid" href="#1g">1g</a>Session detail · child-blocked</div><dc-import name="STPhone" screen="detail" detail="s1" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1h"><div class="dv-olabel"><a class="dv-oid" href="#1h">1h</a>Session detail · stopped, Forget</div><dc-import name="STPhone" screen="detail" detail="s4" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1i"><div class="dv-olabel"><a class="dv-oid" href="#1i">1i</a>Hubs · tap Unpair for confirm</div><dc-import name="STPhone" screen="hubs" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="1j"><div class="dv-olabel"><a class="dv-oid" href="#1j">1j</a>Notification settings</div><dc-import name="STPhone" screen="alerts" theme="dark" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Light variant</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="2a"><div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Onboarding</div><dc-import name="STPhone" screen="welcome" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="2b"><div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Sessions · multi-hub</div><dc-import name="STPhone" screen="sessions" theme="light" hubs="{{ three }}" expand="s1" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="2c"><div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Sessions · single hub</div><dc-import name="STPhone" screen="sessions" theme="light" hubs="{{ one }}" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="2d"><div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Session detail</div><dc-import name="STPhone" screen="detail" detail="s1" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="2e"><div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Hubs</div><dc-import name="STPhone" screen="hubs" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="2f"><div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a>Notification settings</div><dc-import name="STPhone" screen="alerts" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="2g"><div class="dv-olabel"><a class="dv-oid" href="#2g">2g</a>Waiting for approval</div><dc-import name="STPhone" screen="pair" pair="waiting" theme="light" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t3">
+<div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Pairing outcomes · empty &amp; error states</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="3a"><div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Paired</div><dc-import name="STPhone" screen="pair" pair="success" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3b"><div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Pairing expired</div><dc-import name="STPhone" screen="pair" pair="expired" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3c"><div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Rejected</div><dc-import name="STPhone" screen="pair" pair="rejected" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3d"><div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Hub unreachable (pairing)</div><dc-import name="STPhone" screen="pair" pair="unreachable" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3e"><div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Hub unreachable (single hub)</div><dc-import name="STPhone" screen="sessions" scenario="hub-unreachable" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3f"><div class="dv-olabel"><a class="dv-oid" href="#3f">3f</a>All hubs offline</div><dc-import name="STPhone" screen="sessions" scenario="all-offline" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3g"><div class="dv-olabel"><a class="dv-oid" href="#3g">3g</a>No sessions</div><dc-import name="STPhone" screen="sessions" scenario="no-sessions" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="3h"><div class="dv-olabel"><a class="dv-oid" href="#3h">3h</a>Filter empty · Stale filter shown</div><dc-import name="STPhone" screen="sessions" filter="stale" theme="dark" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t4">
+<div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Android notifications</span><span class="dv-tsub">read-only: actions open or mute, never approve</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="4a"><div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Heads-up · needs permission</div><dc-import name="STPhone" screen="sessions" headsup="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="4b"><div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Shade · expanded, grouped per hub, finished, service</div><dc-import name="STPhone" screen="shade" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="4c"><div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Lock screen · redacted</div><dc-import name="STPhone" screen="lock" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="4d"><div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Shade · light</div><dc-import name="STPhone" screen="shade" theme="light" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t5">
+<div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Component sheet</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="5a"><div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Dark</div><dc-import name="STPhone" screen="sheet" theme="dark" hint-size="412px,1500px"></dc-import></div>
+<div class="dv-opt" id="5b"><div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Light</div><dc-import name="STPhone" screen="sheet" theme="light" hint-size="412px,1500px"></dc-import></div>
+</div>
+<p class="dv-next">Try next: "denser rows like <a class="dv-oid" href="#1f">1f</a> but single-line" · "show a tablet/foldable two-pane version of <a class="dv-oid" href="#1e">1e</a> + <a class="dv-oid" href="#1g">1g</a>" · "swap letter marks for real provider icons"</p>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() { return { one: 1, three: 3, yes: true }; }
+}
+</script>
+</body>
+</html>

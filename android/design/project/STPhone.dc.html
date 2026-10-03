@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/styles.css">
+<script src="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/_ds_bundle.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+[data-stroot]{--st-bg:color-mix(in oklab,var(--color-bg) 72%,#000);--st-surf:color-mix(in oklab,var(--color-bg) 92%,var(--color-surface));--st-surf2:var(--color-surface);--st-line:color-mix(in srgb,var(--color-text) 9%,transparent);--st-text:var(--color-text);--st-mute:var(--color-neutral-500);--st-dim:var(--color-neutral-700);--st-acc:var(--color-accent);--st-acc-ink:var(--color-accent-300);--st-acc-tint:color-mix(in oklab,var(--color-accent) 14%,transparent);--st-ind:var(--color-accent-900);--st-run:oklch(0.80 0.14 75);--st-block:oklch(0.69 0.19 25);--st-ok:oklch(0.76 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.69 0.19 25) 10%,transparent);--st-inv:var(--color-neutral-200);--st-inv-text:var(--color-neutral-900);--st-inv-acc:var(--color-accent-700);--st-mono:"JetBrains Mono",ui-monospace,monospace;--st-wall:radial-gradient(120% 80% at 20% 0%,color-mix(in oklab,var(--color-section) 55%,transparent),transparent 60%),color-mix(in oklab,var(--color-bg) 60%,#000)}
+[data-st="light"]{--st-bg:var(--color-neutral-100);--st-surf:color-mix(in oklab,var(--color-neutral-100) 45%,var(--color-neutral-200));--st-surf2:var(--color-neutral-200);--st-line:color-mix(in srgb,var(--color-neutral-900) 11%,transparent);--st-text:var(--color-neutral-900);--st-mute:var(--color-neutral-600);--st-dim:var(--color-neutral-400);--st-acc:var(--color-accent-600);--st-acc-ink:var(--color-accent-700);--st-acc-tint:color-mix(in oklab,var(--color-accent-500) 14%,transparent);--st-ind:var(--color-accent-200);--st-run:oklch(0.64 0.15 65);--st-block:oklch(0.56 0.2 25);--st-ok:oklch(0.56 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.56 0.2 25) 8%,transparent);--st-inv:var(--color-neutral-800);--st-inv-text:var(--color-neutral-100);--st-inv-acc:var(--color-accent-300);--st-wall:radial-gradient(120% 80% at 20% 0%,var(--color-accent-200),transparent 60%),var(--color-neutral-200)}
+@keyframes st-spin{to{transform:rotate(360deg)}}
+@keyframes st-pulse{50%{opacity:.3}}
+</style>
+</helmet>
+<div data-stroot="" data-st="{{ theme }}" style="position:relative;width:{{ rootW }};height:{{ rootH }};padding:{{ rootPad }};border-radius:{{ rootR }};background:{{ rootBg }};box-sizing:border-box;font-family:var(--font-body);flex:none">
+<div style="position:relative;width:100%;height:{{ innerH }};border-radius:{{ innerR }};overflow:hidden;background:var(--st-bg);color:var(--st-text);display:flex;flex-direction:column;font-size:14px;line-height:1.4">
+
+<sc-if value="{{ framed }}" hint-placeholder-val="{{ true }}">
+<div style="height:36px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:13px;font-weight:500;position:relative;z-index:6;background:{{ barBg }}">
+<span>14:32</span>
+<span style="position:absolute;left:50%;top:10px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:color-mix(in oklab,var(--color-bg) 30%,#000)"></span>
+<span style="display:flex;gap:6px;align-items:center;font-size:15px"><i class="ph-fill ph-wifi-high"></i><i class="ph-fill ph-cell-signal-full"></i><i class="ph-fill ph-battery-high"></i></span>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWelcome }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;flex-direction:column;padding:20px 24px 24px;gap:0">
+<div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:var(--st-mute)"><i class="ph ph-broadcast" style="font-size:18px;color:var(--st-acc)"></i>SessionTap</div>
+<div style="flex:1"></div>
+<h1 style="font-size:34px;line-height:1.1;letter-spacing:-0.02em;margin:0 0 12px;text-wrap:pretty">Watch your coding agents from your pocket.</h1>
+<p style="font-size:15px;color:var(--st-mute);margin:0 0 24px;text-wrap:pretty">Pair with the computer running Claude Code, Codex, Pi or Qwen. SessionTap only reads — it never sends commands.</p>
+<div style="font-size:12px;color:var(--st-mute);margin-bottom:6px">On your computer, run</div>
+<div style="display:flex;align-items:center;gap:10px;padding:14px 14px 14px 16px;border-radius:14px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);font-family:var(--st-mono);font-size:14px">
+<span style="color:var(--st-mute)">$</span><span style="flex:1">sessiontap-hub pair</span><i class="ph ph-copy" style="font-size:18px;color:var(--st-mute)"></i>
+</div>
+<div style="font-size:12px;color:var(--st-mute);margin:8px 0 28px">A QR code appears in the terminal.</div>
+<button onClick="{{ goPerms }}" class="btn btn-primary" style="height:52px;border-radius:26px;font-size:15px;width:100%;gap:8px"><i class="ph ph-qr-code" style="font-size:20px"></i>Scan QR</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isPerms }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;flex-direction:column;padding:12px 24px 24px">
+<button onClick="{{ goWelcome }}" class="btn btn-ghost btn-icon" style="color:var(--st-text);margin-left:-8px;font-size:22px"><i class="ph ph-arrow-left"></i></button>
+<h2 style="font-size:28px;margin:16px 0 8px;letter-spacing:-0.02em">Before you scan</h2>
+<p style="font-size:14px;color:var(--st-mute);margin:0 0 20px;text-wrap:pretty">Three things keep alerts reliable. You can change them later in Android settings.</p>
+<div style="display:flex;flex-direction:column;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);overflow:hidden">
+<sc-for list="{{ perms }}" as="pm" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:14px;padding:14px 14px 14px 16px;border-top:{{ pm.border }}">
+<div style="width:24px;height:24px;flex:none;display:flex;align-items:center;justify-content:center">
+<sc-if value="{{ pm.done }}"><i class="ph-bold ph-check-circle" style="font-size:22px;color:var(--st-ok)"></i></sc-if>
+<sc-if value="{{ pm.todo }}"><span style="width:18px;height:18px;border-radius:50%;border:1.5px solid var(--st-dim);box-sizing:border-box"></span></sc-if>
+</div>
+<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500">{{ pm.title }}</div><div style="font-size:12.5px;color:var(--st-mute);text-wrap:pretty">{{ pm.sub }}</div></div>
+<sc-if value="{{ pm.todo }}"><button onClick="{{ pm.onAllow }}" class="btn btn-secondary" style="border-radius:16px;height:32px;padding:0 14px;font-size:13px;color:var(--st-text)">Allow</button></sc-if>
+</div>
+</sc-for>
+</div>
+<div style="display:flex;gap:10px;margin-top:16px;padding:0 4px;font-size:12.5px;color:var(--st-mute);text-wrap:pretty"><i class="ph ph-info" style="font-size:16px;flex:none;margin-top:1px"></i><span>Hubs outside your home network are reached over Tailscale. Keep it connected on this phone.</span></div>
+<div style="flex:1"></div>
+<button onClick="{{ goScan }}" class="btn btn-primary" style="height:52px;border-radius:26px;font-size:15px;width:100%">Continue</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isScan }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ goPair }}" style="flex:1;position:relative;display:flex;flex-direction:column;background:radial-gradient(circle at 50% 42%,color-mix(in oklab,var(--color-neutral-800) 60%,#000),color-mix(in oklab,var(--color-bg) 25%,#000));color:var(--color-text);cursor:pointer">
+<div style="display:flex;align-items:center;gap:8px;padding:8px 12px">
+<button onClick="{{ goPermsStop }}" class="btn btn-ghost btn-icon" style="color:var(--color-text);font-size:22px"><i class="ph ph-x"></i></button>
+<span style="font-size:17px;font-weight:500">Scan pairing code</span>
+<span style="flex:1"></span>
+<button class="btn btn-ghost btn-icon" style="color:var(--color-text);font-size:20px"><i class="ph ph-lightning"></i></button>
+</div>
+<div style="flex:1;display:flex;align-items:center;justify-content:center;position:relative">
+<div style="position:relative;width:248px;height:248px;border-radius:28px;box-shadow:0 0 0 2000px color-mix(in oklab,var(--color-bg) 40%,transparent)">
+<span style="position:absolute;left:-2px;top:-2px;width:36px;height:36px;border-left:3px solid var(--color-accent);border-top:3px solid var(--color-accent);border-top-left-radius:28px"></span>
+<span style="position:absolute;right:-2px;top:-2px;width:36px;height:36px;border-right:3px solid var(--color-accent);border-top:3px solid var(--color-accent);border-top-right-radius:28px"></span>
+<span style="position:absolute;left:-2px;bottom:-2px;width:36px;height:36px;border-left:3px solid var(--color-accent);border-bottom:3px solid var(--color-accent);border-bottom-left-radius:28px"></span>
+<span style="position:absolute;right:-2px;bottom:-2px;width:36px;height:36px;border-right:3px solid var(--color-accent);border-bottom:3px solid var(--color-accent);border-bottom-right-radius:28px"></span>
+<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--st-mono);font-size:11px;color:var(--color-neutral-600)">camera preview</div>
+</div>
+</div>
+<div style="padding:0 32px 40px;display:flex;flex-direction:column;gap:6px">
+<div style="font-size:15px;font-weight:500">Point at the QR in your terminal</div>
+<div style="font-size:13px;color:var(--color-neutral-400)">From <span style="font-family:var(--st-mono)">sessiontap-hub pair</span>. The code expires after 2 minutes.</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isPair }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;flex-direction:column;padding:12px 24px 24px">
+<button onClick="{{ goScan }}" class="btn btn-ghost btn-icon" style="color:var(--st-text);margin-left:-8px;font-size:22px"><i class="ph ph-x"></i></button>
+<sc-if value="{{ pWait }}">
+<div style="margin-top:40px;display:flex;flex-direction:column;flex:1">
+<div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--st-mute)">{{ arc }}<span>Waiting · expires in 1:42</span></div>
+<h2 style="font-size:28px;margin:14px 0 8px;letter-spacing:-0.02em;text-wrap:pretty">Approve on MacBook</h2>
+<p style="font-size:14px;color:var(--st-mute);margin:0 0 24px;text-wrap:pretty">The terminal on MacBook is asking whether to trust this phone. Check the fingerprint matches before you type <span style="font-family:var(--st-mono);color:var(--st-text)">y</span>.</p>
+<div style="border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);padding:16px">
+<div style="font-size:12px;color:var(--st-mute)">This phone</div>
+<div style="font-size:16px;font-weight:500;margin:2px 0 16px">Pixel 9 Pro</div>
+<div style="font-size:12px;color:var(--st-mute);margin-bottom:8px">Device fingerprint</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+<sc-for list="{{ fpGroups }}" as="g" hint-placeholder-count="4"><div style="font-family:var(--st-mono);font-size:19px;font-weight:500;letter-spacing:.04em;text-align:center;padding:10px 0;border-radius:10px;background:var(--st-bg);box-shadow:0 0 0 1px var(--st-line)">{{ g }}</div></sc-for>
+</div>
+</div>
+<div style="flex:1"></div>
+<button onClick="{{ goScan }}" class="btn btn-secondary" style="height:48px;border-radius:24px;width:100%;color:var(--st-text)">Cancel</button>
+</div>
+</sc-if>
+<sc-if value="{{ pOk }}">
+<div style="margin-top:40px;display:flex;flex-direction:column;flex:1">
+<i class="ph-bold ph-check-circle" style="font-size:40px;color:var(--st-ok)"></i>
+<h2 style="font-size:28px;margin:16px 0 8px;letter-spacing:-0.02em">Paired with MacBook</h2>
+<p style="font-size:14px;color:var(--st-mute);margin:0 0 20px">Connected over LAN. When you leave home it switches to your tailnet automatically.</p>
+<div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+<div style="display:flex;gap:12px"><span style="width:88px;color:var(--st-mute)">Endpoint</span><span style="font-family:var(--st-mono)">LAN · 192.168.1.24:7420</span></div>
+<div style="display:flex;gap:12px"><span style="width:88px;color:var(--st-mute)">Hub key</span><span style="font-family:var(--st-mono)">7F3A 9C21 E04B 5D88</span></div>
+</div>
+<div style="flex:1"></div>
+<button onClick="{{ goSessions }}" class="btn btn-primary" style="height:52px;border-radius:26px;width:100%;font-size:15px">View sessions</button>
+</div>
+</sc-if>
+<sc-if value="{{ pExp }}">
+<div style="margin-top:40px;display:flex;flex-direction:column;flex:1">
+<i class="ph ph-timer" style="font-size:40px;color:var(--st-mute)"></i>
+<h2 style="font-size:28px;margin:16px 0 8px;letter-spacing:-0.02em">Pairing code expired</h2>
+<p style="font-size:14px;color:var(--st-mute);margin:0;text-wrap:pretty">Codes last 2 minutes. Run <span style="font-family:var(--st-mono);color:var(--st-text)">sessiontap-hub pair</span> again for a fresh one.</p>
+<div style="flex:1"></div>
+<button onClick="{{ goScan }}" class="btn btn-primary" style="height:52px;border-radius:26px;width:100%;font-size:15px">Scan again</button>
+</div>
+</sc-if>
+<sc-if value="{{ pRej }}">
+<div style="margin-top:40px;display:flex;flex-direction:column;flex:1">
+<i class="ph-bold ph-prohibit" style="font-size:40px;color:var(--st-block)"></i>
+<h2 style="font-size:28px;margin:16px 0 8px;letter-spacing:-0.02em">MacBook declined this phone</h2>
+<p style="font-size:14px;color:var(--st-mute);margin:0;text-wrap:pretty">Someone answered no on the hub, or the fingerprints didn't match. Nothing was shared.</p>
+<div style="flex:1"></div>
+<button onClick="{{ goScan }}" class="btn btn-secondary" style="height:52px;border-radius:26px;width:100%;font-size:15px;color:var(--st-text)">Start over</button>
+</div>
+</sc-if>
+<sc-if value="{{ pUnr }}">
+<div style="margin-top:40px;display:flex;flex-direction:column;flex:1">
+<i class="ph ph-plugs" style="font-size:40px;color:var(--st-mute)"></i>
+<h2 style="font-size:28px;margin:16px 0 8px;letter-spacing:-0.02em">Can't reach MacBook</h2>
+<p style="font-size:14px;color:var(--st-mute);margin:0 0 16px;text-wrap:pretty">The code is valid, but neither address answered.</p>
+<div style="display:flex;flex-direction:column;border-radius:14px;box-shadow:0 0 0 1px var(--st-line);font-family:var(--st-mono);font-size:12px">
+<div style="display:flex;gap:10px;padding:10px 12px;align-items:center"><i class="ph-bold ph-x" style="color:var(--st-block)"></i><span style="flex:1">192.168.1.24:7420</span><span style="color:var(--st-mute)">LAN · timeout</span></div>
+<div style="display:flex;gap:10px;padding:10px 12px;align-items:center;border-top:1px solid var(--st-line)"><i class="ph-bold ph-x" style="color:var(--st-block)"></i><span style="flex:1">macbook.tail3f2a.ts.net</span><span style="color:var(--st-mute)">tailnet · no route</span></div>
+</div>
+<p style="font-size:13px;color:var(--st-mute);margin:14px 0 0;text-wrap:pretty">Join the same Wi-Fi as MacBook, or connect Tailscale on this phone.</p>
+<div style="flex:1"></div>
+<div style="display:flex;gap:10px">
+<button class="btn btn-secondary" style="height:52px;border-radius:26px;flex:1;color:var(--st-text)">Open Tailscale</button>
+<button class="btn btn-primary" style="height:52px;border-radius:26px;flex:1">Retry</button>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isFeed }}" hint-placeholder-val="{{ true }}">
+<div style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
+<sc-if value="{{ isSessions }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;align-items:center;gap:4px;padding:10px 8px 6px 16px;flex:none">
+<div style="flex:1;min-width:0">
+<div style="font-size:22px;font-weight:500;letter-spacing:-0.015em">{{ topTitle }}</div>
+<div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--st-mute);margin-top:1px">
+<sc-for list="{{ summary }}" as="c" hint-placeholder-count="2">
+<span style="display:flex;align-items:center;gap:5px">
+<sc-if value="{{ c.cLive }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok);flex:none"></span></sc-if>
+<sc-if value="{{ c.cReco }}">{{ pulse }}</sc-if>
+<sc-if value="{{ c.cOff }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box;flex:none"></span></sc-if>
+{{ c.text }}</span>
+</sc-for>
+</div>
+</div>
+<button onClick="{{ toggleMenu }}" class="btn btn-ghost btn-icon" style="color:var(--st-text);font-size:22px;width:44px;height:44px;border-radius:22px"><i class="ph ph-dots-three-vertical"></i></button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSheet }}" hint-placeholder-val="{{ false }}">
+<div style="padding:20px 16px 4px;display:flex;flex-direction:column;gap:18px">
+<div style="font-size:18px;font-weight:500">{{ sheetTitle }}</div>
+<div>
+<div style="font-size:11px;color:var(--st-mute);margin-bottom:10px;letter-spacing:.06em;text-transform:uppercase">Effective status</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px 8px">
+<sc-for list="{{ legend }}" as="x" hint-placeholder-count="7">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;filter:{{ x.filter }}">
+<span style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex:none">
+<sc-if value="{{ x.sRun }}">{{ arc }}</sc-if>
+<sc-if value="{{ x.sBlock }}"><span style="width:8px;height:8px;border-radius:50%;background:var(--st-block);box-shadow:0 0 0 3px color-mix(in oklab,var(--st-block) 25%,transparent)"></span></sc-if>
+<sc-if value="{{ x.sIdle }}"><span style="width:8px;height:8px;border-radius:50%;border:1.5px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ x.sDone }}"><i class="ph-bold ph-check" style="font-size:13px;color:var(--st-ok)"></i></sc-if>
+<sc-if value="{{ x.sFail }}"><i class="ph-bold ph-x" style="font-size:13px;color:var(--st-block)"></i></sc-if>
+<sc-if value="{{ x.sOther }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-dim)"></span></sc-if>
+</span>{{ x.label }}</div>
+</sc-for>
+</div>
+</div>
+<div>
+<div style="font-size:11px;color:var(--st-mute);margin-bottom:10px;letter-spacing:.06em;text-transform:uppercase">Hub connection · provider marks</div>
+<div style="display:flex;gap:18px;align-items:center;font-size:12px;flex-wrap:wrap">
+<span style="display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok)"></span>live</span>
+<span style="display:flex;align-items:center;gap:6px">{{ pulse }}reconnecting</span>
+<span style="display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box"></span>offline</span>
+<span style="flex:1"></span>
+<sc-for list="{{ provList }}" as="pv" hint-placeholder-count="4"><span style="font:500 9.5px var(--st-mono);padding:1px 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-mute)">{{ pv }}</span></sc-for>
+</div>
+</div>
+<div style="font-size:11px;color:var(--st-mute);letter-spacing:.06em;text-transform:uppercase;margin-bottom:-12px">Hub chips · filter chips</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showHubChips }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;gap:6px;overflow-x:auto;padding:6px 16px 2px;scrollbar-width:none;flex:none">
+<sc-for list="{{ hubChips }}" as="ch" hint-placeholder-count="4">
+<div onClick="{{ ch.onClick }}" style="flex:none;display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:10px;box-shadow:inset 0 0 0 1px {{ ch.border }};background:{{ ch.bg }};color:{{ ch.color }};font-size:13px;font-weight:500;cursor:pointer;user-select:none">
+<sc-if value="{{ ch.cLive }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok);flex:none"></span></sc-if>
+<sc-if value="{{ ch.cReco }}">{{ pulse }}</sc-if>
+<sc-if value="{{ ch.cOff }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box;flex:none"></span></sc-if>
+{{ ch.label }}<span style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ ch.count }}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ showFilters }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;gap:6px;overflow-x:auto;padding:6px 16px 6px;scrollbar-width:none;flex:none">
+<sc-for list="{{ filterChips }}" as="ch" hint-placeholder-count="4">
+<div onClick="{{ ch.onClick }}" style="flex:none;display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;box-shadow:inset 0 0 0 1px {{ ch.border }};background:{{ ch.bg }};color:{{ ch.color }};font-size:12.5px;font-weight:500;cursor:pointer;user-select:none">
+<sc-if value="{{ ch.attn }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-block)"></span></sc-if>
+{{ ch.label }}<span style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ ch.count }}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+<div style="flex:1;min-height:0;overflow-y:{{ feedOverflow }};scrollbar-width:none;padding-bottom:{{ feedPad }}">
+<sc-for list="{{ feed }}" as="it" hint-placeholder-count="6">
+<sc-if value="{{ it.isLabel }}"><div style="font-size:11px;color:var(--st-mute);letter-spacing:.06em;text-transform:uppercase;padding:18px 16px 6px">{{ it.title }}</div></sc-if>
+<sc-if value="{{ it.isSection }}">
+<div onClick="{{ it.onToggle }}" style="display:flex;align-items:center;gap:8px;padding:14px 12px 6px 16px;cursor:pointer;user-select:none">
+<sc-if value="{{ it.cLive }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok);flex:none"></span></sc-if>
+<sc-if value="{{ it.cReco }}">{{ pulse }}</sc-if>
+<sc-if value="{{ it.cOff }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box;flex:none"></span></sc-if>
+<sc-if value="{{ it.cAttn }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-block);flex:none"></span></sc-if>
+<span style="font-size:12.5px;font-weight:500;color:{{ it.titleColor }}">{{ it.title }}</span>
+<span style="font-size:12px;color:var(--st-mute)">{{ it.meta }}</span>
+<span style="flex:1;height:1px;background:linear-gradient(to right,var(--st-line),transparent);margin:0 6px"></span>
+<span style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ it.count }}</span>
+<i class="ph ph-caret-down" style="font-size:14px;color:var(--st-mute);transform:{{ it.chev }};transition:transform .2s"></i>
+</div>
+</sc-if>
+<sc-if value="{{ it.isSource }}"><div style="display:flex;align-items:center;gap:6px;padding:8px 16px 2px 30px;font-family:var(--st-mono);font-size:11px;color:var(--st-mute)"><i class="{{ it.icon }}" style="font-size:12px"></i>{{ it.title }}</div></sc-if>
+<sc-if value="{{ it.isNote }}"><div style="padding:2px 16px 6px 30px;font-size:12px;color:var(--st-mute)">{{ it.title }}</div></sc-if>
+<sc-if value="{{ it.isError }}">
+<div style="margin:8px 12px 4px;padding:14px 16px;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500"><i class="ph ph-plugs" style="font-size:18px;color:var(--st-mute)"></i>{{ it.title }}</div>
+<div style="font-size:13px;color:var(--st-mute);text-wrap:pretty">{{ it.body }}</div>
+<div style="font-family:var(--st-mono);font-size:11.5px;color:var(--st-mute)">{{ it.detail }}</div>
+<div style="display:flex;gap:8px;margin-top:6px"><button class="btn btn-primary" style="border-radius:16px;height:32px;padding:0 14px;font-size:13px">Retry now</button><button class="btn btn-secondary" style="border-radius:16px;height:32px;padding:0 14px;font-size:13px;color:var(--st-text)">Open Tailscale</button></div>
+</div>
+</sc-if>
+<sc-if value="{{ it.isEmpty }}">
+<div style="padding:56px 28px 0;display:flex;flex-direction:column;gap:8px">
+<i class="{{ it.icon }}" style="font-size:32px;color:var(--st-mute)"></i>
+<div style="font-size:18px;font-weight:500;margin-top:6px">{{ it.title }}</div>
+<div style="font-size:13.5px;color:var(--st-mute);text-wrap:pretty">{{ it.body }}</div>
+<sc-if value="{{ it.cmd }}"><div style="margin-top:10px;font-family:var(--st-mono);font-size:13px;padding:10px 14px;border-radius:12px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);align-self:flex-start">{{ it.cmd }}</div></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{ it.isRow }}">
+<div style="position:relative;overflow:hidden">
+<sc-if value="{{ it.swipeable }}"><div style="position:absolute;inset:0;background:color-mix(in oklab,var(--st-block) 22%,var(--st-bg));display:flex;align-items:center;justify-content:flex-end;padding-right:22px;gap:6px;color:var(--st-block);font-size:13px;font-weight:500"><i class="ph ph-eraser" style="font-size:17px"></i>Forget</div></sc-if>
+<div onClick="{{ it.onTap }}" onPointerDown="{{ it.onPD }}" onPointerMove="{{ it.onPM }}" onPointerUp="{{ it.onPU }}" onPointerCancel="{{ it.onPU }}" style="position:relative;display:flex;gap:10px;padding:10px 14px 10px 14px;background:{{ it.bg }};transform:{{ it.tx }};transition:{{ it.trans }};filter:{{ it.filter }};touch-action:pan-y;cursor:pointer;user-select:none">
+<span style="width:16px;height:20px;display:flex;align-items:center;justify-content:center;flex:none">
+<sc-if value="{{ it.sRun }}">{{ arc }}</sc-if>
+<sc-if value="{{ it.sBlock }}"><span style="width:8px;height:8px;border-radius:50%;background:var(--st-block);box-shadow:0 0 0 3px color-mix(in oklab,var(--st-block) 25%,transparent)"></span></sc-if>
+<sc-if value="{{ it.sIdle }}"><span style="width:8px;height:8px;border-radius:50%;border:1.5px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ it.sDone }}"><i class="ph-bold ph-check" style="font-size:13px;color:var(--st-ok)"></i></sc-if>
+<sc-if value="{{ it.sFail }}"><i class="ph-bold ph-x" style="font-size:13px;color:var(--st-block)"></i></sc-if>
+<sc-if value="{{ it.sOther }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-dim)"></span></sc-if>
+</span>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+<div style="display:flex;align-items:center;gap:6px;min-width:0">
+<span style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ it.name }}</span>
+<span style="flex:none;font:500 9.5px var(--st-mono);padding:1px 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-mute)">{{ it.provShort }}</span>
+<sc-if value="{{ it.hubTag }}"><span style="flex:none;font-size:11px;color:var(--st-mute);padding:0 6px;border-radius:4px;background:var(--st-line)">{{ it.hubTag }}</span></sc-if>
+<span style="flex:1"></span>
+<span style="flex:none;font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ it.time }}</span>
+</div>
+<div style="display:flex;align-items:center;gap:6px;min-width:0;font-size:12px">
+<span style="width:6px;height:6px;border-radius:2px;flex:none;background:{{ it.repoColor }}"></span>
+<span style="font-family:var(--st-mono);font-size:11.5px;white-space:nowrap;flex:none;max-width:46%;overflow:hidden;text-overflow:ellipsis">{{ it.branch }}</span>
+<span style="color:var(--st-dim);flex:none">·</span>
+<span style="color:var(--st-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-family:{{ it.actFont }}">{{ it.activity }}</span>
+</div>
+<sc-if value="{{ it.reason }}"><div style="font-size:12px;color:var(--st-block);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ it.reason }}</div></sc-if>
+</div>
+<sc-if value="{{ it.kidCount }}">
+<div onClick="{{ it.onKids }}" onPointerDown="{{ it.stop }}" style="align-self:center;flex:none;display:flex;gap:4px;align-items:center;height:26px;padding:0 6px 0 8px;border-radius:13px;box-shadow:inset 0 0 0 1px var(--st-line);background:{{ it.kidBg }};font:500 11px var(--st-mono);color:var(--st-mute)"><i class="ph ph-tree-structure" style="font-size:12px"></i>{{ it.kidCount }}<i class="ph ph-caret-down" style="font-size:11px;transform:{{ it.kidChev }}"></i></div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ it.isKids }}">
+<div style="padding:0 14px 10px 40px;background:{{ it.bg }};filter:{{ it.filter }}">
+<div style="border-left:1px solid var(--st-line);padding-left:10px;display:flex;flex-direction:column">
+<div style="font-size:11px;color:var(--st-mute);padding:0 0 4px">{{ it.title }}</div>
+<sc-for list="{{ it.kids }}" as="k" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:8px;padding:4px 0;min-width:0">
+<span style="width:14px;height:14px;display:flex;align-items:center;justify-content:center;flex:none">
+<sc-if value="{{ k.sRun }}">{{ arc }}</sc-if>
+<sc-if value="{{ k.sBlock }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-block)"></span></sc-if>
+<sc-if value="{{ k.sIdle }}"><span style="width:7px;height:7px;border-radius:50%;border:1.5px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ k.sDone }}"><i class="ph-bold ph-check" style="font-size:12px;color:var(--st-ok)"></i></sc-if>
+<sc-if value="{{ k.sFail }}"><i class="ph-bold ph-x" style="font-size:12px;color:var(--st-block)"></i></sc-if>
+<sc-if value="{{ k.sOther }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-dim)"></span></sc-if>
+</span>
+<span style="font-size:12.5px;font-weight:500;flex:none">{{ k.name }}</span>
+<span style="font-size:12px;color:{{ k.sumColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1">{{ k.summary }}</span>
+<span style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute);flex:none">{{ k.el }}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ it.isSnack }}">
+<div style="margin:10px 12px 0;display:flex;align-items:center;gap:12px;padding:12px 8px 12px 16px;border-radius:8px;background:var(--st-inv);color:var(--st-inv-text);font-size:14px"><span style="flex:1">{{ it.title }}</span><span style="color:var(--st-inv-acc);font-weight:500;padding:0 8px">Undo</span></div>
+</sc-if>
+</sc-for>
+</div>
+
+<sc-if value="{{ isSessions }}" hint-placeholder-val="{{ true }}">
+<div style="position:absolute;left:0;right:0;bottom:0;height:72px;display:flex;background:var(--st-surf);box-shadow:0 -1px 0 var(--st-line)">
+<sc-for list="{{ navItems }}" as="n" hint-placeholder-count="3">
+<div onClick="{{ n.onClick }}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer">
+<div style="position:relative;width:56px;height:30px;border-radius:15px;background:{{ n.ind }};display:flex;align-items:center;justify-content:center;font-size:20px;color:{{ n.color }}"><i class="{{ n.icon }}"></i>
+<sc-if value="{{ n.badge }}"><span style="position:absolute;top:2px;right:12px;min-width:16px;height:16px;border-radius:8px;background:var(--st-block);color:var(--st-bg);font:600 10px var(--st-mono);display:flex;align-items:center;justify-content:center;padding:0 4px">{{ n.badge }}</span></sc-if>
+</div>
+<span style="font-size:12px;font-weight:500;color:{{ n.color }}">{{ n.label }}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ headsup }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;top:6px;left:8px;right:8px;z-index:8;padding:14px 16px 10px;border-radius:24px;background:var(--st-surf2);box-shadow:var(--shadow-md);display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-acc-tint);display:flex;align-items:center;justify-content:center;color:var(--st-acc);font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · now<span style="flex:1"></span><i class="ph ph-caret-down"></i></div>
+<div style="font-size:14.5px;font-weight:500;margin-top:4px">Fix flaky auth tests</div>
+<div style="font-size:13px;color:var(--st-mute);text-wrap:pretty">MacBook · Claude Code needs your permission · <span style="font-family:var(--st-mono);font-size:12px">~/code/api · feat/auth-retry</span></div>
+<div style="display:flex;gap:4px;margin-top:6px"><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Open</span><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Mute MacBook 1h</span></div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;min-height:0;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;padding:6px 4px;flex:none">
+<button onClick="{{ goSessions }}" class="btn btn-ghost btn-icon" style="color:var(--st-text);font-size:22px;width:44px;height:44px;border-radius:22px"><i class="ph ph-arrow-left"></i></button>
+<span style="flex:1;font-size:13px;color:var(--st-mute);padding-left:4px">{{ d.hubSource }}</span>
+<button onClick="{{ toggleMenu }}" class="btn btn-ghost btn-icon" style="color:var(--st-text);font-size:22px;width:44px;height:44px;border-radius:22px"><i class="ph ph-dots-three-vertical"></i></button>
+</div>
+<div style="flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;padding:0 16px 24px;display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;flex-direction:column;gap:8px;padding:0 4px">
+<h2 style="font-size:24px;margin:0;letter-spacing:-0.02em;text-wrap:pretty">{{ d.name }}</h2>
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+<sc-for list="{{ d.chips }}" as="c" hint-placeholder-count="3"><span style="font-size:12px;padding:3px 9px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-mute);font-family:{{ c.font }}">{{ c.label }}</span></sc-for>
+</div>
+</div>
+<div style="padding:14px 16px;border-radius:16px;background:{{ d.statusBg }};box-shadow:0 0 0 1px var(--st-line);display:flex;gap:12px">
+<span style="width:16px;height:20px;display:flex;align-items:center;justify-content:center;flex:none">
+<sc-if value="{{ d.sRun }}">{{ arc }}</sc-if>
+<sc-if value="{{ d.sBlock }}"><span style="width:8px;height:8px;border-radius:50%;background:var(--st-block);box-shadow:0 0 0 3px color-mix(in oklab,var(--st-block) 25%,transparent)"></span></sc-if>
+<sc-if value="{{ d.sIdle }}"><span style="width:8px;height:8px;border-radius:50%;border:1.5px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ d.sDone }}"><i class="ph-bold ph-check" style="font-size:13px;color:var(--st-ok)"></i></sc-if>
+<sc-if value="{{ d.sFail }}"><i class="ph-bold ph-x" style="font-size:13px;color:var(--st-block)"></i></sc-if>
+<sc-if value="{{ d.sOther }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-dim)"></span></sc-if>
+</span>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+<div style="font-size:15px;font-weight:500;color:{{ d.statusColor }}">{{ d.statusTitle }}</div>
+<div style="font-family:var(--st-mono);font-size:12px;text-wrap:pretty;word-break:break-word">{{ d.statusLine }}</div>
+<div style="font-size:12px;color:var(--st-mute)">{{ d.statusMeta }}</div>
+</div>
+</div>
+<div>
+<div style="font-size:12px;color:var(--st-mute);padding:0 4px 6px">Location</div>
+<div style="display:flex;flex-direction:column;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);font-size:13px">
+<div style="display:flex;gap:12px;padding:11px 14px"><span style="width:64px;color:var(--st-mute);flex:none">cwd</span><span style="font-family:var(--st-mono);font-size:12.5px">{{ d.cwd }}</span></div>
+<div style="display:flex;gap:12px;padding:11px 14px;border-top:1px solid var(--st-line);align-items:center"><span style="width:64px;color:var(--st-mute);flex:none">branch</span><span style="width:6px;height:6px;border-radius:2px;background:{{ d.repoColor }};flex:none"></span><span style="font-family:var(--st-mono);font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">{{ d.branch }}</span><sc-if value="{{ d.dirty }}"><span style="font-family:var(--st-mono);font-size:11px;color:var(--st-run)">● dirty</span></sc-if></div>
+<div style="display:flex;gap:12px;padding:11px 14px;border-top:1px solid var(--st-line)"><span style="width:64px;color:var(--st-mute);flex:none">head</span><span style="font-family:var(--st-mono);font-size:12.5px">{{ d.sha }}</span></div>
+</div>
+</div>
+<div>
+<div style="font-size:12px;color:var(--st-mute);padding:0 4px 6px">Usage</div>
+<div style="padding:14px;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);display:flex;flex-direction:column;gap:12px">
+<div style="display:flex;align-items:baseline;gap:8px;font-size:13px"><span style="flex:1">Context window</span><span style="font-family:var(--st-mono);font-size:12px;color:var(--st-mute)">{{ d.ctxUsed }}</span><span style="font-family:var(--st-mono);font-size:14px;font-weight:500">{{ d.ctxPct }}</span></div>
+<div style="height:6px;border-radius:3px;background:var(--st-line);overflow:hidden"><div style="height:100%;width:{{ d.ctxPct }};background:{{ d.ctxColor }};border-radius:3px"></div></div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+<sc-for list="{{ d.tokens }}" as="t" hint-placeholder-count="3"><div><div style="font-size:11px;color:var(--st-mute)">{{ t.label }}</div><div style="font-family:var(--st-mono);font-size:15px;font-weight:500">{{ t.value }}</div></div></sc-for>
+</div>
+</div>
+</div>
+<sc-if value="{{ d.hasKids }}">
+<div>
+<div style="font-size:12px;color:var(--st-mute);padding:0 4px 6px">{{ d.kidsTitle }}</div>
+<div style="display:flex;flex-direction:column;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line)">
+<sc-for list="{{ d.kids }}" as="k" hint-placeholder-count="3">
+<div style="display:flex;gap:10px;padding:11px 14px;border-top:{{ k.border }};background:{{ k.bg }}">
+<span style="width:14px;height:18px;display:flex;align-items:center;justify-content:center;flex:none">
+<sc-if value="{{ k.sRun }}">{{ arc }}</sc-if>
+<sc-if value="{{ k.sBlock }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-block)"></span></sc-if>
+<sc-if value="{{ k.sIdle }}"><span style="width:7px;height:7px;border-radius:50%;border:1.5px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ k.sDone }}"><i class="ph-bold ph-check" style="font-size:12px;color:var(--st-ok)"></i></sc-if>
+<sc-if value="{{ k.sFail }}"><i class="ph-bold ph-x" style="font-size:12px;color:var(--st-block)"></i></sc-if>
+<sc-if value="{{ k.sOther }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-dim)"></span></sc-if>
+</span>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+<div style="display:flex;gap:8px;align-items:baseline"><span style="font-size:13.5px;font-weight:500;flex:1">{{ k.name }}</span><span style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ k.el }}</span></div>
+<div style="font-size:12px;color:{{ k.sumColor }};text-wrap:pretty">{{ k.summary }}</div>
+<div style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ k.times }}</div>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<div style="display:flex;flex-direction:column;gap:6px;padding:0 4px;font-size:12.5px">
+<div style="display:flex"><span style="width:80px;color:var(--st-mute)">Created</span><span style="font-family:var(--st-mono);font-size:12px">{{ d.created }}</span></div>
+<div style="display:flex"><span style="width:80px;color:var(--st-mute)">Updated</span><span style="font-family:var(--st-mono);font-size:12px">{{ d.updated }}</span></div>
+<div style="display:flex"><span style="width:80px;color:var(--st-mute)">Session</span><span style="font-family:var(--st-mono);font-size:12px">{{ d.sid }}</span></div>
+</div>
+<sc-if value="{{ d.stopped }}">
+<div style="display:flex;flex-direction:column;gap:6px">
+<button onClick="{{ d.onForget }}" class="btn btn-secondary" style="height:44px;border-radius:22px;color:var(--st-block);box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--st-block) 45%,transparent);border-color:transparent;gap:8px"><i class="ph ph-eraser"></i>Forget session</button>
+<div style="font-size:12px;color:var(--st-mute);text-align:center">Removes it from {{ d.hubName }}'s list. Files and history on disk are untouched.</div>
+</div>
+</sc-if>
+<sc-if value="{{ d.notStopped }}"><div style="font-size:12px;color:var(--st-mute);padding:0 4px">Forget becomes available once this session stops.</div></sc-if>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isHubs }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
+<div style="padding:10px 16px 10px;flex:none"><div style="font-size:22px;font-weight:500;letter-spacing:-0.015em">Hubs</div><div style="font-size:12px;color:var(--st-mute)">{{ hubsSub }}</div></div>
+<div style="flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;padding:4px 12px 96px;display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{ hubCards }}" as="h" hint-placeholder-count="3">
+<div style="padding:14px 16px 8px;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px">
+<sc-if value="{{ h.cLive }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-ok);flex:none"></span></sc-if>
+<sc-if value="{{ h.cReco }}">{{ pulse }}</sc-if>
+<sc-if value="{{ h.cOff }}"><span style="width:7px;height:7px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box;flex:none"></span></sc-if>
+<span style="font-size:16px;font-weight:500;flex:1">{{ h.name }}</span>
+<span style="font-size:12px;color:var(--st-mute)">{{ h.connText }}</span>
+</div>
+<div style="display:grid;grid-template-columns:84px 1fr;row-gap:5px;font-size:12.5px">
+<span style="color:var(--st-mute)">Endpoint</span><span style="font-family:var(--st-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.endpoint }}</span>
+<span style="color:var(--st-mute)">Fingerprint</span><span style="font-family:var(--st-mono);font-size:12px">{{ h.fp }}</span>
+<span style="color:var(--st-mute)">Last seen</span><span style="font-family:var(--st-mono);font-size:12px">{{ h.seen }}</span>
+</div>
+<div style="display:flex;justify-content:flex-end"><button onClick="{{ h.onUnpair }}" class="btn btn-ghost" style="color:var(--st-block);font-size:13px;padding:6px 10px;border-radius:16px">Unpair</button></div>
+</div>
+</sc-for>
+<button onClick="{{ goScan }}" class="btn btn-primary" style="height:48px;border-radius:24px;gap:8px;margin-top:6px"><i class="ph ph-plus"></i>Pair another hub</button>
+<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;font-size:12px;color:var(--st-mute)"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok)"></span>Tailscale connected on this phone · off-LAN hubs reachable</div>
+</div>
+<div style="position:absolute;left:0;right:0;bottom:0;height:72px;display:flex;background:var(--st-surf);box-shadow:0 -1px 0 var(--st-line)">
+<sc-for list="{{ navItems }}" as="n" hint-placeholder-count="3">
+<div onClick="{{ n.onClick }}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer">
+<div style="position:relative;width:56px;height:30px;border-radius:15px;background:{{ n.ind }};display:flex;align-items:center;justify-content:center;font-size:20px;color:{{ n.color }}"><i class="{{ n.icon }}"></i>
+<sc-if value="{{ n.badge }}"><span style="position:absolute;top:2px;right:12px;min-width:16px;height:16px;border-radius:8px;background:var(--st-block);color:var(--st-bg);font:600 10px var(--st-mono);display:flex;align-items:center;justify-content:center;padding:0 4px">{{ n.badge }}</span></sc-if>
+</div>
+<span style="font-size:12px;font-weight:500;color:{{ n.color }}">{{ n.label }}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isAlerts }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
+<div style="padding:10px 16px 6px;flex:none"><div style="font-size:22px;font-weight:500;letter-spacing:-0.015em">Notifications</div><div style="font-size:12px;color:var(--st-mute)">What reaches you, and when</div></div>
+<div style="flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;padding:0 12px 96px">
+<sc-for list="{{ settings }}" as="r" hint-placeholder-count="8">
+<sc-if value="{{ r.isHead }}"><div style="font-size:12px;color:var(--st-mute);padding:18px 4px 6px">{{ r.title }}</div></sc-if>
+<sc-if value="{{ r.isRow }}">
+<div onClick="{{ r.onToggle }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--st-surf);border-radius:{{ r.radius }};margin-top:2px;cursor:pointer;user-select:none;opacity:{{ r.opacity }}">
+<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500">{{ r.title }}</div><sc-if value="{{ r.sub }}"><div style="font-size:12px;color:var(--st-mute);font-family:{{ r.subFont }}">{{ r.sub }}</div></sc-if></div>
+<sc-if value="{{ r.on }}"><span style="width:46px;height:28px;border-radius:14px;background:var(--st-acc-tint);box-shadow:inset 0 0 0 1.5px var(--st-acc);position:relative;flex:none"><span style="position:absolute;right:4px;top:4px;width:20px;height:20px;border-radius:50%;background:var(--st-acc);display:flex;align-items:center;justify-content:center;color:var(--st-bg);font-size:11px"><i class="ph-bold ph-check"></i></span></span></sc-if>
+<sc-if value="{{ r.off }}"><span style="width:46px;height:28px;border-radius:14px;box-shadow:inset 0 0 0 1.5px var(--st-dim);position:relative;flex:none"><span style="position:absolute;left:7px;top:7px;width:14px;height:14px;border-radius:50%;background:var(--st-dim)"></span></span></sc-if>
+</div>
+</sc-if>
+</sc-for>
+</div>
+<div style="position:absolute;left:0;right:0;bottom:0;height:72px;display:flex;background:var(--st-surf);box-shadow:0 -1px 0 var(--st-line)">
+<sc-for list="{{ navItems }}" as="n" hint-placeholder-count="3">
+<div onClick="{{ n.onClick }}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer">
+<div style="position:relative;width:56px;height:30px;border-radius:15px;background:{{ n.ind }};display:flex;align-items:center;justify-content:center;font-size:20px;color:{{ n.color }}"><i class="{{ n.icon }}"></i>
+<sc-if value="{{ n.badge }}"><span style="position:absolute;top:2px;right:12px;min-width:16px;height:16px;border-radius:8px;background:var(--st-block);color:var(--st-bg);font:600 10px var(--st-mono);display:flex;align-items:center;justify-content:center;padding:0 4px">{{ n.badge }}</span></sc-if>
+</div>
+<span style="font-size:12px;font-weight:500;color:{{ n.color }}">{{ n.label }}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isShade }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;flex-direction:column;gap:2px;padding:4px 10px 0;background:var(--st-wall);margin-top:-36px;padding-top:44px">
+<div style="display:flex;align-items:baseline;gap:10px;padding:8px 10px 14px"><span style="font-size:34px;font-weight:400;letter-spacing:-0.02em">14:32</span><span style="font-size:14px;color:var(--st-mute)">Sat, Oct 3</span></div>
+<div style="padding:14px 16px 8px;border-radius:24px 24px 6px 6px;background:var(--st-surf2);display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-acc-tint);display:flex;align-items:center;justify-content:center;color:var(--st-acc);font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · now<span style="flex:1"></span><i class="ph ph-caret-up"></i></div>
+<div style="font-size:14.5px;font-weight:500;margin-top:4px">Fix flaky auth tests</div>
+<div style="font-size:13px;color:var(--st-mute);text-wrap:pretty">MacBook · Claude Code needs your permission · <span style="font-family:var(--st-mono);font-size:12px">~/code/api · feat/auth-retry</span></div>
+<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--st-bg);font-family:var(--st-mono);font-size:12px;line-height:1.5;text-wrap:pretty">Explore subagent wants to run<br>Bash · find ~/code -name "*.pem" -newer .env</div>
+<div style="margin-top:8px;font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">Context 42% · In 15.3k · Out 2.1k</div>
+<div style="display:flex;gap:4px;margin-top:4px;margin-left:-10px"><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Open session</span><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Mute MacBook 1h</span></div>
+</div>
+<div style="padding:12px 16px;border-radius:6px 6px 24px 24px;background:var(--st-surf2);display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-line);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · 2m</div>
+<div style="font-size:14px;font-weight:500;margin-top:2px">Provision dev box</div>
+<div style="font-size:13px;color:var(--st-mute)">MacBook · Codex needs your permission · <span style="font-family:var(--st-mono);font-size:12px">~/infra · chore/devbox</span></div>
+</div>
+<div style="height:8px"></div>
+<div style="padding:12px 16px;border-radius:24px 24px 6px 6px;background:var(--st-surf2);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-line);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · Desktop<span style="font-family:var(--st-mono)">2</span><span style="flex:1"></span><i class="ph ph-caret-down"></i></div>
+<div style="padding:10px 16px;border-radius:6px;background:var(--st-surf2);font-size:13px;display:flex;gap:6px;min-width:0"><span style="font-weight:500;flex:none">Write release notes</span><span style="color:var(--st-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Codex needs input · Which version tag?</span></div>
+<div style="padding:10px 16px 12px;border-radius:6px 6px 24px 24px;background:var(--st-surf2);font-size:13px;display:flex;gap:6px;min-width:0"><span style="font-weight:500;flex:none">Benchmark tokenizer</span><span style="color:var(--st-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Pi failed · exited 1</span></div>
+<div style="height:8px"></div>
+<div style="padding:12px 16px;border-radius:24px;background:var(--st-surf2);display:flex;flex-direction:column;gap:2px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-line);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · 1h</div>
+<div style="font-size:14px;margin-top:2px">Migrate to Vite 6 <span style="color:var(--st-mute)">finished</span></div>
+<div style="font-size:12.5px;color:var(--st-mute);font-family:var(--st-mono)">~/code/web · chore/vite-6</div>
+</div>
+<div style="font-size:12px;color:var(--st-mute);padding:14px 10px 6px">Silent</div>
+<div style="padding:12px 16px;border-radius:24px;background:var(--st-surf2);display:flex;align-items:center;gap:8px;font-size:13px"><i class="ph ph-broadcast" style="color:var(--st-mute)"></i><span style="flex:1">Watching 2 hubs · 1 needs attention</span><i class="ph ph-caret-down" style="color:var(--st-mute)"></i></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isLock }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;flex-direction:column;padding:44px 12px 0;background:var(--st-wall);margin-top:-36px">
+<div style="padding:30px 16px 0;display:flex;flex-direction:column">
+<span style="font-size:13px;color:var(--st-mute)">Sat, Oct 3</span>
+<span style="font-size:92px;line-height:1;font-weight:400;letter-spacing:-0.04em;margin-top:4px">14:32</span>
+</div>
+<div style="flex:1"></div>
+<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:12px">
+<div style="padding:12px 16px;border-radius:24px 24px 6px 6px;background:color-mix(in oklab,var(--st-surf2) 85%,transparent);display:flex;flex-direction:column;gap:2px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-acc-tint);display:flex;align-items:center;justify-content:center;color:var(--st-acc);font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · now</div>
+<div style="font-size:14px;font-weight:500;margin-top:2px">Claude Code needs your permission</div>
+<div style="font-size:13px;color:var(--st-mute)">Unlock to see details</div>
+</div>
+<div style="padding:12px 16px;border-radius:6px 6px 24px 24px;background:color-mix(in oklab,var(--st-surf2) 85%,transparent);display:flex;flex-direction:column;gap:2px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-line);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · Desktop · 5m</div>
+<div style="font-size:14px;font-weight:500;margin-top:2px">Codex needs input</div>
+<div style="font-size:13px;color:var(--st-mute)">Unlock to see details</div>
+</div>
+<div style="margin-top:8px;padding:10px 16px;border-radius:20px;background:color-mix(in oklab,var(--st-surf2) 70%,transparent);font-size:12.5px;color:var(--st-mute);display:flex;gap:8px;align-items:center"><i class="ph ph-broadcast"></i>Watching 2 hubs · 1 needs attention</div>
+</div>
+<div style="display:flex;justify-content:center;padding:18px 0 22px;font-size:30px;color:var(--st-mute)"><i class="ph ph-fingerprint"></i></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ framed }}" hint-placeholder-val="{{ true }}">
+<div style="height:22px;flex:none;display:flex;align-items:center;justify-content:center;background:{{ navBg }};position:relative;z-index:6"><span style="width:108px;height:4px;border-radius:2px;background:var(--st-text);opacity:.45"></span></div>
+</sc-if>
+
+<sc-if value="{{ snack }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:12px;right:12px;bottom:{{ snackBottom }};z-index:9;display:flex;align-items:center;gap:12px;padding:12px 8px 12px 16px;border-radius:8px;background:var(--st-inv);color:var(--st-inv-text);font-size:14px;box-shadow:var(--shadow-md)"><span style="flex:1">{{ snack.text }}</span><button onClick="{{ undo }}" class="btn btn-ghost" style="color:var(--st-inv-acc);font-size:14px;padding:6px 10px">Undo</button></div>
+</sc-if>
+
+<sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ toggleMenu }}" style="position:absolute;inset:0;z-index:10"></div>
+<div style="position:absolute;top:84px;right:12px;z-index:11;min-width:220px;padding:6px 0;border-radius:14px;background:var(--st-surf2);box-shadow:var(--shadow-md);display:flex;flex-direction:column">
+<sc-for list="{{ menuItems }}" as="m" hint-placeholder-count="3">
+<div onClick="{{ m.onClick }}" style="display:flex;align-items:center;gap:12px;padding:11px 16px;font-size:14px;color:{{ m.color }};cursor:pointer" style-hover="background:var(--st-line)"><i class="{{ m.icon }}" style="font-size:18px"></i>{{ m.label }}</div>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{ dialog }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;z-index:12;background:color-mix(in oklab,var(--color-bg) 60%,transparent);display:flex;align-items:center;justify-content:center;padding:24px">
+<div style="width:100%;padding:24px;border-radius:28px;background:var(--st-surf2);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:12px">
+<i class="ph ph-link-break" style="font-size:24px;color:var(--st-block)"></i>
+<div style="font-size:22px;font-weight:500">Unpair {{ dialog.name }}?</div>
+<div style="font-size:14px;color:var(--st-mute);text-wrap:pretty">This phone stops receiving {{ dialog.name }}'s sessions and alerts, and the hub forgets this device's key. To reconnect, pair again from the hub.</div>
+<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button onClick="{{ closeDialog }}" class="btn btn-ghost" style="color:var(--st-acc);padding:8px 14px;border-radius:20px">Cancel</button><button onClick="{{ confirmUnpair }}" class="btn btn-secondary" style="color:var(--st-block);box-shadow:inset 0 0 0 1px var(--st-block);border-color:transparent;padding:8px 16px;border-radius:20px">Unpair</button></div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;welcome&quot;,&quot;perms&quot;,&quot;scan&quot;,&quot;pair&quot;,&quot;sessions&quot;,&quot;detail&quot;,&quot;hubs&quot;,&quot;alerts&quot;,&quot;shade&quot;,&quot;lock&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;sessions&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hubs&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:3,&quot;tsType&quot;:&quot;number&quot;},&quot;scenario&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;hub-unreachable&quot;,&quot;all-offline&quot;,&quot;no-sessions&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;pair&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;success&quot;,&quot;expired&quot;,&quot;rejected&quot;,&quot;unreachable&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;expand&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;detail&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;s1&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;filter&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;all&quot;,&quot;attention&quot;,&quot;running&quot;,&quot;stale&quot;],&quot;default&quot;:&quot;all&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;headsup&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { nav: null, hubSel: null, filter: null, expanded: {}, collapsed: {}, forgotten: {}, unpaired: {}, snack: null, menu: false, dialog: null, drag: null, pairState: null, detailId: null, toggles: {}, perms: {} };
+
+  PROV = { claude: ['Claude Code', 'CC'], codex: ['Codex', 'CX'], pi: ['Pi', 'PI'], qwen: ['Qwen Code', 'QW'] };
+  REPO = { api: 'oklch(0.72 0.11 250)', infra: 'oklch(0.72 0.11 165)', billing: 'oklch(0.72 0.11 320)', web: 'oklch(0.74 0.11 85)', tok: 'oklch(0.72 0.11 205)', docs: 'oklch(0.66 0.02 280)', plug: 'oklch(0.72 0.11 20)' };
+  HUBS = [
+    { id: 'mbp', name: 'MacBook', conn: 'live', connText: 'live', endpoint: 'LAN · 192.168.1.24:7420', fp: '7F3A 9C21 E04B 5D88', seen: 'now' },
+    { id: 'desk', name: 'Desktop', conn: 'reco', connText: 'reconnecting 12s', endpoint: 'tailnet · desktop.tail3f2a.ts.net', fp: 'C10D 44E7 9A02 B3F6', seen: '12s ago' },
+    { id: 'vm', name: 'Sandbox-VM', conn: 'off', connText: 'offline · 2h', endpoint: 'tailnet · sandbox-vm.tail3f2a.ts.net', fp: '5B9E 0F71 2DC8 A644', seen: '2h ago' }
+  ];
+  SESS = [
+    { id: 's1', hub: 'mbp', src: 'host', name: 'Fix flaky auth tests', prov: 'claude', repo: 'api', branch: 'feat/auth-retry', status: 'running', act: 'pnpm test --filter auth', mono: true, t: '8m', model: 'opus-4.1', effort: 'high', cwd: '~/code/api', dirty: true, sha: 'a41f9c2', ctx: 42, ctxUsed: '84k / 200k', tin: '15.3k', tout: '2.1k', tcache: '2.4M', created: 'Oct 3 · 14:24', updated: '8s ago', kids: [
+      { name: 'Explore', status: 'blocked', need: 'approval', summary: 'awaiting permission · find ~/code -name "*.pem"', el: '2m', times: 'started 14:29 · updated 2m ago' },
+      { name: 'test-runner', status: 'running', summary: 'auth.spec.ts · 14/31 passing', el: '6m', times: 'started 14:26 · updated 4s ago' },
+      { name: 'docs-lookup', status: 'completed', summary: 'Found retry config in jest.setup.ts', el: '1m', times: 'started 14:25 · updated 6m ago' }] },
+    { id: 's2', hub: 'mbp', src: 'host', name: 'Provision dev box', prov: 'codex', repo: 'infra', branch: 'chore/devbox', status: 'blocked', reason: 'awaiting permission · sudo apt install postgresql-16', act: 'Setting up local Postgres', t: '2m', model: 'gpt-5-codex', effort: 'medium', cwd: '~/infra', dirty: false, sha: '0c9e1d4', ctx: 18, ctxUsed: '48k / 272k', tin: '6.2k', tout: '0.9k', tcache: '310k', created: 'Oct 3 · 14:18', updated: '2m ago', kids: [] },
+    { id: 's3', hub: 'mbp', src: 'host', name: 'Refactor billing webhooks', prov: 'claude', repo: 'billing', branch: 'feat/stripe-v2', status: 'idle', act: 'Editing src/webhooks/stripe.ts', t: '14m', model: 'sonnet-4.5', effort: 'medium', cwd: '~/code/billing', dirty: true, sha: '9b02f7e', ctx: 67, ctxUsed: '134k / 200k', tin: '41.8k', tout: '9.4k', tcache: '1.1M', created: 'Oct 3 · 14:04', updated: '20s ago', kids: [
+      { name: 'Plan', status: 'completed', summary: 'Outlined 4 migration steps', el: '40s', times: 'started 14:05 · updated 13m ago' },
+      { name: 'general-purpose', status: 'running', summary: 'Reading src/webhooks/*.ts', el: '3m', times: 'started 14:15 · updated 2s ago' }] },
+    { id: 's4', hub: 'mbp', src: 'host', name: 'Migrate to Vite 6', prov: 'claude', repo: 'web', branch: 'chore/vite-6', status: 'completed', act: 'Done · 14 files changed', t: '1h', model: 'sonnet-4.5', effort: 'low', cwd: '~/code/web', dirty: true, sha: 'e57a210', ctx: 91, ctxUsed: '182k / 200k', tin: '88.0k', tout: '21.6k', tcache: '3.9M', created: 'Oct 3 · 12:40', updated: '1h ago', kids: [] },
+    { id: 's5', hub: 'mbp', src: 'host', name: '', prov: 'qwen', repo: 'web', branch: 'main', status: 'idle', act: 'Waiting for prompt', t: '23m', model: 'qwen3-coder', effort: '—', cwd: '~/code/web', dirty: false, sha: '3f8c0aa', ctx: 6, ctxUsed: '15k / 256k', tin: '1.2k', tout: '0.3k', tcache: '0', created: 'Oct 3 · 14:09', updated: '23m ago', kids: [] },
+    { id: 's6', hub: 'desk', src: 'host', name: 'Write release notes', prov: 'codex', repo: 'docs', branch: 'release/2.8', status: 'blocked', need: 'input', reason: 'needs input · Which version tag, 2.8.0 or 2.8.0-rc1?', act: 'Drafting CHANGELOG.md', t: '5m', model: 'gpt-5-codex', effort: 'low', cwd: '~/work/docs', dirty: true, sha: '71d3be0', ctx: 22, ctxUsed: '60k / 272k', tin: '9.9k', tout: '3.1k', tcache: '120k', created: 'Oct 3 · 14:11', updated: '5m ago', kids: [] },
+    { id: 's7', hub: 'desk', src: 'sandbox', name: 'Benchmark tokenizer', prov: 'pi', repo: 'tok', branch: 'perf/simd', status: 'failed', act: 'Exited 1 · OOM killed', t: '3h', model: 'kimi-k2', effort: '—', cwd: '/work/tokenizer', dirty: false, sha: 'c2a9e31', ctx: 54, ctxUsed: '70k / 128k', tin: '22.4k', tout: '4.0k', tcache: '0', created: 'Oct 3 · 10:52', updated: '3h ago', kids: [] },
+    { id: 's8', hub: 'desk', src: 'sandbox', name: 'Port lexer to Rust', prov: 'claude', repo: 'tok', branch: 'feat/rust-lexer', status: 'running', act: 'cargo build --release', mono: true, t: '1m', model: 'opus-4.1', effort: 'high', cwd: '/work/tokenizer', dirty: true, sha: '58e01f9', ctx: 31, ctxUsed: '62k / 200k', tin: '12.7k', tout: '5.5k', tcache: '640k', created: 'Oct 3 · 13:47', updated: '1m ago', kids: [
+      { name: 'test-runner', status: 'running', summary: 'cargo test lexer::', el: '1m', times: 'started 14:31 · updated 3s ago' }] },
+    { id: 's9', hub: 'desk', src: 'host', name: 'Triage open issues', prov: 'codex', repo: 'api', branch: 'main', status: 'other', act: 'Cancelled by user', t: '50m', model: 'gpt-5-codex', effort: 'low', cwd: '~/work/api', dirty: false, sha: 'aa10c4b', ctx: 12, ctxUsed: '33k / 272k', tin: '4.1k', tout: '0.6k', tcache: '0', created: 'Oct 3 · 13:30', updated: '50m ago', kids: [] },
+    { id: 's10', hub: 'vm', src: 'host', name: 'Spike: wasm plugin host', prov: 'claude', repo: 'plug', branch: 'spike/wasm', status: 'running', act: 'Last seen running wasm-pack build', t: '2h', model: 'sonnet-4.5', effort: 'medium', cwd: '~/plugins', dirty: true, sha: '1e4d77c', ctx: 48, ctxUsed: '96k / 200k', tin: '30.2k', tout: '7.7k', tcache: '900k', created: 'Oct 3 · 11:58', updated: '2h ago', kids: [] },
+    { id: 's11', hub: 'mbp', src: 'host', name: 'Onboarding docs pass', prov: 'claude', repo: 'docs', branch: 'docs/onboarding', status: 'idle', act: 'Waiting for prompt', t: '3d', stale: true, model: 'sonnet-4.5', effort: 'low', cwd: '~/code/docs', dirty: false, sha: '6c1f0b2', ctx: 9, ctxUsed: '18k / 200k', tin: '2.0k', tout: '0.4k', tcache: '0', created: 'Sep 30 · 09:12', updated: '3d ago', kids: [] },
+    { id: 's12', hub: 'desk', src: 'host', name: 'Try bun runtime', prov: 'pi', repo: 'web', branch: 'exp/bun', status: 'running', act: 'bun install', mono: true, t: '6d', stale: true, model: 'kimi-k2', effort: '—', cwd: '~/work/web', dirty: true, sha: 'f03b9a8', ctx: 15, ctxUsed: '19k / 128k', tin: '3.3k', tout: '0.8k', tcache: '0', created: 'Sep 27 · 16:40', updated: '6d ago', kids: [] }
+  ];
+
+  componentWillUnmount() { clearTimeout(this.ts); clearTimeout(this.tp); }
+  flags(st) { return { sRun: st === 'running', sBlock: st === 'blocked', sIdle: st === 'idle', sDone: st === 'completed', sFail: st === 'failed', sOther: st === 'other' }; }
+  conn(c) { return { cLive: c === 'live', cReco: c === 'reco', cOff: c === 'off' }; }
+  eff(x) {
+    const kb = (x.kids || []).find(k => k.status === 'blocked');
+    if (x.status === 'blocked') return { st: 'blocked', reason: x.reason };
+    if (kb) return { st: 'blocked', reason: `${kb.name} subagent needs ${kb.need === 'input' ? 'input' : 'approval'}`, kid: kb };
+    if (x.status === 'running' || (x.kids || []).some(k => k.status === 'running')) return { st: 'running' };
+    return { st: x.status };
+  }
+  go(nav, extra = {}) { this.setState({ nav, menu: false, ...extra }); }
+  forget(id) {
+    const x = this.SESS.find(s => s.id === id), h = this.HUBS.find(h => h.id === x.hub);
+    clearTimeout(this.ts);
+    this.setState(st => ({ forgotten: { ...st.forgotten, [id]: true }, drag: null, menu: false, snack: { id, text: `Forgotten on ${h.name}` } }));
+    this.ts = setTimeout(() => this.setState({ snack: null }), 5000);
+  }
+
+  renderVals() {
+    const p = this.props, s = this.state;
+    const theme = p.theme ?? 'dark';
+    const screen = s.nav ?? p.screen ?? 'sessions';
+    const scenario = p.scenario ?? 'normal';
+    const framed = screen !== 'sheet';
+    const multi = (p.hubs ?? 3) > 1 && !['hub-unreachable', 'no-sessions'].includes(scenario);
+    let hubs = (multi ? this.HUBS : [this.HUBS[0]]).filter(h => !s.unpaired[h.id]);
+    if (scenario === 'all-offline') hubs = hubs.map(h => ({ ...h, conn: 'off', connText: h.id === 'mbp' ? 'offline · 4m' : h.id === 'desk' ? 'offline · 9m' : 'offline · 2h', seen: h.id === 'mbp' ? '4m ago' : h.seen }));
+    if (scenario === 'hub-unreachable') hubs = hubs.map(h => ({ ...h, conn: 'off', connText: 'unreachable · 6m', seen: '6m ago' }));
+    const hubOf = id => hubs.find(h => h.id === id) || this.HUBS.find(h => h.id === id);
+    const sessions = scenario === 'no-sessions' ? [] : this.SESS.filter(x => hubs.some(h => h.id === x.hub));
+    const hubSel = s.hubSel ?? 'all';
+    const filter = s.filter ?? p.filter ?? 'all';
+    const arc = React.createElement('span', { style: { display: 'block', width: 12, height: 12, boxSizing: 'border-box', borderRadius: '50%', border: '1.75px solid color-mix(in oklab, var(--st-run) 22%, transparent)', borderTopColor: 'var(--st-run)', animation: 'st-spin .9s linear infinite' } });
+    const pulse = React.createElement('span', { style: { display: 'block', flex: 'none', width: 6, height: 6, borderRadius: '50%', background: 'var(--st-run)', animation: 'st-pulse 1.2s ease-in-out infinite' } });
+    const noop = () => {};
+
+    const mkRow = (x, o = {}) => {
+      const e = this.eff(x), stopped = ['completed', 'failed', 'other'].includes(e.st);
+      const drag = s.drag && s.drag.id === x.id;
+      const dx = drag ? s.drag.dx : (o.dx || 0);
+      const blocked = e.st === 'blocked' && !x.stale;
+      const bg = blocked ? 'linear-gradient(var(--st-block-tint),var(--st-block-tint)),var(--st-bg)' : 'var(--st-bg)';
+      const exp = s.expanded[x.id] ?? (o.expand || p.expand === x.id);
+      const swipe = stopped && !o.static;
+      const out = [{
+        isRow: true, ...this.flags(e.st), name: x.name || this.PROV[x.prov][0], provShort: this.PROV[x.prov][1],
+        branch: x.branch, repoColor: this.REPO[x.repo], activity: x.act, actFont: x.mono ? 'var(--st-mono)' : 'inherit',
+        reason: blocked ? e.reason : '', time: x.t, hubTag: o.hubTag || '', swipeable: stopped,
+        kidCount: x.kids.length ? String(x.kids.length) : '', kidChev: exp ? 'rotate(180deg)' : 'none', kidBg: exp ? 'var(--st-line)' : 'transparent',
+        bg, tx: `translateX(${dx}px)`, trans: drag ? 'none' : 'transform .28s cubic-bezier(.2,.8,.2,1)', filter: x.stale ? 'grayscale(1) opacity(.5)' : 'none',
+        stop: e2 => e2.stopPropagation(),
+        onKids: e2 => { e2.stopPropagation(); if (o.static) return; this.setState(st => ({ expanded: { ...st.expanded, [x.id]: !exp } })); },
+        onTap: () => { if (this.suppress) { this.suppress = false; return; } if (!o.static) this.go('detail', { detailId: x.id }); },
+        onPD: swipe ? ev => { this.dg = { id: x.id, x0: ev.clientX, moved: false }; ev.currentTarget.setPointerCapture && ev.currentTarget.setPointerCapture(ev.pointerId); } : noop,
+        onPM: swipe ? ev => { const d = this.dg; if (!d || d.id !== x.id) return; const ddx = Math.min(0, ev.clientX - d.x0); if (Math.abs(ddx) > 6) d.moved = true; if (d.moved) this.setState({ drag: { id: x.id, dx: ddx } }); } : noop,
+        onPU: swipe ? () => { const d = this.dg; this.dg = null; if (!d) return; if (d.moved) this.suppress = true; const cur = this.state.drag && this.state.drag.id === x.id ? this.state.drag.dx : 0; if (cur < -100) { this.setState({ drag: { id: x.id, dx: -440 } }); setTimeout(() => this.forget(x.id), 200); } else this.setState({ drag: null }); } : noop
+      }];
+      if (exp && x.kids.length) out.push({ isKids: true, bg, filter: out[0].filter, title: `${x.kids.length} agents`, kids: x.kids.map(k => ({ ...this.flags(k.status), name: k.name, summary: k.summary, el: k.el, sumColor: k.status === 'blocked' ? 'var(--st-block)' : 'var(--st-mute)' })) });
+      return out;
+    };
+    const coll = (k, def) => s.collapsed[k] ?? def;
+    const toggle = k => () => this.setState(st => ({ collapsed: { ...st.collapsed, [k]: !(st.collapsed[k] ?? k === 'stale') } }));
+    const section = (k, title, meta, count, extra, def = false) => {
+      const c = coll(k, def);
+      return { isSection: true, title, meta, count: String(count), chev: c ? 'rotate(-90deg)' : 'none', onToggle: toggle(k), titleColor: 'var(--st-text)', ...extra };
+    };
+
+    let feed = [];
+    const vis = sessions.filter(x => !s.forgotten[x.id] && (hubSel === 'all' || x.hub === hubSel));
+    const isAttn = x => !x.stale && this.eff(x).st === 'blocked';
+    const attn = vis.filter(isAttn);
+    const stale = vis.filter(x => x.stale);
+    if (screen === 'sessions') {
+      if (scenario === 'all-offline') feed.push({ isError: true, title: 'All hubs offline', body: "Can't reach MacBook, Desktop or Sandbox-VM. Showing the last state each hub reported.", detail: 'tailscale: disconnected · wi-fi: Cafe_Guest' });
+      if (scenario === 'hub-unreachable') feed.push({ isError: true, title: "Can't reach MacBook", body: 'Retrying every 30s. Below is the last state it reported, 6 minutes ago.', detail: 'LAN 192.168.1.24 · timeout   tailnet · no route' });
+      if (scenario === 'no-sessions') feed.push({ isEmpty: true, icon: 'ph ph-terminal-window', title: 'No sessions on MacBook yet', body: 'Start Claude Code, Codex, Pi or Qwen in any terminal on MacBook. It shows up here within a second.', cmd: '$ claude' });
+      if ((filter === 'all' || filter === 'attention') && attn.length) {
+        feed.push(section('attn', 'Needs attention', '', attn.length, { cAttn: true, titleColor: 'var(--st-block)' }));
+        if (!coll('attn', false)) attn.forEach(x => feed.push(...mkRow(x, { hubTag: multi ? hubOf(x.hub).name : '' })));
+      }
+      if (filter === 'all' || filter === 'running') {
+        hubs.filter(h => hubSel === 'all' || h.id === hubSel).forEach(h => {
+          const all = vis.filter(x => x.hub === h.id && !x.stale && !isAttn(x));
+          const list = filter === 'running' ? all.filter(x => this.eff(x).st === 'running') : all;
+          if (filter === 'running' && !list.length) return;
+          if (multi) feed.push(section('h_' + h.id, h.name, '· ' + h.connText, list.length, this.conn(h.conn)));
+          if (multi && coll('h_' + h.id, false)) return;
+          if (h.conn === 'off' && list.length && scenario !== 'hub-unreachable') feed.push({ isNote: true, title: `Last known state · ${h.seen}` });
+          const srcs = [...new Set(sessions.filter(x => x.hub === h.id).map(x => x.src))];
+          if (srcs.length > 1) srcs.forEach(src => { const l = list.filter(x => x.src === src); if (!l.length) return; feed.push({ isSource: true, title: src, icon: src === 'host' ? 'ph ph-desktop' : 'ph ph-cube' }); l.forEach(x => feed.push(...mkRow(x))); });
+          else list.forEach(x => feed.push(...mkRow(x)));
+        });
+      }
+      if ((filter === 'all' || filter === 'stale') && stale.length) {
+        const def = filter !== 'stale';
+        feed.push(section('stale', 'Stale', '· no update in 24h', stale.length, { titleColor: 'var(--st-mute)' }, def));
+        if (!coll('stale', def)) stale.forEach(x => feed.push(...mkRow(x, { hubTag: multi ? hubOf(x.hub).name : '' })));
+      }
+      if (scenario === 'normal' && !feed.some(f => f.isRow || f.isSection)) {
+        const m = { attention: ['ph ph-check-circle', 'Nothing needs you', 'Blocked agents across all hubs land here first.'], running: ['ph ph-pause-circle', 'No agents running', 'Idle and finished sessions are under All.'], stale: ['ph ph-broom', 'No stale sessions', 'Sessions move here after 24h without an update.'] }[filter] || ['ph ph-funnel', 'No sessions match', ''];
+        feed.push({ isEmpty: true, icon: m[0], title: m[1], body: m[2] });
+      }
+    }
+    if (screen === 'sheet') {
+      const S = id => this.SESS.find(x => x.id === id);
+      const L = t => ({ isLabel: true, title: t });
+      feed = [
+        L('Section headers'),
+        { isSection: true, title: 'Needs attention', meta: '', count: '3', chev: 'none', cAttn: true, titleColor: 'var(--st-block)', onToggle: noop },
+        { isSection: true, title: 'MacBook', meta: '· live', count: '4', chev: 'none', cLive: true, titleColor: 'var(--st-text)', onToggle: noop },
+        { isSection: true, title: 'Desktop', meta: '· reconnecting 12s', count: '3', chev: 'none', cReco: true, titleColor: 'var(--st-text)', onToggle: noop },
+        { isSection: true, title: 'Sandbox-VM', meta: '· offline · 2h', count: '1', chev: 'rotate(-90deg)', cOff: true, titleColor: 'var(--st-text)', onToggle: noop },
+        { isSource: true, title: 'sandbox', icon: 'ph ph-cube' },
+        { isSection: true, title: 'Stale', meta: '· no update in 24h', count: '2', chev: 'rotate(-90deg)', titleColor: 'var(--st-mute)', onToggle: noop },
+        L('Rows'),
+        ...mkRow({ ...S('s8'), kids: [] }, { static: true }),
+        ...mkRow(S('s2'), { static: true, hubTag: 'MacBook' }),
+        ...mkRow(S('s1'), { static: true, hubTag: 'MacBook' }),
+        ...mkRow(S('s5'), { static: true }),
+        ...mkRow(S('s4'), { static: true }),
+        ...mkRow(S('s7'), { static: true }),
+        ...mkRow(S('s9'), { static: true }),
+        ...mkRow(S('s12'), { static: true, hubTag: 'Desktop' }),
+        L('Expanded children'),
+        ...mkRow(S('s1'), { static: true, expand: true }),
+        L('Swipe to forget (stopped rows only)'),
+        ...mkRow(S('s4'), { static: true, dx: -132 }),
+        { isSnack: true, title: 'Forgotten on MacBook' }
+      ];
+    }
+
+    const cntHub = id => sessions.filter(x => !s.forgotten[x.id] && !x.stale && (id === 'all' || x.hub === id)).length;
+    const selStyle = on => on ? { border: 'var(--st-acc)', bg: 'var(--st-acc-tint)', color: 'var(--st-acc-ink)' } : { border: 'var(--st-line)', bg: 'transparent', color: 'var(--st-text)' };
+    const hubChips = [{ id: 'all', label: 'All' }, ...hubs.map(h => ({ id: h.id, label: h.name, ...this.conn(h.conn) }))].map(c => ({ ...c, count: String(cntHub(c.id)), ...selStyle((screen === 'sheet' ? 'all' : hubSel) === c.id), onClick: () => this.setState({ hubSel: c.id }) }));
+    const base = sessions.filter(x => !s.forgotten[x.id] && (hubSel === 'all' || x.hub === hubSel));
+    const filterChips = [
+      { id: 'all', label: 'All', count: '' },
+      { id: 'attention', label: 'Needs attention', count: String(base.filter(isAttn).length), attn: base.some(isAttn) },
+      { id: 'running', label: 'Running', count: String(base.filter(x => !x.stale && this.eff(x).st === 'running').length) },
+      { id: 'stale', label: 'Stale', count: String(base.filter(x => x.stale).length) }
+    ].map(c => ({ ...c, ...selStyle(filter === c.id), onClick: () => this.setState({ filter: c.id }) }));
+
+    const counts = { live: 0, reco: 0, off: 0 };
+    hubs.forEach(h => counts[h.conn]++);
+    const summary = multi
+      ? [['live', 'live'], ['reco', 'reconnecting'], ['off', 'offline']].filter(([k]) => counts[k]).map(([k, t]) => ({ ...this.conn(k), text: `${counts[k]} ${t}` }))
+      : [{ ...this.conn(hubs[0].conn), text: `${hubs[0].connText} · ${hubs[0].endpoint.split(' · ')[0]} · ${sessions.filter(x => !s.forgotten[x.id]).length} sessions` }];
+
+    const attnAll = sessions.filter(x => !s.forgotten[x.id] && isAttn(x)).length;
+    const navItems = [['sessions', 'Sessions', 'ph-rows'], ['hubs', 'Hubs', 'ph-desktop-tower'], ['alerts', 'Alerts', 'ph-bell']].map(([id, label, ic]) => {
+      const on = screen === id;
+      return { label, icon: (on ? 'ph-fill ' : 'ph ') + ic, ind: on ? 'var(--st-ind)' : 'transparent', color: on ? 'var(--st-text)' : 'var(--st-mute)', badge: id === 'sessions' && attnAll ? String(attnAll) : '', onClick: () => this.go(id) };
+    });
+
+    const dId = s.detailId ?? p.detail ?? 's1';
+    const dx = this.SESS.find(x => x.id === dId) || this.SESS[0];
+    const de = this.eff(dx), dh = this.HUBS.find(h => h.id === dx.hub);
+    const dStopped = ['completed', 'failed', 'other'].includes(de.st);
+    const titles = { running: 'Running', blocked: 'Blocked', idle: 'Idle', completed: 'Completed', failed: 'Failed', other: 'Stopped' };
+    const d = {
+      ...this.flags(de.st), name: dx.name || this.PROV[dx.prov][0], hubName: dh.name, hubSource: `${dh.name} · ${dx.src}`,
+      chips: [{ label: this.PROV[dx.prov][0], font: 'inherit' }, { label: dx.model, font: 'var(--st-mono)' }, { label: `effort ${dx.effort}`, font: 'inherit' }],
+      statusTitle: de.st === 'blocked' ? (de.kid ? `Blocked · ${de.reason}` : `Blocked · needs ${dx.need === 'input' ? 'input' : 'permission'}`) : titles[de.st] + (dx.stale ? ' · stale' : ''),
+      statusLine: de.st === 'blocked' ? (de.kid ? de.kid.summary : dx.reason) : dx.act,
+      statusMeta: de.st === 'blocked' ? `since ${de.kid ? de.kid.el : dx.t} · hub ${dh.connText}` : `updated ${dx.updated}`,
+      statusBg: de.st === 'blocked' ? 'var(--st-block-tint)' : 'var(--st-surf)', statusColor: de.st === 'blocked' ? 'var(--st-block)' : 'var(--st-text)',
+      cwd: dx.cwd, branch: dx.branch, repoColor: this.REPO[dx.repo], dirty: dx.dirty, sha: dx.sha,
+      ctxPct: dx.ctx + '%', ctxUsed: dx.ctxUsed, ctxColor: dx.ctx >= 85 ? 'var(--st-run)' : 'color-mix(in oklab,var(--st-text) 70%,transparent)',
+      tokens: [{ label: 'Input', value: dx.tin }, { label: 'Output', value: dx.tout }, { label: 'Cache read', value: dx.tcache }],
+      hasKids: dx.kids.length > 0, kidsTitle: `Agents · ${dx.kids.length}`,
+      kids: dx.kids.map((k, i) => ({ ...this.flags(k.status), name: k.name, summary: k.summary, el: k.el, times: k.times, border: i ? '1px solid var(--st-line)' : 'none', bg: k.status === 'blocked' ? 'var(--st-block-tint)' : 'transparent', sumColor: k.status === 'blocked' ? 'var(--st-block)' : 'var(--st-mute)' })),
+      created: dx.created, updated: dx.updated, sid: dx.id + '-' + dx.sha.slice(0, 4) + '-' + dx.prov,
+      stopped: dStopped, notStopped: !dStopped, onForget: () => { this.forget(dx.id); this.go('sessions'); }
+    };
+
+    const menuItems = screen === 'detail'
+      ? [{ label: 'Copy cwd', icon: 'ph ph-copy', color: 'var(--st-text)', onClick: () => this.setState({ menu: false }) }, ...(dStopped ? [{ label: 'Forget session', icon: 'ph ph-eraser', color: 'var(--st-block)', onClick: d.onForget }] : [])]
+      : [{ label: 'Pair another hub', icon: 'ph ph-qr-code', color: 'var(--st-text)', onClick: () => this.go('scan') }, { label: 'Manage hubs', icon: 'ph ph-desktop-tower', color: 'var(--st-text)', onClick: () => this.go('hubs') }, { label: 'Notification settings', icon: 'ph ph-bell', color: 'var(--st-text)', onClick: () => this.go('alerts') }];
+
+    const T = (k, def) => s.toggles[k] ?? def;
+    const tg = k => () => this.setState(st => ({ toggles: { ...st.toggles, [k]: !T(k, DEF[k]) } }));
+    const DEF = { perm: true, input: true, fin: false, hub_mbp: true, hub_desk: true, hub_vm: false, p_claude: true, p_codex: true, p_pi: true, p_qwen: false, quiet: true, brk: true };
+    const groups = [
+      ['Alert me when', [['perm', 'Needs permission', 'An agent wants to run a tool'], ['input', 'Needs input', 'An agent asked you a question'], ['fin', 'Finished', 'Completed or failed · quiet, no sound']]],
+      ['Hubs', this.HUBS.map(h => ['hub_' + h.id, h.name, h.endpoint, true])],
+      ['Providers', [['p_claude', 'Claude Code'], ['p_codex', 'Codex'], ['p_pi', 'Pi'], ['p_qwen', 'Qwen Code']]],
+      ['Quiet hours', [['quiet', 'Quiet hours', '22:00 – 07:30 · alerts arrive silently'], ['brk', 'Let permission requests through', 'Still ring for blocked agents', false, 'quiet']]]
+    ];
+    const settings = [];
+    groups.forEach(([gt, rows]) => {
+      settings.push({ isHead: true, title: gt });
+      rows.forEach(([k, title, sub, mono, dep], i) => {
+        const on = T(k, DEF[k]); const n = rows.length;
+        const radius = n === 1 ? '16px' : i === 0 ? '16px 16px 4px 4px' : i === n - 1 ? '4px 4px 16px 16px' : '4px';
+        settings.push({ isRow: true, title, sub: sub || '', subFont: mono ? 'var(--st-mono)' : 'inherit', on, off: !on, radius, opacity: dep && !T(dep, DEF[dep]) ? '.45' : '1', onToggle: tg(k) });
+      });
+    });
+
+    const permDefs = [['cam', 'Camera', 'To scan the pairing code', true], ['notif', 'Notifications', 'So you hear when an agent is blocked', false], ['bg', 'Keep running in background', 'Turns off battery optimization so the encrypted channel stays open', false]];
+    const perms = permDefs.map(([k, title, sub, def], i) => { const done = s.perms[k] ?? def; return { title, sub, done, todo: !done, border: i ? '1px solid var(--st-line)' : 'none', onAllow: () => this.setState(st => ({ perms: { ...st.perms, [k]: true } })) }; });
+
+    const pair = s.pairState ?? p.pair ?? 'waiting';
+    const hubCards = hubs.map(h => ({ ...this.conn(h.conn), name: h.name, connText: h.connText, endpoint: h.endpoint, fp: h.fp, seen: h.seen, onUnpair: () => this.setState({ dialog: { id: h.id, name: h.name } }) }));
+    const legend = [['running', 'running'], ['blocked', 'blocked'], ['idle', 'idle'], ['completed', 'completed'], ['failed', 'failed'], ['other', 'stopped'], ['running', 'stale', true]].map(([st, label, stl]) => ({ ...this.flags(st), label, filter: stl ? 'grayscale(1) opacity(.5)' : 'none' }));
+
+    const navBar = ['sessions', 'hubs', 'alerts'].includes(screen);
+    return {
+      theme, framed, arc, pulse,
+      rootW: framed ? '432px' : '412px', rootH: framed ? '935px' : 'auto', rootPad: framed ? '10px' : '0', rootR: framed ? '52px' : '20px',
+      rootBg: framed ? 'color-mix(in oklab,var(--color-neutral-900) 55%,#000)' : 'transparent',
+      innerH: framed ? '100%' : 'auto', innerR: framed ? '42px' : '20px',
+      barBg: screen === 'scan' ? 'color-mix(in oklab,var(--color-bg) 25%,#000)' : 'transparent', navBg: navBar ? 'var(--st-surf)' : 'transparent',
+      isWelcome: screen === 'welcome', isPerms: screen === 'perms', isScan: screen === 'scan', isPair: screen === 'pair',
+      isFeed: screen === 'sessions' || screen === 'sheet', isSessions: screen === 'sessions', isSheet: screen === 'sheet',
+      isDetail: screen === 'detail', isHubs: screen === 'hubs', isAlerts: screen === 'alerts', isShade: screen === 'shade', isLock: screen === 'lock',
+      sheetTitle: theme === 'light' ? 'Components · light' : 'Components · dark',
+      provList: ['CC', 'CX', 'PI', 'QW'],
+      pWait: pair === 'waiting', pOk: pair === 'success', pExp: pair === 'expired', pRej: pair === 'rejected', pUnr: pair === 'unreachable',
+      fpGroups: ['4E1B', 'A7C0', '93DF', '0B62'],
+      topTitle: multi ? 'SessionTap' : hubs[0].name, summary,
+      showHubChips: (screen === 'sessions' && multi) || screen === 'sheet', showFilters: (screen === 'sessions' && scenario !== 'no-sessions') || screen === 'sheet',
+      hubChips, filterChips, feed, feedOverflow: framed ? 'auto' : 'visible', feedPad: framed ? '84px' : '16px',
+      navItems, headsup: !!p.headsup && screen === 'sessions', d, hubCards, hubsSub: `${hubs.length} paired · end-to-end encrypted`, settings, perms, legend,
+      snack: s.snack, snackBottom: navBar ? '84px' : '32px', undo: () => { const id = s.snack && s.snack.id; clearTimeout(this.ts); this.setState(st => { const f = { ...st.forgotten }; delete f[id]; return { forgotten: f, snack: null }; }); },
+      menuOpen: s.menu, menuItems, toggleMenu: () => this.setState(st => ({ menu: !st.menu })),
+      dialog: s.dialog, closeDialog: () => this.setState({ dialog: null }), confirmUnpair: () => this.setState(st => ({ unpaired: { ...st.unpaired, [st.dialog.id]: true }, dialog: null, hubSel: null })),
+      goWelcome: () => this.go('welcome'), goPerms: () => this.go('perms'), goPermsStop: e => { e.stopPropagation(); this.go('perms'); },
+      goScan: () => this.go('scan', { pairState: null }), goSessions: () => this.go('sessions'),
+      goPair: () => { this.go('pair', { pairState: 'waiting' }); clearTimeout(this.tp); this.tp = setTimeout(() => this.state.nav === 'pair' && this.setState({ pairState: 'success' }), 3500); }
+    };
+  }
+}
+</script>
+</body>
+</html>
