@@ -78,7 +78,7 @@ The hub SHALL transactionally replace the materialized invocation set for one so
 - **THEN** the hub removes or marks that stale materialized invocation according to the snapshot replacement semantics
 
 ### Requirement: Hub provides gap-free merged live observation
-The hub SHALL provide a local command that emits one persisted merged public snapshot followed by one JSON object per accepted public update after the snapshot revision without a subscription gap. Agents SHALL be identified by source ID and invocation ID.
+The hub SHALL provide a local command that emits one persisted merged public snapshot followed by one JSON object per accepted public update after the snapshot revision without a subscription gap. The same stream SHALL be available to paired remote devices through the remote `listen` method. Agents SHALL be identified by source ID and invocation ID.
 
 #### Scenario: Status-bar listener starts
 - **WHEN** a consumer runs `sessiontap-hub listen`
@@ -91,6 +91,10 @@ The hub SHALL provide a local command that emits one persisted merged public sna
 #### Scenario: Multiple fields change in one source update
 - **WHEN** one accepted update changes multiple projected fields
 - **THEN** the hub listener receives the complete view and the full deterministic changed-field set from that update
+
+#### Scenario: Remote device listens
+- **WHEN** a paired remote device calls `listen`
+- **THEN** it receives the same snapshot and update envelopes as a local `sessiontap-hub listen` consumer
 
 ### Requirement: Hub retains explicit current attention state
 The hub SHALL retain only the optional bounded public status reason carried inside each complete `PublicAgentView`, including blocked `input`/`approval` and stopped `completed`/`failed` reasons. It SHALL replace or clear the prior reason whenever an accepted complete view replaces the materialized agent state and SHALL NOT infer a reason for a stopped view that omits one.
@@ -112,8 +116,31 @@ The hub SHALL retain only the optional bounded public status reason carried insi
 - **THEN** the hub clears the prior reason and does not infer completed or failed
 
 ### Requirement: Hub control remains unavailable
-The initial hub SHALL NOT expose agent screen inspection, capture, input, or command-control operations, while source envelopes SHALL remain versioned and MAY advertise capabilities for a future separately specified bidirectional transport.
+The hub SHALL NOT expose agent screen inspection, capture, input, or command-control operations, locally or remotely, while source envelopes SHALL remain versioned and MAY advertise capabilities for a future separately specified bidirectional transport. Remote observation, device administration, and forgetting stopped agents change only hub state and SHALL NOT count as agent control.
 
 #### Scenario: Consumer requests agent control
-- **WHEN** a client attempts to send input or inspect an agent through the initial hub
+- **WHEN** a client attempts to send input or inspect an agent through the hub
 - **THEN** the hub exposes no such operation
+
+#### Scenario: Remote device forgets an agent
+- **WHEN** a paired device forgets a stopped agent
+- **THEN** the hub changes only its own state and sends nothing to the source daemon or the agent's terminal
+
+### Requirement: Hub forgets stopped agents with tombstones
+The hub SHALL provide `sessiontap-hub forget <source_id> <invocation_id>`, served by the running service, that deletes a stopped agent from the merged state, records a tombstone for that source and invocation pair, increments the hub revision, and re-baselines every live listener with a fresh snapshot. The hub SHALL refuse to forget an agent that does not exist or whose status is not `stopped`. While a tombstone exists, the hub SHALL acknowledge updates for that pair without persisting them, publishing them, or evaluating subscriptions, and SHALL leave that pair out when it materializes a source snapshot. The hub SHALL delete tombstones older than twice `retention_days`.
+
+#### Scenario: Forget a stopped agent
+- **WHEN** the user runs `sessiontap-hub forget host 7f3c` for a stopped agent
+- **THEN** the agent leaves the merged state and each `sessiontap-hub listen` consumer receives a new snapshot without it
+
+#### Scenario: Forgotten agent is redelivered
+- **WHEN** a source later sends an update or a complete snapshot that includes the forgotten invocation
+- **THEN** the hub acknowledges the delivery, the agent stays absent, and no subscription command runs
+
+#### Scenario: Forget a non-stopped agent
+- **WHEN** the user forgets an agent whose status is `blocked`
+- **THEN** the command reports that only stopped agents can be forgotten and exits non-zero without changing state
+
+#### Scenario: New run of the same project
+- **WHEN** the user starts the agent again, producing a new invocation ID
+- **THEN** the hub ingests the new invocation normally
