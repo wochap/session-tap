@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS accepted_deliveries (
  source_id TEXT NOT NULL, delivery_id TEXT NOT NULL, accepted_at TEXT NOT NULL,
  PRIMARY KEY (source_id, delivery_id)
 );
+CREATE TABLE IF NOT EXISTS devices (
+ device_id TEXT PRIMARY KEY, spki_sha256 TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+ scopes TEXT NOT NULL, paired_at TEXT NOT NULL, last_seen_at TEXT
+);
+CREATE TABLE IF NOT EXISTS forgotten_agents (
+ source_id TEXT NOT NULL, invocation_id TEXT NOT NULL, forgotten_at TEXT NOT NULL,
+ PRIMARY KEY (source_id, invocation_id)
+);
 "#;
 
 pub struct HubStore {
@@ -72,6 +80,34 @@ pub enum UpdateAccept {
     },
     Duplicate,
     Stale,
+    /// The invocation is tombstoned: the delivery is acknowledged and its
+    /// source revision recorded, but nothing is persisted or published.
+    Suppressed,
+}
+
+/// A paired remote device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Device {
+    pub device_id: String,
+    pub spki_sha256: String,
+    pub name: String,
+    pub scopes: Vec<String>,
+    pub paired_at: String,
+    pub last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceLookup {
+    Found(Device),
+    NotFound,
+    Ambiguous(Vec<Device>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForgetOutcome {
+    Forgotten { hub_revision: u64 },
+    NotFound,
+    NotStopped,
 }
 
 impl HubStore {
@@ -195,7 +231,9 @@ impl HubStore {
         tx.execute("DELETE FROM public_agents WHERE source_id=?1", [&source.id])
             .map_err(malformed)?;
         for view in views {
-            persist_view(&tx, &source.id, view, &now).map_err(malformed)?;
+            if !is_forgotten(&tx, &source.id, &view.invocation_id).map_err(malformed)? {
+                persist_view(&tx, &source.id, view, &now).map_err(malformed)?;
+            }
         }
         let hub_revision = bump_revision(&tx).map_err(malformed)?;
         tx.commit().map_err(malformed)?;
@@ -256,6 +294,12 @@ impl HubStore {
         if *revision <= source_revision {
             return Ok(UpdateAccept::Stale);
         }
+        let now = Utc::now().to_rfc3339();
+        if is_forgotten(&tx, source_id, &view.invocation_id).map_err(malformed)? {
+            record_delivery(&tx, source_id, delivery_id, *revision, &now).map_err(malformed)?;
+            tx.commit().map_err(malformed)?;
+            return Ok(UpdateAccept::Suppressed);
+        }
         let prior = Self::prior(&tx, source_id, &view.invocation_id).map_err(malformed)?;
         let actual = changed_public_fields(prior.as_ref(), view);
         if actual.is_empty() {
@@ -263,18 +307,8 @@ impl HubStore {
                 "update does not change the public view".into(),
             ));
         }
-        let now = Utc::now().to_rfc3339();
         persist_view(&tx, source_id, view, &now).map_err(malformed)?;
-        tx.execute(
-            "UPDATE sources SET source_revision=?2,updated_at=?3 WHERE source_id=?1",
-            params![source_id, revision, now],
-        )
-        .map_err(malformed)?;
-        tx.execute(
-            "INSERT INTO accepted_deliveries(source_id,delivery_id,accepted_at) VALUES (?1,?2,?3)",
-            params![source_id, delivery_id, now],
-        )
-        .map_err(malformed)?;
+        record_delivery(&tx, source_id, delivery_id, *revision, &now).map_err(malformed)?;
         let hub_revision = bump_revision(&tx).map_err(malformed)?;
         tx.commit().map_err(malformed)?;
         Ok(UpdateAccept::Applied {
@@ -298,7 +332,132 @@ impl HubStore {
             [&cutoff],
         )?;
         conn.execute("DELETE FROM sources WHERE source_id NOT IN (SELECT DISTINCT source_id FROM public_agents)", [])?;
-        Ok(agents + deliveries)
+        let tombstone_cutoff = (Utc::now()
+            - Duration::days(i64::try_from(retention_days.saturating_mul(2)).unwrap_or(i64::MAX)))
+        .to_rfc3339();
+        let tombstones = conn.execute(
+            "DELETE FROM forgotten_agents WHERE forgotten_at < ?1",
+            [&tombstone_cutoff],
+        )?;
+        Ok(agents + deliveries + tombstones)
+    }
+
+    /// Deletes a stopped agent and tombstones its invocation so later
+    /// deliveries for it are suppressed. Bumps the hub revision.
+    pub fn forget(&self, source_id: &str, invocation_id: &str) -> Result<ForgetOutcome> {
+        let mut conn = self.conn.lock().expect("hub store mutex poisoned");
+        let tx = conn.transaction()?;
+        let raw: Option<String> = tx
+            .query_row(
+                "SELECT view_json FROM public_agents WHERE source_id=?1 AND invocation_id=?2",
+                params![source_id, invocation_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(raw) = raw else {
+            return Ok(ForgetOutcome::NotFound);
+        };
+        let view: PublicAgentView = serde_json::from_str(&raw)?;
+        if view.status != PublicStatus::Stopped {
+            return Ok(ForgetOutcome::NotStopped);
+        }
+        tx.execute(
+            "DELETE FROM public_agents WHERE source_id=?1 AND invocation_id=?2",
+            params![source_id, invocation_id],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO forgotten_agents(source_id,invocation_id,forgotten_at) VALUES (?1,?2,?3)",
+            params![source_id, invocation_id, Utc::now().to_rfc3339()],
+        )?;
+        let hub_revision = bump_revision(&tx)?;
+        tx.commit()?;
+        Ok(ForgetOutcome::Forgotten { hub_revision })
+    }
+
+    /// Inserts a device, or refreshes name and scopes when its SPKI is
+    /// already paired. Returns the stored device.
+    pub fn upsert_device(
+        &self,
+        device_id: &str,
+        spki_sha256: &str,
+        name: &str,
+        scopes: &[String],
+    ) -> Result<Device> {
+        let conn = self.conn.lock().expect("hub store mutex poisoned");
+        conn.execute(
+            "INSERT INTO devices(device_id,spki_sha256,name,scopes,paired_at) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(spki_sha256) DO UPDATE SET name=excluded.name,scopes=excluded.scopes,paired_at=excluded.paired_at",
+            params![device_id, spki_sha256, name, scopes.join(","), Utc::now().to_rfc3339()],
+        )?;
+        Ok(conn.query_row(
+            &format!("{DEVICE_COLUMNS} WHERE spki_sha256=?1"),
+            [spki_sha256],
+            device_row,
+        )?)
+    }
+
+    pub fn devices(&self) -> Result<Vec<Device>> {
+        let conn = self.conn.lock().expect("hub store mutex poisoned");
+        let mut stmt = conn.prepare(&format!("{DEVICE_COLUMNS} ORDER BY paired_at,device_id"))?;
+        Ok(stmt
+            .query_map([], device_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn device_by_spki(&self, spki_sha256: &str) -> Result<Option<Device>> {
+        let conn = self.conn.lock().expect("hub store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &format!("{DEVICE_COLUMNS} WHERE spki_sha256=?1"),
+                [spki_sha256],
+                device_row,
+            )
+            .optional()?)
+    }
+
+    /// Resolves a device ID or unique ID prefix.
+    pub fn find_device(&self, prefix: &str) -> Result<DeviceLookup> {
+        if prefix.is_empty() {
+            return Ok(DeviceLookup::NotFound);
+        }
+        let mut matches: Vec<Device> = self
+            .devices()?
+            .into_iter()
+            .filter(|device| device.device_id.starts_with(prefix))
+            .collect();
+        if let Some(exact) = matches.iter().position(|d| d.device_id == prefix) {
+            return Ok(DeviceLookup::Found(matches.swap_remove(exact)));
+        }
+        Ok(match matches.len() {
+            0 => DeviceLookup::NotFound,
+            1 => DeviceLookup::Found(matches.remove(0)),
+            _ => DeviceLookup::Ambiguous(matches),
+        })
+    }
+
+    /// Deletes the device matching an ID or unique prefix.
+    pub fn delete_device(&self, prefix: &str) -> Result<DeviceLookup> {
+        let lookup = self.find_device(prefix)?;
+        if let DeviceLookup::Found(device) = &lookup {
+            self.conn
+                .lock()
+                .expect("hub store mutex poisoned")
+                .execute(
+                    "DELETE FROM devices WHERE device_id=?1",
+                    [&device.device_id],
+                )?;
+        }
+        Ok(lookup)
+    }
+
+    pub fn touch_device(&self, device_id: &str) -> Result<()> {
+        self.conn
+            .lock()
+            .expect("hub store mutex poisoned")
+            .execute(
+                "UPDATE devices SET last_seen_at=?2 WHERE device_id=?1",
+                params![device_id, Utc::now().to_rfc3339()],
+            )?;
+        Ok(())
     }
 
     pub fn has_source(&self, source_id: &str) -> Result<bool> {
@@ -314,6 +473,54 @@ impl HubStore {
             .optional()?
             .is_some())
     }
+}
+
+const DEVICE_COLUMNS: &str =
+    "SELECT device_id,spki_sha256,name,scopes,paired_at,last_seen_at FROM devices";
+
+fn device_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Device> {
+    let scopes: String = r.get(3)?;
+    Ok(Device {
+        device_id: r.get(0)?,
+        spki_sha256: r.get(1)?,
+        name: r.get(2)?,
+        scopes: scopes
+            .split(',')
+            .filter(|scope| !scope.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        paired_at: r.get(4)?,
+        last_seen_at: r.get(5)?,
+    })
+}
+
+fn is_forgotten(tx: &Transaction<'_>, source_id: &str, id: &InvocationId) -> Result<bool> {
+    Ok(tx
+        .query_row(
+            "SELECT 1 FROM forgotten_agents WHERE source_id=?1 AND invocation_id=?2",
+            params![source_id, id.to_string()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn record_delivery(
+    tx: &Transaction<'_>,
+    source_id: &str,
+    delivery_id: &str,
+    revision: u64,
+    now: &str,
+) -> Result<()> {
+    tx.execute(
+        "UPDATE sources SET source_revision=?2,updated_at=?3 WHERE source_id=?1",
+        params![source_id, revision, now],
+    )?;
+    tx.execute(
+        "INSERT INTO accepted_deliveries(source_id,delivery_id,accepted_at) VALUES (?1,?2,?3)",
+        params![source_id, delivery_id, now],
+    )?;
+    Ok(())
 }
 
 fn validate_version(version: u32) -> std::result::Result<(), Reject> {
@@ -582,5 +789,149 @@ mod tests {
             store.ingest_snapshot(&snapshot("a", 1, vec![invalid])),
             Err(Reject::Malformed(_))
         ));
+    }
+
+    fn stopped(id: &str) -> PublicAgentView {
+        let mut stopped = view(id);
+        stopped.status = PublicStatus::Stopped;
+        stopped
+    }
+
+    const ID: &str = "00000000-0000-4000-8000-000000000001";
+
+    fn update(delivery: &str, revision: u64, view: PublicAgentView) -> SourceEnvelope {
+        SourceEnvelope::Update {
+            schema_version: 1,
+            source_id: "a".into(),
+            delivery_id: delivery.into(),
+            revision,
+            changed: BTreeSet::from([PublicField::UpdatedAt]),
+            view: Box::new(view),
+        }
+    }
+
+    #[test]
+    fn devices_insert_list_lookup_touch_and_delete() {
+        let store = HubStore::memory().unwrap();
+        let scopes = vec!["read".to_owned(), "manage".to_owned()];
+        let phone = store
+            .upsert_device("ab12", "spki1", "Pixel", &scopes)
+            .unwrap();
+        assert_eq!(phone.scopes, scopes);
+        store
+            .upsert_device("ab34", "spki2", "Tablet", &scopes[..1])
+            .unwrap();
+        let again = store
+            .upsert_device("ffff", "spki1", "Pixel 9", &scopes[..1])
+            .unwrap();
+        assert_eq!(again.device_id, "ab12");
+        assert_eq!(again.name, "Pixel 9");
+        assert_eq!(store.devices().unwrap().len(), 2);
+        assert_eq!(
+            store.device_by_spki("spki2").unwrap().unwrap().device_id,
+            "ab34"
+        );
+        assert!(store.device_by_spki("nope").unwrap().is_none());
+        store.touch_device("ab12").unwrap();
+        assert!(
+            store
+                .device_by_spki("spki1")
+                .unwrap()
+                .unwrap()
+                .last_seen_at
+                .is_some()
+        );
+        assert!(matches!(
+            store.delete_device("ab").unwrap(),
+            DeviceLookup::Ambiguous(matches) if matches.len() == 2
+        ));
+        assert_eq!(store.delete_device("zz").unwrap(), DeviceLookup::NotFound);
+        assert!(
+            matches!(store.delete_device("ab3").unwrap(), DeviceLookup::Found(d) if d.name == "Tablet")
+        );
+        assert_eq!(store.devices().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn forget_requires_existing_stopped_agent() {
+        let store = HubStore::memory().unwrap();
+        let mut running = view(ID);
+        running.status = PublicStatus::Running;
+        store
+            .ingest_snapshot(&snapshot("a", 1, vec![running]))
+            .unwrap();
+        assert_eq!(store.forget("a", "nope").unwrap(), ForgetOutcome::NotFound);
+        assert_eq!(store.forget("b", ID).unwrap(), ForgetOutcome::NotFound);
+        let before = store.revision().unwrap();
+        assert_eq!(store.forget("a", ID).unwrap(), ForgetOutcome::NotStopped);
+        assert_eq!(store.revision().unwrap(), before);
+        store
+            .ingest_snapshot(&snapshot("a", 2, vec![stopped(ID)]))
+            .unwrap();
+        let ForgetOutcome::Forgotten { hub_revision } = store.forget("a", ID).unwrap() else {
+            panic!("expected forgotten");
+        };
+        assert_eq!(hub_revision, store.revision().unwrap());
+        assert!(store.merged().unwrap().2.is_empty());
+    }
+
+    #[test]
+    fn tombstoned_deliveries_are_suppressed() {
+        let store = HubStore::memory().unwrap();
+        store
+            .ingest_snapshot(&snapshot("a", 1, vec![stopped(ID)]))
+            .unwrap();
+        store.forget("a", ID).unwrap();
+        let revision = store.revision().unwrap();
+        let mut again = stopped(ID);
+        again.updated_at = Utc::now() + Duration::seconds(1);
+        let redelivered = update("late", 2, again.clone());
+        assert_eq!(
+            store.ingest_update(&redelivered).unwrap(),
+            UpdateAccept::Suppressed
+        );
+        assert_eq!(
+            store.ingest_update(&redelivered).unwrap(),
+            UpdateAccept::Duplicate
+        );
+        assert_eq!(store.revision().unwrap(), revision);
+        assert!(store.merged().unwrap().2.is_empty());
+        // the suppressed delivery advanced the source revision
+        assert_eq!(
+            store.ingest_update(&update("older", 2, again)).unwrap(),
+            UpdateAccept::Stale
+        );
+        let other = "00000000-0000-4000-8000-000000000002";
+        store
+            .ingest_snapshot(&snapshot("a", 3, vec![stopped(ID), view(other)]))
+            .unwrap();
+        let (_, _, agents) = store.merged().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].view.invocation_id.to_string(), other);
+    }
+
+    #[test]
+    fn old_tombstones_are_pruned() {
+        let store = HubStore::memory().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            let old = (Utc::now() - Duration::days(15)).to_rfc3339();
+            let recent = (Utc::now() - Duration::days(13)).to_rfc3339();
+            conn.execute(
+                "INSERT INTO forgotten_agents VALUES ('a','old',?1),('a','recent',?2)",
+                params![old, recent],
+            )
+            .unwrap();
+        }
+        store.prune_retained(7).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let left: Vec<String> = conn
+            .prepare("SELECT invocation_id FROM forgotten_agents")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(left, vec!["recent".to_owned()]);
     }
 }

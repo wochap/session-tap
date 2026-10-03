@@ -47,6 +47,81 @@ pub struct HubConfig {
     pub command_timeout_secs: u64,
     #[serde(default)]
     pub subscriptions: Vec<Subscription>,
+    /// Remote device access; absent means no remote port is opened.
+    #[serde(default)]
+    pub remote: Option<RemoteConfig>,
+}
+
+/// Remote listener for paired devices. Every bind address must be a concrete
+/// IP and port so the hub never listens on every interface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteConfig {
+    /// Display name shown to devices; defaults to the host name.
+    #[serde(default)]
+    pub name: Option<String>,
+    pub listen: Vec<String>,
+    /// Extra `host:port` endpoint hints placed in the pairing QR code.
+    #[serde(default)]
+    pub advertise: Vec<String>,
+}
+
+impl RemoteConfig {
+    /// Parsed bind addresses; call after `validate`.
+    #[must_use]
+    pub fn listen_addrs(&self) -> Vec<std::net::SocketAddr> {
+        self.listen
+            .iter()
+            .filter_map(|entry| entry.parse().ok())
+            .collect()
+    }
+
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        self.name.clone().unwrap_or_else(host_name)
+    }
+
+    /// Endpoint hints: every listen address, then every advertised entry.
+    #[must_use]
+    pub fn endpoints(&self) -> Vec<String> {
+        self.listen.iter().chain(&self.advertise).cloned().collect()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.listen.is_empty() {
+            return Err("remote.listen must name at least one address".into());
+        }
+        for entry in &self.listen {
+            let address: std::net::SocketAddr = entry
+                .parse()
+                .map_err(|_| format!("invalid remote.listen address: {entry}"))?;
+            if address.ip().is_unspecified() {
+                return Err(format!(
+                    "remote.listen address {entry} is a wildcard; wildcard addresses are not allowed"
+                ));
+            }
+        }
+        if let Some(entry) = self.advertise.iter().find(|entry| entry.trim().is_empty()) {
+            return Err(format!("invalid remote.advertise entry: {entry:?}"));
+        }
+        if self
+            .name
+            .as_deref()
+            .is_some_and(|name| name.trim().is_empty())
+        {
+            return Err("remote.name must not be empty".into());
+        }
+        Ok(())
+    }
+}
+
+fn host_name() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .or_else(|_| std::fs::read_to_string("/etc/hostname"))
+        .map(|name| name.trim().to_owned())
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "sessiontap-hub".into())
 }
 
 impl Default for HubConfig {
@@ -60,6 +135,7 @@ impl Default for HubConfig {
             max_concurrent_commands: default_max_concurrent_commands(),
             command_timeout_secs: default_command_timeout_secs(),
             subscriptions: Vec::new(),
+            remote: None,
         }
     }
 }
@@ -148,6 +224,9 @@ impl HubConfig {
         }
         if self.command_timeout_secs == 0 {
             return Err("command_timeout_secs must be at least 1".into());
+        }
+        if let Some(remote) = &self.remote {
+            remote.validate()?;
         }
         for (index, subscription) in self.subscriptions.iter().enumerate() {
             if subscription.commands.is_empty() {
@@ -256,6 +335,48 @@ subscriptions:
             ..Default::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn remote_section_validates_addresses() {
+        let config = HubConfig::parse(
+            "version: 1\nremote:\n  name: MacBook\n  listen: [\"100.64.0.7:8932\", \"[fd00::1]:8932\"]\n  advertise: [\"macbook.tailnet.ts.net:8932\"]\n",
+        )
+        .unwrap();
+        config.validate().unwrap();
+        let remote = config.remote.unwrap();
+        assert_eq!(remote.listen_addrs().len(), 2);
+        assert_eq!(
+            remote.endpoints(),
+            vec![
+                "100.64.0.7:8932",
+                "[fd00::1]:8932",
+                "macbook.tailnet.ts.net:8932"
+            ]
+        );
+        assert_eq!(remote.display_name(), "MacBook");
+    }
+
+    #[test]
+    fn remote_section_rejects_wildcards_empty_and_unparsable() {
+        for listen in ["[\"0.0.0.0:8932\"]", "[\"[::]:8932\"]"] {
+            let config =
+                HubConfig::parse(&format!("version: 1\nremote:\n  listen: {listen}\n")).unwrap();
+            let error = config.validate().unwrap_err();
+            assert!(error.contains("wildcard"), "{error}");
+        }
+        let empty = HubConfig::parse("version: 1\nremote:\n  listen: []\n").unwrap();
+        assert!(empty.validate().unwrap_err().contains("at least one"));
+        let bad = HubConfig::parse("version: 1\nremote:\n  listen: [\"laptop:8932\"]\n").unwrap();
+        assert!(bad.validate().unwrap_err().contains("laptop:8932"));
+        assert!(HubConfig::parse("version: 1\nremote:\n  name: x\n").is_err());
+    }
+
+    #[test]
+    fn remote_section_is_optional() {
+        let config = HubConfig::parse("version: 1\n").unwrap();
+        config.validate().unwrap();
+        assert!(config.remote.is_none());
     }
 
     fn subscription_error(body: &str) -> String {

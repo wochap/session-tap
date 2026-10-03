@@ -18,6 +18,10 @@ host sessiontapd ──hub sink──▶ sessiontap-hub ◀──hub sink── 
 ```sh
 sessiontap-hub            # run the service (same as `sessiontap-hub run`)
 sessiontap-hub listen     # merged snapshot, then JSONL updates
+sessiontap-hub pair       # pair a remote device (see Remote access)
+sessiontap-hub devices    # list paired devices
+sessiontap-hub revoke <device>
+sessiontap-hub forget <source_id> <invocation_id>
 ```
 
 The service reads `$XDG_CONFIG_HOME/sessiontap-hub/config.yaml` (falling back
@@ -276,9 +280,142 @@ single daemon. To migrate a Quickshell surface (for example
 5. Rollback if needed: switch the command back to `sessiontap listen`; broker
    state and behavior are unaffected.
 
+## Forgetting stopped agents
+
+```sh
+sessiontap-hub forget host 7f3c2a1e-...
+```
+
+`forget` asks the running service to delete one stopped agent from the merged
+state. The hub records a tombstone for that source and invocation, increments
+the hub revision, and sends every live listener (local and remote) a fresh
+snapshot without the agent. Only agents whose status is `stopped` can be
+forgotten; an unknown agent or any other status exits non-zero and changes
+nothing.
+
+While the tombstone exists, updates for that invocation are acknowledged with
+`{"status":"suppressed"}` but are not stored, published, or routed to
+subscriptions, and source snapshots leave the invocation out. A new run of the
+same project has a new invocation ID and is ingested normally. Tombstones are
+deleted after twice `retention_days`. Forgetting changes only hub state; nothing
+is sent to the source daemon or the agent.
+
+## Remote access
+
+Paired devices (the SessionTap Android app) can observe the merged state and
+forget stopped agents over the LAN or a tailnet. The channel is TLS 1.3 with
+WebSocket framing and mutual authentication: the device pins the hub key from
+the pairing QR code, and the hub pins each device's client certificate.
+Without a `remote` section the hub opens no remote port.
+
+```yaml
+version: 1
+remote:
+  name: MacBook                                 # default: host name
+  listen: ["100.64.0.7:8932", "192.168.1.20:8932"]
+  advertise: ["macbook.tailnet.ts.net:8932"]    # extra QR endpoint hints
+```
+
+Every `remote.listen` entry must be a concrete IP and port. Wildcard addresses
+(`0.0.0.0`, `::`), an empty list, and unparsable entries make the configuration
+invalid, so the hub runs with defaults and no remote listener. An address that
+fails to bind (for example a LAN address after switching networks) is logged
+with its address and skipped; the other addresses keep serving.
+
+On first remote start the hub creates an ECDSA P-256 identity at
+`$XDG_STATE_HOME/sessiontap-hub/remote-identity.pem` (mode 0600) and reuses it
+afterwards. The hub ID is the lowercase hex SHA-256 of its
+SubjectPublicKeyInfo. Deleting the file creates a new identity with a new hub
+ID, and every device must pair again.
+
+If Tailscale's "block connections without VPN" (or another always-on VPN
+lockdown) is enabled on the phone, the LAN endpoints are unreachable; the app
+then needs the tailnet address.
+
+### Pairing
+
+```sh
+sessiontap-hub pair                 # scopes read and manage
+sessiontap-hub pair --scope read    # read-only device
+```
+
+`pair` asks the running service to open a pairing window and prints a QR code
+with a countdown. The window lasts 120 seconds, allows one successful pairing,
+and closes after three failed proofs. A newer `pair` replaces an open window.
+The QR payload is JSON:
+
+```json
+{"v":1,"hub":"MacBook","id":"<hub_id>","ep":["100.64.0.7:8932","192.168.1.20:8932","macbook.tailnet.ts.net:8932"],"sc":["read","manage"],"s":"<base64url secret>","exp":1767225600}
+```
+
+`ep` lists every `remote.listen` address and then every `remote.advertise`
+entry. `s` is a 32-byte secret; `exp` is the expiry in Unix seconds.
+
+When a device proves the secret, the terminal shows its name and fingerprint
+(the first 16 bytes of the SHA-256 of the device key, as four groups of eight
+hex characters) and asks `Trust this device? [y/N]`. Compare the fingerprint
+with the one the app shows. Only `y` stores the device. `pair` exits zero only
+when a device was paired; expiry, rejection, too many failures, or a replaced
+window exit non-zero. `pair` also fails when the service is not running or
+remote access is not configured.
+
+Pairing an already paired device key again updates its name and scopes.
+
+### Devices and revocation
+
+```sh
+sessiontap-hub devices
+sessiontap-hub revoke 3f9a
+```
+
+`devices` prints each device ID, name, scopes, pairing time, and last-seen
+time. `revoke` takes a device ID or unique prefix, deletes the device, and
+closes its open connections with WebSocket close code 4401. An ambiguous prefix
+lists the matches and revokes nothing; both cases exit non-zero.
+
+### Protocol
+
+Connect with TLS 1.3 to an endpoint, present the device client certificate,
+and accept the server only if the SHA-256 of its SubjectPublicKeyInfo equals
+the hub ID. Then open a WebSocket (any path). All messages are JSON text
+frames.
+
+- Request: `{"id":1,"method":"hub.info","params":{}}` (`params` optional)
+- Response: `{"id":1,"result":{...}}` or
+  `{"id":1,"error":{"code":"forbidden","message":"..."}}`
+- Stream event (no `id`): `{"event":"stream","data":<envelope>}`, where `data`
+  is exactly one `sessiontap-hub listen` line.
+
+| Method | Scope | Params | Result |
+|---|---|---|---|
+| `hub.info` | paired | none | `{"hub_id","hub_name","protocol":1,"scopes"}` |
+| `listen` | `read` | none | `{}`, then stream events |
+| `forget` | `manage` | `source_id`, `invocation_id` | `{"hub_revision"}` |
+| `pair.begin` | none | none | `{"nonce"}` (base64url) |
+| `pair.complete` | none | `name`, `mac` (base64url) | `{"device_id","hub_name"}` |
+
+`listen` sends a complete snapshot, then each update after it, and a new
+snapshot whenever the hub re-baselines (a source snapshot, a forget, or a
+lagging consumer). Requests are still answered while a stream runs. One
+connection carries at most one stream. The hub pings every 60 seconds and
+closes a connection that missed the previous pong.
+
+Pairing runs on a connection that presents the device certificate: call
+`pair.begin`, then `pair.complete` with
+`mac = HMAC-SHA256(secret, "sessiontap-pair-v1" || hub_spki || device_spki || nonce)`,
+where both SPKIs are DER bytes and the secret and nonce are the decoded bytes.
+The response waits for the operator. After success the same connection is
+authenticated.
+
+Error codes: `bad_request`, `unknown_method`, `unauthorized` (unknown or
+absent client certificate), `forbidden` (missing scope), `not_found`,
+`not_stopped`, `pairing_closed` (no open window), `pairing_failed` (bad proof
+or no client certificate), `pairing_rejected`, `internal`.
+
 ## Limits
 
-The initial hub is one-way. It exposes no agent screen inspection, capture,
-input, or command-control operations. Source envelopes remain versioned and
-carry capability metadata reserved for a future separately specified
-bidirectional transport.
+The hub exposes no agent screen inspection, capture,
+input, or command-control operations, locally or remotely. Remote observation,
+device administration, and forgetting stopped agents change only hub state.
+Source envelopes remain versioned and carry capability metadata reserved for a
+future separately specified bidirectional transport.

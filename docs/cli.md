@@ -20,6 +20,10 @@ sessiontap listen                # snapshot then JSONL updates
 sessiontap inspect-hooks         # ephemeral raw managed-hook JSONL
 sessiontap-hub                   # merged multi-source service
 sessiontap-hub listen            # merged snapshot then JSONL updates
+sessiontap-hub pair [--scope read|manage]...   # pair a remote device (QR code)
+sessiontap-hub devices           # list paired remote devices
+sessiontap-hub revoke <device>   # revoke a device by ID or unique prefix
+sessiontap-hub forget <source_id> <invocation_id>   # forget a stopped agent
 ```
 
 SessionTap option parsing ends at the provider token; every later argument is

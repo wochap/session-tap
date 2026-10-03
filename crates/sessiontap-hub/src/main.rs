@@ -1,10 +1,13 @@
 use anyhow::{Context, Result, bail};
 use sessiontap_hub::config::{HubConfig, Subscription};
 use sessiontap_hub::ingest::{self, HubPublication};
-use sessiontap_hub::listen::{self, HubRequest};
+use sessiontap_hub::listen::HubRequest;
 use sessiontap_hub::paths::HubPaths;
+use sessiontap_hub::remote::{self, PING_INTERVAL};
 use sessiontap_hub::routing::CommandLimits;
+use sessiontap_hub::service::{self, Hub, RemoteInfo};
 use sessiontap_hub::store::HubStore;
+use sessiontap_hub::{cli, tls};
 use sessiontap_infra::{
     fs::prepare_private_dir,
     json::write_json_line,
@@ -18,19 +21,72 @@ use tokio::{
 };
 
 const BROADCAST_CAPACITY: usize = 1024;
+const USAGE: &str = "usage: sessiontap-hub [run]
+       sessiontap-hub listen
+       sessiontap-hub pair [--scope read|manage]...
+       sessiontap-hub devices
+       sessiontap-hub revoke <device>
+       sessiontap-hub forget <source_id> <invocation_id>";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        None | Some("run") => run_service().await,
-        Some("listen") => listen_client().await,
-        Some("--help" | "-h") => {
-            eprintln!("usage: sessiontap-hub [run] | listen");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    match args.as_slice() {
+        [] | ["run"] => run_service().await,
+        ["listen"] => listen_client().await,
+        ["pair", rest @ ..] => {
+            let scopes = parse_scopes(rest)?;
+            let socket = HubPaths::discover()?.socket();
+            cli::pair(&socket, scopes, &mut std::io::stdout(), true, |_, _| {
+                cli::prompt_yes_no("Trust this device?")
+            })
+            .await
+        }
+        ["devices"] => cli::devices(&HubPaths::discover()?.socket(), &mut std::io::stdout()).await,
+        ["revoke", device] => {
+            cli::revoke(
+                &HubPaths::discover()?.socket(),
+                device,
+                &mut std::io::stdout(),
+            )
+            .await
+        }
+        ["forget", source_id, invocation_id] => {
+            cli::forget(
+                &HubPaths::discover()?.socket(),
+                source_id,
+                invocation_id,
+                &mut std::io::stdout(),
+            )
+            .await
+        }
+        ["--help" | "-h"] => {
+            eprintln!("{USAGE}");
             Ok(())
         }
-        Some(other) => bail!("usage: sessiontap-hub [run] | listen (unknown command '{other}')"),
+        _ => bail!("{USAGE}"),
     }
+}
+
+fn parse_scopes(args: &[&str]) -> Result<Vec<String>> {
+    let mut scopes = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match *arg {
+            "--scope" => {
+                let Some(scope) = args.next() else {
+                    bail!("--scope needs a value (read or manage)");
+                };
+                scopes.push((*scope).to_owned());
+            }
+            other => match other.strip_prefix("--scope=") {
+                Some(scope) => scopes.push(scope.to_owned()),
+                None => bail!("{USAGE}"),
+            },
+        }
+    }
+    service::normalize_scopes(&scopes).map_err(anyhow::Error::msg)
 }
 
 async fn run_service() -> Result<()> {
@@ -64,11 +120,45 @@ async fn run_service() -> Result<()> {
     let tcp_listener = TcpListener::bind(&config.listen)
         .await
         .with_context(|| format!("bind ingestion address {}", config.listen))?;
+    let mut remote_info = None;
+    let mut remote_listeners = Vec::new();
+    if let Some(remote) = &config.remote {
+        let hub_name = remote.display_name();
+        let identity =
+            tls::load_or_create_identity(&paths.state_dir.join(tls::IDENTITY_FILE), &hub_name)?;
+        let acceptor = tokio_rustls::TlsAcceptor::from(tls::server_config(&identity)?);
+        for listener in remote::bind_all(&remote.listen_addrs()).await {
+            eprintln!(
+                "sessiontap-hub: remote access on {}",
+                listener.local_addr()?
+            );
+            remote_listeners.push((listener, acceptor.clone()));
+        }
+        remote_info = Some(RemoteInfo {
+            hub_id: identity.spki_sha256(),
+            hub_name,
+            hub_spki: identity.spki.clone(),
+            endpoints: remote.endpoints(),
+        });
+    }
+    let hub = Arc::new(Hub::new(Arc::clone(&store), updates.clone(), remote_info));
+    for (listener, acceptor) in remote_listeners {
+        tokio::spawn(remote::serve_remote(
+            listener,
+            acceptor,
+            Arc::clone(&hub),
+            PING_INTERVAL,
+        ));
+    }
     eprintln!(
         "sessiontap-hub: ingesting on {} and serving merged stream on {}",
         config.listen,
         socket.display()
     );
+    let unix = tokio::spawn(service::serve_unix_listener(
+        unix_listener,
+        Arc::clone(&hub),
+    ));
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -91,16 +181,9 @@ async fn run_service() -> Result<()> {
                     }
                 });
             }
-            accepted = unix_listener.accept() => {
-                let (stream, _) = accepted?;
-                let store = Arc::clone(&store);
-                let receiver = updates.subscribe();
-                tokio::spawn(async move {
-                    let _ = listen::serve_listener(stream, store, receiver).await;
-                });
-            }
         }
     }
+    unix.abort();
     let _ = fs::remove_file(&socket);
     drop(lock);
     Ok(())
@@ -117,9 +200,9 @@ async fn retention_task(store: Arc<HubStore>, retention_days: u64) {
     }
 }
 
-/// Evaluates subscriptions only for durably accepted updates. Rejected, stale,
-/// and duplicate deliveries never reach this task; source snapshots carry no
-/// routable update.
+/// Evaluates subscriptions only for durably accepted updates. Rejected,
+/// stale, duplicate, and suppressed deliveries never reach this task; source
+/// snapshots and forgets carry no routable update.
 async fn route_updates(
     mut receiver: broadcast::Receiver<HubPublication>,
     subscriptions: Arc<Vec<Subscription>>,

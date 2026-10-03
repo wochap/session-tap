@@ -5,10 +5,29 @@ _sessiontap-hub() {
   commands=(
     'run:Run the hub service (default)'
     'listen:Print the merged snapshot then JSONL updates'
+    'pair:Pair a remote device with a QR code'
+    'devices:List paired remote devices'
+    'revoke:Revoke a paired device and close its connections'
+    'forget:Forget a stopped agent'
   )
   if (( CURRENT == 2 )); then
     _describe 'command' commands
+    return 0
   fi
+  case $words[2] in
+    pair)
+      _arguments '*--scope[grant a scope (default: read and manage)]:scope:(read manage)'
+      ;;
+    revoke)
+      (( CURRENT == 3 )) && _message 'device ID or unique prefix'
+      ;;
+    forget)
+      case $CURRENT in
+        3) _message 'source ID' ;;
+        4) _message 'invocation ID' ;;
+      esac
+      ;;
+  esac
   return 0
 }
 

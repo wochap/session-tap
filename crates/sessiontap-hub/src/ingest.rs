@@ -141,6 +141,10 @@ pub fn handle_ingest(
                 outcome(200, serde_json::json!({"status":"duplicate"}), None)
             }
             Ok(UpdateAccept::Stale) => outcome(200, serde_json::json!({"status":"stale"}), None),
+            // Tombstoned invocation: acknowledged, never published or routed.
+            Ok(UpdateAccept::Suppressed) => {
+                outcome(200, serde_json::json!({"status":"suppressed"}), None)
+            }
             Err(reject) => reject_outcome(reject),
         },
     }

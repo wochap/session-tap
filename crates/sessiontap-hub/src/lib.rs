@@ -1,6 +1,10 @@
+pub mod cli;
 pub mod config;
 pub mod ingest;
 pub mod listen;
 pub mod paths;
+pub mod remote;
 pub mod routing;
+pub mod service;
 pub mod store;
+pub mod tls;

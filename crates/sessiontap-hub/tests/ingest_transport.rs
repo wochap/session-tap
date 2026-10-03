@@ -277,3 +277,46 @@ async fn valid_envelope_is_still_accepted() {
     let (status, _, _) = exchange(b"GET /health HTTP/1.1\r\n\r\n".to_vec(), 64 * 1024).await;
     assert_eq!(status, 200);
 }
+
+#[test]
+fn tombstoned_update_is_acknowledged_without_publication() {
+    let store = HubStore::memory().unwrap();
+    let mut stopped = view(PublicStatus::Stopped);
+    let post = |envelope: &SourceEnvelope| IngestedRequest {
+        method: "POST".into(),
+        path: "/v1/envelopes".into(),
+        bearer: None,
+        body: serde_json::to_vec(envelope).unwrap(),
+    };
+    let snapshot = SourceEnvelope::Snapshot {
+        schema_version: 1,
+        source: SourceIdentity {
+            id: "host".into(),
+            display_name: None,
+        },
+        revision: 1,
+        views: vec![stopped.clone()],
+    };
+    assert!(
+        handle_ingest(&store, None, &post(&snapshot))
+            .publication
+            .is_some()
+    );
+    store
+        .forget("host", &stopped.invocation_id.to_string())
+        .unwrap();
+    stopped.updated_at = Utc::now() + chrono::Duration::seconds(1);
+    let update = SourceEnvelope::Update {
+        schema_version: 1,
+        source_id: "host".into(),
+        delivery_id: "late".into(),
+        revision: 2,
+        changed: BTreeSet::from([PublicField::UpdatedAt]),
+        view: Box::new(stopped),
+    };
+    let outcome = handle_ingest(&store, None, &post(&update));
+    assert_eq!(outcome.status, 200);
+    assert_eq!(outcome.body["status"], "suppressed");
+    assert!(outcome.publication.is_none());
+    assert!(store.merged().unwrap().2.is_empty());
+}
