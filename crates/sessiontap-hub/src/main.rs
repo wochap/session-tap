@@ -177,9 +177,10 @@ async fn run_service() -> Result<()> {
                 let auth = Arc::clone(&auth);
                 let max_body = config.max_body_bytes;
                 let sender = updates.clone();
+                let relay = Arc::clone(&hub.relay);
                 tokio::spawn(async move {
                     if let Some(publication) =
-                        ingest::serve_connection(stream, store, auth, max_body).await
+                        ingest::serve_connection(stream, store, auth, max_body, relay).await
                     {
                         let _ = sender.send(publication);
                     }

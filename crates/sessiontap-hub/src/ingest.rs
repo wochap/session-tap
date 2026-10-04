@@ -1,5 +1,6 @@
 use crate::{
     config::SourceAuth,
+    relay::{self, Relay},
     store::{HubStore, Reject, SnapshotAccept, UpdateAccept},
 };
 use anyhow::Result;
@@ -58,6 +59,15 @@ pub async fn read_request(
     stream: &mut TcpStream,
     max_body_bytes: usize,
 ) -> Result<IngestedRequest, HttpReadError> {
+    Ok(read_upgradable(stream, max_body_bytes).await?.0)
+}
+
+/// Reads one request; the second value is the `sec-websocket-key` of a
+/// WebSocket upgrade request.
+async fn read_upgradable(
+    stream: &mut TcpStream,
+    max_body_bytes: usize,
+) -> Result<(IngestedRequest, Option<String>), HttpReadError> {
     let request = read_http_request(
         stream,
         HttpLimits {
@@ -70,12 +80,20 @@ pub async fn read_request(
         .header("authorization")
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::to_owned);
-    Ok(IngestedRequest {
-        method: request.method,
-        path: request.path,
-        bearer,
-        body: request.body,
-    })
+    let websocket_key = request
+        .header("upgrade")
+        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
+        .then(|| request.header("sec-websocket-key").map(str::to_owned))
+        .flatten();
+    Ok((
+        IngestedRequest {
+            method: request.method,
+            path: request.path,
+            bearer,
+            body: request.body,
+        },
+        websocket_key,
+    ))
 }
 
 /// Ingestion credentials: source ID to private token file. Empty means
@@ -94,6 +112,12 @@ impl IngestAuth {
                 .map(|(id, auth)| (id.clone(), PathBuf::from(&auth.token_file)))
                 .collect(),
         }
+    }
+
+    /// Whether ingestion is tokenless (loopback only).
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.sources.is_empty()
     }
 
     /// Source IDs the bearer may write, or `None` when unauthenticated.
@@ -277,13 +301,19 @@ pub fn transport_rejection(error: &HttpReadError) -> IngestOutcome {
     outcome(status, serde_json::json!({ "error": code }), None)
 }
 
+/// Path of the source control channel upgrade.
+pub const CONTROL_PATH: &str = "/control";
+
+/// Serves one ingestion connection. An authenticated `GET /control`
+/// WebSocket upgrade becomes a source control channel on `relay`.
 pub async fn serve_connection(
     mut stream: TcpStream,
     store: Arc<HubStore>,
     auth: Arc<IngestAuth>,
     max_body_bytes: usize,
+    relay: Arc<Relay>,
 ) -> Option<HubPublication> {
-    let request = match read_request(&mut stream, max_body_bytes).await {
+    let (request, websocket_key) = match read_upgradable(&mut stream, max_body_bytes).await {
         Ok(request) => request,
         Err(HttpReadError::Io(_)) => return None,
         Err(error) => {
@@ -292,6 +322,28 @@ pub async fn serve_connection(
             return None;
         }
     };
+    if request.method == "GET" && request.path == CONTROL_PATH {
+        let permitted = if auth.is_open() {
+            None
+        } else if let Some(permitted) = auth.permitted(request.bearer.as_deref()) {
+            Some(permitted.into_iter().map(str::to_owned).collect())
+        } else {
+            let rejected = outcome(401, serde_json::json!({"error":"unauthorized"}), None);
+            let _ = write_response(&mut stream, &rejected).await;
+            return None;
+        };
+        let Some(key) = websocket_key else {
+            let rejected = outcome(
+                400,
+                serde_json::json!({"error":"websocket_upgrade_required"}),
+                None,
+            );
+            let _ = write_response(&mut stream, &rejected).await;
+            return None;
+        };
+        relay::serve_channel(stream, &key, relay, permitted).await;
+        return None;
+    }
     let result = handle_ingest(&store, &auth, &request);
     let publication = result.publication.clone();
     let _ = write_response(&mut stream, &result).await;

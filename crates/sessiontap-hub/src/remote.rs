@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ingest::HubPublication;
 use crate::listen::{HubStreamEnvelope, StreamSink, stream_merged};
+use crate::relay::{Answer, DeviceOut, Pending, RelayError};
 use crate::scope::Scope;
 use crate::service::{ConnectionHandle, Hub, PairAttempt, PairEvent, fingerprint};
 use crate::store::{Device, ForgetOutcome};
@@ -535,6 +536,7 @@ async fn serve_connection(
     };
     let revoked = cancel.is_cancelled();
     cancel.cancel();
+    hub.relay.release_owner(connection.handle.id);
     if !revoked && let Some(device) = connection.device() {
         hub.unregister_connection(&device.device_id);
     }
@@ -553,8 +555,15 @@ fn error_response(id: Value, code: &str, message: &str) -> Value {
 enum Dispatch {
     Respond(Value),
     Listen(Value, broadcast::Receiver<HubPublication>),
+    /// A terminal request forwarded to its source, awaiting the answer.
+    Terminal(Value, TerminalWait),
     /// The connection is closing: answer nothing.
     Silent,
+}
+
+enum TerminalWait {
+    Open(Pending),
+    Input(Pending),
 }
 
 /// Answers one request frame with exactly one response, unless the
@@ -606,11 +615,20 @@ async fn handle_request(connection: &Arc<Connection>, text: &str, permit: OwnedS
         "pair.complete" => Dispatch::Respond(pair_complete(connection, id, &params).await),
         _ => device_request(connection, id, method, &params),
     };
+    if let Dispatch::Terminal(id, wait) = dispatch {
+        let (response, activate) = terminal_answer(connection, id, wait).await;
+        drop(permit);
+        connection.send(&response).await;
+        if let Some(stream) = activate {
+            connection.hub.relay.activate(stream);
+        }
+        return;
+    }
     drop(permit);
     match dispatch {
         Dispatch::Respond(response) => connection.send(&response).await,
         Dispatch::Listen(id, receiver) => listen(connection, id, receiver).await,
-        Dispatch::Silent => {}
+        Dispatch::Terminal(..) | Dispatch::Silent => {}
     }
 }
 
@@ -641,6 +659,8 @@ fn device_request(connection: &Connection, id: Value, method: &str, params: &Val
         "hub.info" => None,
         "listen" => Some(Scope::Read),
         "forget" => Some(Scope::Manage),
+        "terminal.open" | "terminal.close" => Some(Scope::Watch),
+        "terminal.input" => Some(Scope::Control),
         _ => {
             return Dispatch::Respond(error_response(
                 id,
@@ -668,7 +688,154 @@ fn device_request(connection: &Connection, id: Value, method: &str, params: &Val
             connection.handle.add_stream_scope(Scope::Read);
             Dispatch::Listen(id, connection.hub.updates.subscribe())
         }
+        "terminal.open" => terminal_open(connection, id, params),
+        "terminal.input" => terminal_input(connection, id, params),
+        "terminal.close" => terminal_close(connection, id, params),
         _ => Dispatch::Respond(forget(connection, id, params)),
+    }
+}
+
+fn relay_error(id: Value, error: &RelayError) -> Value {
+    error_response(id, error.code, &error.message)
+}
+
+/// Forwards `terminal.open` to the agent's source. Callers hold
+/// `device_gate` for reading.
+fn terminal_open(connection: &Connection, id: Value, params: &Value) -> Dispatch {
+    let (Some(source_id), Some(invocation_id)) = (
+        params.get("source_id").and_then(Value::as_str),
+        params.get("invocation_id").and_then(Value::as_str),
+    ) else {
+        return Dispatch::Respond(error_response(
+            id,
+            "bad_request",
+            "terminal.open needs source_id and invocation_id",
+        ));
+    };
+    match connection.hub.store.has_agent(source_id, invocation_id) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Dispatch::Respond(error_response(
+                id,
+                "not_found",
+                &format!("no agent {source_id}/{invocation_id}"),
+            ));
+        }
+        Err(error) => return Dispatch::Respond(error_response(id, "internal", &error.to_string())),
+    }
+    let device = DeviceOut {
+        owner: connection.handle.id,
+        out: connection.out.clone(),
+    };
+    match connection.hub.relay.open(&device, source_id, invocation_id) {
+        Ok(pending) => {
+            connection.handle.add_stream_scope(Scope::Watch);
+            Dispatch::Terminal(id, TerminalWait::Open(pending))
+        }
+        Err(error) => Dispatch::Respond(relay_error(id, &error)),
+    }
+}
+
+fn stream_param(params: &Value) -> Option<u64> {
+    params.get("stream").and_then(Value::as_u64)
+}
+
+/// Forwards `terminal.input` for a stream this connection opened. Callers
+/// hold `device_gate` for reading, so a revoke either sees the input
+/// forwarded or forwards nothing.
+fn terminal_input(connection: &Connection, id: Value, params: &Value) -> Dispatch {
+    let Some(stream) = stream_param(params) else {
+        return Dispatch::Respond(error_response(
+            id,
+            "bad_request",
+            "terminal.input needs a stream",
+        ));
+    };
+    let input = match (params.get("keys"), params.get("paste")) {
+        (Some(keys), None) => json!({"keys": keys}),
+        (None, Some(paste)) => json!({"paste": paste}),
+        _ => {
+            return Dispatch::Respond(error_response(
+                id,
+                "bad_request",
+                "terminal.input needs exactly one of keys or paste",
+            ));
+        }
+    };
+    let input = match serde_json::from_value(input) {
+        Ok(input) => input,
+        Err(error) => {
+            return Dispatch::Respond(error_response(id, "bad_request", &error.to_string()));
+        }
+    };
+    match connection
+        .hub
+        .relay
+        .input(connection.handle.id, stream, input)
+    {
+        Ok(pending) => Dispatch::Terminal(id, TerminalWait::Input(pending)),
+        Err(error) => Dispatch::Respond(relay_error(id, &error)),
+    }
+}
+
+fn terminal_close(connection: &Connection, id: Value, params: &Value) -> Dispatch {
+    let Some(stream) = stream_param(params) else {
+        return Dispatch::Respond(error_response(
+            id,
+            "bad_request",
+            "terminal.close needs a stream",
+        ));
+    };
+    Dispatch::Respond(
+        match connection.hub.relay.close(connection.handle.id, stream) {
+            Ok(()) => ok_response(id, json!({})),
+            Err(error) => relay_error(id, &error),
+        },
+    )
+}
+
+/// Waits for the source's answer. Returns the response and, for an opened
+/// stream, its ID to activate once the response is queued.
+async fn terminal_answer(
+    connection: &Connection,
+    id: Value,
+    wait: TerminalWait,
+) -> (Value, Option<u64>) {
+    let relay = &connection.hub.relay;
+    match wait {
+        TerminalWait::Open(pending) => {
+            let stream = pending.stream;
+            match relay.answer(pending).await {
+                Ok(Answer::Opened) => (ok_response(id, json!({"stream": stream})), Some(stream)),
+                Ok(Answer::Error { code, message }) => {
+                    relay.abandon(stream);
+                    (error_response(id, &code, &message), None)
+                }
+                Ok(Answer::Input(_)) => {
+                    relay.abandon(stream);
+                    (
+                        error_response(id, "internal", "unexpected source answer"),
+                        None,
+                    )
+                }
+                Err(error) => {
+                    relay.abandon(stream);
+                    (relay_error(id, &error), None)
+                }
+            }
+        }
+        TerminalWait::Input(pending) => match relay.answer(pending).await {
+            Ok(Answer::Input(None)) => (ok_response(id, json!({})), None),
+            Ok(Answer::Input(Some(code)) | Answer::Error { code, .. }) => (
+                error_response(id, &code, "input refused by the source"),
+                None,
+            ),
+            Ok(Answer::Opened) => (
+                error_response(id, "internal", "unexpected source answer"),
+                None,
+            ),
+            Err(error) => (relay_error(id, &error), None),
+        },
     }
 }
 

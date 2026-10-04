@@ -10,8 +10,12 @@
 #   test-hub.sh answer y|n          answer the pending pairing confirmation
 #   test-hub.sh hub <args...>       run sessiontap-hub against this instance (listen, devices, revoke, ...)
 #   test-hub.sh install-link        `link` and send it to the emulator with adb
+#   test-hub.sh terminal start|stop|exit  terminal fixture: an isolated sessiontapd (source `term`,
+#                                   hub sink with control) and tmux server running fake-agent.sh
+#                                   through sessiontap; `exit` makes the fake agent quit
 #
-# HUB_BIN=<path> HUB_BIN_PREBUILT=1 skips the cargo build.
+# HUB_BIN=<path> HUB_BIN_PREBUILT=1 skips the cargo build (also of sessiontapd and sessiontap
+# for `terminal start`; DAEMON_BIN and WRAPPER_BIN override their paths).
 # TEST_HUB=2 runs a second independent hub (TestHub2) on the next ports.
 #
 # FIXTURES: agents fix (running), devbox (blocked on approval), billing (child
@@ -31,6 +35,11 @@ HUB_BIN=${HUB_BIN:-$ROOT/target/debug/sessiontap-hub}
 BUILD_HUB=${HUB_BIN_PREBUILT:-build}
 SOCK=$XDG_RUNTIME_DIR/sessiontap-hub/sessiontap-hub.sock
 SOURCE=${TEST_SOURCE:-host}
+DAEMON_BIN=${DAEMON_BIN:-$ROOT/target/debug/sessiontapd}
+WRAPPER_BIN=${WRAPPER_BIN:-$ROOT/target/debug/sessiontap}
+# Terminal fixture: its own XDG tree and a short tmux socket path (108-byte limit).
+TERM_BASE=$BASE/term
+TMUX_SOCK=$BASE/t.sock
 
 declare -A IDS=(
   [fix]=00000000-0000-4000-8000-00000000000$N
@@ -92,7 +101,7 @@ view() {
 ingest() {
   local body=$1 code
   code=$(curl -s -o "$BASE/last-response" -w '%{http_code}' -H 'content-type: application/json' \
-    --data-binary "$body" "http://127.0.0.1:$INGEST_PORT/ingest")
+    -H "authorization: Bearer $(<"$BASE/$SOURCE.token")" --data-binary "$body" "http://127.0.0.1:$INGEST_PORT/ingest")
   [[ $code == 200 ]] || die "ingest answered $code: $(cat "$BASE/last-response")"
 }
 
@@ -120,9 +129,16 @@ start() {
   stop_quiet
   mkdir -p "$XDG_CONFIG_HOME/sessiontap-hub" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR"
+  local source
+  for source in "$SOURCE" term; do
+    (umask 077; head -c 24 /dev/urandom | base64 >"$BASE/$source.token")
+  done
   cat >"$XDG_CONFIG_HOME/sessiontap-hub/config.yaml" <<YAML
 version: 1
 listen: "127.0.0.1:$INGEST_PORT"
+sources:
+  $SOURCE: {token_file: "$BASE/$SOURCE.token"}
+  term: {token_file: "$BASE/term.token"}
 remote:
   name: $NAME
   listen: ["127.0.0.1:$REMOTE_PORT"]
@@ -146,6 +162,7 @@ YAML
 }
 
 stop_quiet() {
+  terminal_stop
   if [[ -f $BASE/pid ]]; then
     kill "$(<"$BASE/pid")" 2>/dev/null || true
     sleep 0.3
@@ -198,6 +215,93 @@ answer() {
   kill "$(<"$BASE/pair.pid")" 2>/dev/null || true
 }
 
+# Runs a command in the terminal fixture's isolated environment (TERM_EXEC=exec
+# replaces the calling subshell, so `$!` names the command itself).
+term_env() {
+  ${TERM_EXEC-} env -u TMUX -u TMUX_PANE -u SESSIONTAP_PROVIDER -u SESSIONTAP_CREDENTIAL \
+    -u SESSIONTAP_INVOCATION_ID -u SESSIONTAP_WORKSPACE \
+    XDG_CONFIG_HOME="$TERM_BASE/config" XDG_STATE_HOME="$TERM_BASE/state" \
+    XDG_DATA_HOME="$TERM_BASE/data" XDG_RUNTIME_DIR="$TERM_BASE/run" HOME="$TERM_BASE/home" \
+    SESSIONTAP_BIN="$WRAPPER_BIN" "$@"
+}
+
+terminal_start() {
+  [[ -S $SOCK ]] || die "hub is not running; run test-hub.sh start first"
+  command -v tmux >/dev/null || die "tmux is required"
+  if [[ $BUILD_HUB == build ]]; then
+    (cd "$ROOT" && cargo build -q -p sessiontapd -p sessiontap)
+  fi
+  terminal_stop
+  mkdir -p "$TERM_BASE"/{config/sessiontap,state,data,run,home}
+  chmod 700 "$TERM_BASE/run"
+  cat >"$TERM_BASE/config/sessiontap/config.toml" <<TOML
+version = 1
+source_id = "term"
+source_name = "Terminal fixture"
+
+[adapters.term-agent]
+executable = "$ROOT/android/scripts/fake-agent.sh"
+inherits = "claude"
+
+[sinks.hub]
+type = "hub"
+enabled = true
+url = "http://127.0.0.1:$INGEST_PORT/ingest"
+token_file = "$BASE/term.token"
+control = true
+TOML
+  (TERM_EXEC=exec term_env "$DAEMON_BIN") </dev/null >"$TERM_BASE/daemon.log" 2>&1 &
+  echo $! >"$TERM_BASE/daemon.pid"
+  local waited=0
+  until term_env "$WRAPPER_BIN" status >/dev/null 2>&1; do
+    sleep 0.2
+    waited=$((waited + 1))
+    ((waited < 100)) || { cat "$TERM_BASE/daemon.log" >&2; die "sessiontapd did not start"; }
+  done
+  term_env tmux -S "$TMUX_SOCK" -f /dev/null new-session -d -x 100 -y 30 -s term \
+    "'$WRAPPER_BIN' term-agent" </dev/null >/dev/null 2>&1
+  waited=0
+  until { timeout 5 "$HUB_BIN" listen 2>/dev/null || true; } | head -1 |
+    jq -e '.agents | any(.source_id == "term" and .view.terminal != null)' >/dev/null 2>&1; do
+    sleep 0.2
+    waited=$((waited + 1))
+    ((waited < 100)) || { cat "$TERM_BASE/daemon.log" >&2; die "the term agent did not reach the hub"; }
+  done
+  echo "test-hub.sh: terminal fixture running (source term, tmux -S $TMUX_SOCK)"
+}
+
+# Quits the fake agent from its menu or its reply prompt.
+terminal_exit() {
+  tmux -S "$TMUX_SOCK" send-keys -t term q 2>/dev/null || true
+  sleep 0.2
+  # at the reply prompt the first q is still in the line; C-u clears it
+  tmux -S "$TMUX_SOCK" send-keys -t term C-u q Enter 2>/dev/null || true
+}
+
+terminal_stop() {
+  tmux -S "$TMUX_SOCK" kill-server 2>/dev/null || true
+  if [[ -f $TERM_BASE/daemon.pid ]]; then
+    local pid waited=0
+    pid=$(<"$TERM_BASE/daemon.pid")
+    kill "$pid" 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null && ((waited < 30)); do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -rf "$TERM_BASE" "$TMUX_SOCK"
+}
+
+terminal() {
+  case ${1-} in
+    start) terminal_start ;;
+    stop) terminal_stop; echo "test-hub.sh: terminal fixture stopped" ;;
+    exit) terminal_exit ;;
+    *) die "usage: terminal start|stop|exit" ;;
+  esac
+}
+
 case ${1-} in
   start) start ;;
   stop) stop_quiet; rm -rf "$BASE"; echo "test-hub.sh: stopped $NAME" ;;
@@ -207,5 +311,6 @@ case ${1-} in
   install-link) shift; adb shell am start -W -a android.intent.action.VIEW -d "'$(link "$@")'" dev.sessiontap.android ;;
   answer) shift; answer "$@" ;;
   hub) shift; exec "$HUB_BIN" "$@" ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  terminal) shift; terminal "$@" ;;
+  *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

@@ -1,6 +1,9 @@
 use anyhow::Result;
 use sessiontap_adapters::AdapterRegistry;
-use sessiontap_core::{config::Config, paths::AppPaths};
+use sessiontap_core::{
+    config::{Config, SinkConfig},
+    paths::AppPaths,
+};
 use sessiontap_infra::{
     config::load_config,
     fs::prepare_private_dir,
@@ -11,8 +14,9 @@ use sessiontap_infra::{
 use sessiontap_storage::Storage;
 use sessiontapd::{
     app::{App, Collection, PublishConfig},
+    control::{ControlChannel, RECONNECT_BACKOFF, control_url},
     server::handle,
-    sinks::build_sinks,
+    sinks::{TokenSource, build_sinks},
     workers::{SinkWorker, stale_working_worker},
 };
 use std::{fs, path::Path, sync::Arc};
@@ -51,6 +55,44 @@ async fn main() -> Result<()> {
     app.reconcile(process_alive, config.retention_days)?;
     tokio::spawn(SinkWorker::new(&app, sinks, &daemon).run(daemon.sink_poll()));
     tokio::spawn(stale_working_worker(app.clone(), daemon.stale_sweep()));
+    for (name, sink) in &config.sinks {
+        let SinkConfig::Hub {
+            url,
+            token_env,
+            token_file,
+            ..
+        } = sink
+        else {
+            continue;
+        };
+        if !sink.controls_terminals() {
+            continue;
+        }
+        let config_file = paths.config_file();
+        let sink_name = name.clone();
+        // re-read at every open and input so turning control off applies
+        // without a restart
+        let enabled = Arc::new(move || {
+            load_config(&config_file)
+                .ok()
+                .and_then(|config| {
+                    config
+                        .sinks
+                        .get(&sink_name)
+                        .map(SinkConfig::controls_terminals)
+                })
+                .unwrap_or(false)
+        });
+        let channel = ControlChannel {
+            sink: name.clone(),
+            source_id: config.source_id.clone().unwrap_or_default(),
+            url: control_url(url)?,
+            auth: TokenSource::from_config(token_env.as_deref(), token_file.as_deref()),
+            enabled,
+            backoff: RECONNECT_BACKOFF,
+        };
+        tokio::spawn(channel.run(app.clone()));
+    }
     let shutdown = async {
         let _ = tokio::signal::ctrl_c().await;
     };

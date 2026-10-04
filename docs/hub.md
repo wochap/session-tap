@@ -105,6 +105,11 @@ token_file = "/run/keys/sessiontap-hub-sandbox"
 treats a non-loopback address as safe by default. HTTPS sinks are permitted
 anywhere without a trusted list.
 
+A hub sink may set `control = true` (default `false`) to let paired devices
+view and drive this source's agent terminals through the hub; see
+[Terminal relay](#terminal-relay). Only hub sinks accept `control`; on any
+other sink it is a configuration error naming the sink.
+
 ## Delivery semantics
 
 - When a hub sink is enabled, the daemon first delivers a complete versioned
@@ -509,6 +514,9 @@ frames.
 | `hub.info` | paired | none | `{"hub_id","hub_name","protocol":1,"scopes","endpoints"}` |
 | `listen` | `read` | none | `{}`, then stream events |
 | `forget` | `manage` | `source_id`, `invocation_id` | `{"hub_revision"}` |
+| `terminal.open` | `watch` | `source_id`, `invocation_id` | `{"stream"}`, then terminal messages |
+| `terminal.input` | `control` | `stream`, and `keys` or `paste: {text, enter}` | `{}` |
+| `terminal.close` | `watch` | `stream` | `{}` |
 | `pair.begin` | none | none | `{"nonce"}` (base64url) |
 | `pair.complete` | none | `name`, `mac` (base64url) | `{"device_id","hub_name"}` |
 
@@ -540,7 +548,8 @@ request of every open connection with that key. After `revoke` returns, no
 request from the revoked device changes state or gets a success response, and
 its connections send nothing after the 4401 close.
 
-Each stream depends on one scope: `listen` depends on `read`. When re-pairing
+Each stream depends on one scope: `listen` depends on `read`, terminal streams
+depend on `watch`. When re-pairing
 changes a device's effective scopes so that an open stream's scope is gone,
 the hub closes that connection with WebSocket close code 4403 and reason
 `scope withdrawn`, and the connection sends no further stream data. A client
@@ -580,10 +589,70 @@ When accepting on a remote address fails (for example when the process is out
 of file descriptors), the hub logs the error once, retries after 50 ms, doubling
 up to 1 second, and keeps serving that address.
 
+## Terminal relay
+
+The hub relays live agent terminals between paired devices and the source
+daemons that own the agents' tmux panes. It never captures panes, runs
+multiplexer commands, or stores terminal content; it routes by source ID,
+invocation ID, and stream ID only.
+
+To enable it:
+
+1. Set `remote.control: true` on the hub and restart it.
+2. Pair the device with `--scope watch` (view) or `--scope control` (view and
+   input).
+3. Set `control = true` on the source's hub sink and restart `sessiontapd`.
+
+Each opted-in daemon dials a WebSocket control channel to
+`ws(s)://<sink host:port>/control`, with the same scheme rules, trusted
+addresses, and bearer token as its ingestion. Its first message names its
+source ID; the hub binds the channel only when the token is bound to that
+source (or, without tokens, on a loopback ingestion address) and otherwise
+closes it with reason `source_not_permitted`. A missing or unknown token gets
+401 `unauthorized` before the upgrade. One channel per source is kept: a newer
+channel replaces the older one. The daemon reconnects after 1 second, doubling
+up to 30 seconds, and logs the first failure and the recovery once. Ingestion
+does not depend on the channel.
+
+`terminal.open` answers `{"stream"}`, then pushes messages without `id`:
+
+```json
+{"type":"terminal","stream":"<stream id>","frame":{"type":"snapshot","seq":1,...}}
+```
+
+Frames are the daemon's terminal frames, unchanged: `snapshot` (replaces the
+view; also sent after lag, a multiplexer drop, or a resize), `output` (bytes
+base64), `input` (input availability, with reason `not_foreground` or
+`pane_in_mode` when unavailable), and `ended`. Output larger than the frame
+limit arrives as several `output` frames. A device that cannot keep up gets its
+backlog dropped and a fresh `snapshot`; other watchers are not slowed.
+
+`terminal.input` sends `keys` (named keys or single printable characters) or
+`paste` text with `enter`, only on a stream the same device opened. The daemon
+re-checks `control = true` and the pane's input rules on every input. Refused
+input is never retried or queued.
+
+Terminal error codes, besides the remote protocol's: `source_disallows_control`
+(the source has no control channel or turned `control` off),
+`source_unavailable` (the source did not answer within 5 seconds), and the
+daemon's `not_found`, `terminal_unavailable`, `unsupported_backend`,
+`not_foreground`, `pane_in_mode`, `terminal_ended`, `bad_request`.
+
+`ended` reasons: `agent_exited`, `pane_closed`, `session_closed`,
+`multiplexer_stopped`, `identity_changed`, and the relay's own
+`source_unavailable` (control channel closed or replaced),
+`source_disallows_control`, and `closed` (`terminal.close`). After `ended` no
+frame follows and input is answered `terminal_ended`.
+
+A device's streams end and are released on the source when its connection
+closes. Revoking a device (4401) releases its streams before `revoke` returns.
+A re-pair that removes `watch` closes connections carrying terminal streams
+with 4403; a re-pair that removes only `control` keeps the streams open and
+answers `terminal.input` with `forbidden`.
+
 ## Limits
 
-The hub exposes no agent screen inspection, capture,
-input, or command-control operations, locally or remotely. Remote observation,
-device administration, and forgetting stopped agents change only hub state.
-Source envelopes remain versioned and carry capability metadata reserved for a
-future separately specified bidirectional transport.
+The hub never inspects, captures, or writes agent terminals itself. Terminal
+viewing and input exist only as the relay above, for sources that opt in.
+Device administration and forgetting stopped agents change only hub state and
+send nothing to source daemons.

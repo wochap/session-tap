@@ -218,7 +218,14 @@ async fn exchange_with(
     let store = std::sync::Arc::new(HubStore::memory().unwrap());
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
-        sessiontap_hub::ingest::serve_connection(stream, store, Arc::new(auth), max_body).await
+        sessiontap_hub::ingest::serve_connection(
+            stream,
+            store,
+            Arc::new(auth),
+            max_body,
+            Default::default(),
+        )
+        .await
     });
     let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
     client.write_all(&raw).await.unwrap();

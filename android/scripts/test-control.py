@@ -9,6 +9,9 @@ Run inside `nix develop .#android-emulator` after `test-hub.sh start` (and
   GET /run?hub=N&arg=..&arg=..   run `TEST_HUB=N test-hub.sh <args>`, answer its stdout
   GET /bg?hub=N&arg=..           same, in the background (for `answer y|n`)
   GET /listen?hub=N              first snapshot line of `sessiontap-hub listen`
+
+The terminal fixture goes through `/run` too: `arg=terminal&arg=start|stop|exit`
+(pair with `arg=link&arg=control` for terminal scopes).
 """
 import os
 import subprocess

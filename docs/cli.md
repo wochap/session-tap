@@ -242,6 +242,10 @@ url = "http://127.0.0.1:8931/ingest"
 token_file = "/run/keys/sessiontap-hub-token"
 ```
 
+A hub sink may set `control = true` (default `false`) to open the terminal
+relay control channel described in `docs/hub.md`; any other sink type rejects
+`control` with an error naming the sink.
+
 Hub sinks always deliver complete envelopes, so `fields` on a hub sink is a
 configuration error (`sink '<name>' is a hub sink and does not accept fields`)
 and the daemon refuses to start. A hub `409` whose body is

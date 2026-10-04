@@ -2,6 +2,7 @@
 //! workers used by the `sessiontapd` binary and its integration tests.
 
 pub mod app;
+pub mod control;
 pub mod server;
 pub mod sinks;
 pub mod terminal;

@@ -129,6 +129,9 @@ pub enum SinkConfig {
         enabled: bool,
         #[serde(default)]
         fields: Vec<String>,
+        /// Accepted only so validation can name the sink; must be absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control: Option<bool>,
     },
     Http {
         #[serde(default)]
@@ -142,6 +145,9 @@ pub enum SinkConfig {
         max_payload_bytes: usize,
         #[serde(default)]
         fields: Vec<String>,
+        /// Accepted only so validation can name the sink; must be absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control: Option<bool>,
     },
     /// Canonical hub sink delivering versioned source snapshots and updates.
     /// Hub sinks always deliver the complete normalized envelope; a non-empty
@@ -162,6 +168,10 @@ pub enum SinkConfig {
         /// explicitly trusted for cleartext HTTP delivery.
         #[serde(default)]
         trusted_addresses: Vec<String>,
+        /// Opens the outbound control channel that relays agent terminals
+        /// to the hub.
+        #[serde(default)]
+        control: bool,
         /// Accepted only so validation can name the sink; must stay empty.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         fields: Vec<String>,
@@ -211,6 +221,19 @@ impl SinkConfig {
                     .map_err(|_| format!("unknown public field '{name}'"))
             })
             .collect()
+    }
+
+    /// Whether this is an enabled hub sink with `control: true`.
+    #[must_use]
+    pub const fn controls_terminals(&self) -> bool {
+        matches!(
+            self,
+            Self::Hub {
+                enabled: true,
+                control: true,
+                ..
+            }
+        )
     }
 
     #[must_use]
@@ -318,6 +341,13 @@ impl Config {
             sink.public_fields()
                 .map_err(|error| format!("sink '{name}': {error}"))?;
             match sink {
+                SinkConfig::Http { control, .. } | SinkConfig::Stdout { control, .. }
+                    if control.is_some() =>
+                {
+                    return Err(format!(
+                        "sink '{name}' does not accept control; only hub sinks relay terminals"
+                    ));
+                }
                 SinkConfig::Http { url, .. } => validate_sink_url(url, &[])?,
                 SinkConfig::Hub {
                     enabled,
@@ -438,6 +468,35 @@ trusted_addresses = ["192.168.100.1"]
             "https://hub.example:8931/ingest",
         ] {
             hub_sink(url, "").validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn control_is_a_hub_only_opt_in() {
+        let default = hub_sink("http://127.0.0.1:8931/ingest", "");
+        default.validate().unwrap();
+        assert!(!default.sinks["hub"].controls_terminals());
+        let on = hub_sink("http://127.0.0.1:8931/ingest", "control=true\n");
+        on.validate().unwrap();
+        assert!(on.sinks["hub"].controls_terminals());
+        let trusted = hub_sink(
+            "http://192.168.100.10:8931/ingest",
+            "control=true\ntoken_file='/run/keys/hub'\n",
+        );
+        trusted.validate().unwrap();
+        assert!(trusted.sinks["hub"].controls_terminals());
+        let error = hub_sink("http://192.168.100.10:8931/ingest", "control=true\n")
+            .validate()
+            .unwrap_err();
+        assert!(error.contains("token_env or token_file"), "{error}");
+        for kind in ["type='http'\nurl='http://127.0.0.1:9/x'", "type='stdout'"] {
+            let c: Config = toml::from_str(&format!(
+                "version=1\n[sinks.archive]\n{kind}\ncontrol=true\n"
+            ))
+            .unwrap();
+            let error = c.validate().unwrap_err();
+            assert!(error.contains("'archive'"), "{error}");
+            assert!(error.contains("control"), "{error}");
         }
     }
 

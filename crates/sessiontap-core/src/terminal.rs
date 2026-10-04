@@ -12,6 +12,10 @@ pub mod error_code {
     pub const TERMINAL_ENDED: &str = "terminal_ended";
     pub const UNSUPPORTED_BACKEND: &str = "unsupported_backend";
     pub const BAD_REQUEST: &str = "bad_request";
+    /// Relay only: the source's control channel is gone or did not answer.
+    pub const SOURCE_UNAVAILABLE: &str = "source_unavailable";
+    /// Relay only: the source has not opted in to terminal control.
+    pub const SOURCE_DISALLOWS_CONTROL: &str = "source_disallows_control";
 }
 
 /// Number of scrollback lines a snapshot carries above the visible screen.
@@ -68,6 +72,12 @@ pub enum EndReason {
     SessionClosed,
     MultiplexerStopped,
     IdentityChanged,
+    /// Relay only: the source's control channel closed or was replaced.
+    SourceUnavailable,
+    /// Relay only: the source turned `control` off.
+    SourceDisallowsControl,
+    /// Relay only: the device closed the stream.
+    Closed,
 }
 
 /// One message of a terminal watch stream.
@@ -332,6 +342,12 @@ mod tests {
             (EndReason::SessionClosed, "session_closed"),
             (EndReason::MultiplexerStopped, "multiplexer_stopped"),
             (EndReason::IdentityChanged, "identity_changed"),
+            (EndReason::SourceUnavailable, "source_unavailable"),
+            (
+                EndReason::SourceDisallowsControl,
+                "source_disallows_control",
+            ),
+            (EndReason::Closed, "closed"),
         ] {
             round_trip(
                 &TerminalFrame::Ended { reason },

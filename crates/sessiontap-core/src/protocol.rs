@@ -126,6 +126,63 @@ pub enum StreamEnvelope {
     },
 }
 
+/// Version of the hub control channel protocol sent in `hello`.
+pub const RELAY_PROTOCOL_VERSION: u32 = 1;
+
+/// Hub-to-source messages on the control channel. `req` correlates an
+/// answer; `stream` is the hub-assigned terminal stream ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RelayRequest {
+    Open {
+        req: u64,
+        stream: u64,
+        invocation_id: String,
+    },
+    Input {
+        req: u64,
+        stream: u64,
+        input: TerminalInput,
+    },
+    Close {
+        stream: u64,
+    },
+    /// The hub dropped frames for the stream; send a fresh snapshot.
+    Resync {
+        stream: u64,
+    },
+}
+
+/// Source-to-hub messages on the control channel. `hello` is first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RelayMessage {
+    Hello {
+        source_id: String,
+        protocol: u32,
+    },
+    Opened {
+        req: u64,
+        stream: u64,
+    },
+    Error {
+        req: u64,
+        code: String,
+        #[serde(default)]
+        message: String,
+    },
+    /// Input answer: success without `code`, refusal with it.
+    InputResult {
+        req: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
+    Frame {
+        stream: u64,
+        frame: TerminalFrame,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +215,98 @@ mod tests {
             children: None,
             terminal: None,
         }
+    }
+
+    #[test]
+    fn relay_envelopes_round_trip() {
+        use crate::terminal::{EndReason, Key, NamedKey};
+        use serde_json::json;
+        fn check<T>(value: &T, expected: serde_json::Value)
+        where
+            T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
+        {
+            assert_eq!(serde_json::to_value(value).unwrap(), expected);
+            assert_eq!(&serde_json::from_value::<T>(expected).unwrap(), value);
+        }
+        check(
+            &RelayMessage::Hello {
+                source_id: "host".into(),
+                protocol: RELAY_PROTOCOL_VERSION,
+            },
+            json!({"type": "hello", "source_id": "host", "protocol": 1}),
+        );
+        check(
+            &RelayRequest::Open {
+                req: 1,
+                stream: 7,
+                invocation_id: "inv".into(),
+            },
+            json!({"type": "open", "req": 1, "stream": 7, "invocation_id": "inv"}),
+        );
+        check(
+            &RelayMessage::Opened { req: 1, stream: 7 },
+            json!({"type": "opened", "req": 1, "stream": 7}),
+        );
+        check(
+            &RelayMessage::Error {
+                req: 1,
+                code: "source_disallows_control".into(),
+                message: "off".into(),
+            },
+            json!({"type": "error", "req": 1, "code": "source_disallows_control", "message": "off"}),
+        );
+        check(
+            &RelayRequest::Input {
+                req: 2,
+                stream: 7,
+                input: TerminalInput::Keys(vec![Key::Named(NamedKey::Enter), Key::Char('1')]),
+            },
+            json!({"type": "input", "req": 2, "stream": 7, "input": {"keys": ["enter", "1"]}}),
+        );
+        check(
+            &RelayMessage::InputResult { req: 2, code: None },
+            json!({"type": "input_result", "req": 2}),
+        );
+        check(
+            &RelayMessage::InputResult {
+                req: 3,
+                code: Some("not_foreground".into()),
+            },
+            json!({"type": "input_result", "req": 3, "code": "not_foreground"}),
+        );
+        check(
+            &RelayRequest::Close { stream: 7 },
+            json!({"type": "close", "stream": 7}),
+        );
+        check(
+            &RelayRequest::Resync { stream: 7 },
+            json!({"type": "resync", "stream": 7}),
+        );
+        let bytes: Vec<u8> = (0..=255).collect();
+        let frame = RelayMessage::Frame {
+            stream: 7,
+            frame: TerminalFrame::Output {
+                seq: 3,
+                data: bytes.clone(),
+            },
+        };
+        let text = serde_json::to_string(&frame).unwrap();
+        match serde_json::from_str::<RelayMessage>(&text).unwrap() {
+            RelayMessage::Frame {
+                frame: TerminalFrame::Output { data, .. },
+                ..
+            } => assert_eq!(data, bytes),
+            other => panic!("{other:?}"),
+        }
+        check(
+            &RelayMessage::Frame {
+                stream: 7,
+                frame: TerminalFrame::Ended {
+                    reason: EndReason::SourceDisallowsControl,
+                },
+            },
+            json!({"type": "frame", "stream": 7, "frame": {"type": "ended", "reason": "source_disallows_control"}}),
+        );
     }
 
     #[test]

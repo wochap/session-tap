@@ -462,3 +462,225 @@ async fn public_view_carries_terminal_descriptor() {
     headless.register(snapshot(), "credential").unwrap();
     assert!(headless.status().unwrap().1[0].terminal.is_none());
 }
+
+mod relay {
+    use super::*;
+    use crate::control::{Bridge, ControlEnabled};
+    use sessiontap_core::protocol::{RelayMessage, RelayRequest};
+
+    struct Harness {
+        fake: Arc<Fake>,
+        app: App,
+        initial: InvocationSnapshot,
+        enabled: Arc<AtomicBool>,
+        bridge: Bridge,
+        out: mpsc::Receiver<RelayMessage>,
+    }
+
+    fn harness() -> Harness {
+        let fake = Fake::new();
+        let (app, initial) = registered(&fake);
+        let enabled = Arc::new(AtomicBool::new(true));
+        let check: ControlEnabled = {
+            let enabled = enabled.clone();
+            Arc::new(move || enabled.load(Ordering::SeqCst))
+        };
+        let (sender, out) = mpsc::channel(64);
+        Harness {
+            bridge: Bridge::new(app.clone(), check, sender),
+            fake,
+            app,
+            initial,
+            enabled,
+            out,
+        }
+    }
+
+    async fn message(out: &mut mpsc::Receiver<RelayMessage>) -> RelayMessage {
+        tokio::time::timeout(Duration::from_secs(5), out.recv())
+            .await
+            .expect("relay message")
+            .expect("open")
+    }
+
+    /// Next frame of `stream`, skipping other streams and input frames.
+    async fn frame_of(out: &mut mpsc::Receiver<RelayMessage>, stream: u64) -> TerminalFrame {
+        loop {
+            if let RelayMessage::Frame { stream: s, frame } = message(out).await
+                && s == stream
+                && !matches!(frame, TerminalFrame::Input(_))
+            {
+                return frame;
+            }
+        }
+    }
+
+    impl Harness {
+        async fn open(&mut self, req: u64, stream: u64) {
+            assert!(
+                self.bridge
+                    .handle(RelayRequest::Open {
+                        req,
+                        stream,
+                        invocation_id: self.initial.invocation_id.to_string(),
+                    })
+                    .await
+            );
+            assert_eq!(
+                message(&mut self.out).await,
+                RelayMessage::Opened { req, stream }
+            );
+            assert!(matches!(
+                frame_of(&mut self.out, stream).await,
+                TerminalFrame::Snapshot { .. }
+            ));
+        }
+
+        async fn input(&mut self, req: u64, stream: u64) -> (bool, Option<String>) {
+            let open = self
+                .bridge
+                .handle(RelayRequest::Input {
+                    req,
+                    stream,
+                    input: keys("1"),
+                })
+                .await;
+            loop {
+                if let RelayMessage::InputResult {
+                    req: answered,
+                    code,
+                } = message(&mut self.out).await
+                {
+                    assert_eq!(answered, req);
+                    return (open, code);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn two_streams_share_one_pane_stream_and_resync_alone() {
+        let mut h = harness();
+        h.open(1, 10).await;
+        h.open(2, 20).await;
+        assert_eq!(h.fake.opened.load(Ordering::SeqCst), 1);
+        h.fake.push(PaneEvent::Output(b"both".to_vec()));
+        let mut seen = Vec::new();
+        while seen.len() < 2 {
+            if let RelayMessage::Frame {
+                stream,
+                frame: TerminalFrame::Output { data, .. },
+            } = message(&mut h.out).await
+            {
+                assert_eq!(data, b"both");
+                seen.push(stream);
+            }
+        }
+        seen.sort_unstable();
+        assert_eq!(seen, vec![10, 20]);
+        // a lagging relay stream asks for a snapshot; the other keeps output
+        let before = h.fake.snapshots.load(Ordering::SeqCst);
+        assert!(h.bridge.handle(RelayRequest::Resync { stream: 20 }).await);
+        assert!(matches!(
+            frame_of(&mut h.out, 20).await,
+            TerminalFrame::Snapshot { .. }
+        ));
+        assert!(h.fake.snapshots.load(Ordering::SeqCst) > before);
+        h.fake.push(PaneEvent::Output(b"more".to_vec()));
+        assert!(matches!(
+            frame_of(&mut h.out, 10).await,
+            TerminalFrame::Snapshot { .. } | TerminalFrame::Output { .. }
+        ));
+        assert!(h.bridge.handle(RelayRequest::Close { stream: 10 }).await);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!h.fake.control_dropped.load(Ordering::SeqCst));
+        assert!(h.bridge.handle(RelayRequest::Close { stream: 20 }).await);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            h.fake.control_dropped.load(Ordering::SeqCst),
+            "the last relay stream releases the pane stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn input_follows_the_pane_guard() {
+        let mut h = harness();
+        h.open(1, 10).await;
+        assert_eq!(h.input(2, 10).await, (true, None));
+        assert_eq!(h.fake.sent.lock().unwrap().as_slice(), ["1"]);
+        h.fake.set(|state| state.foreground_pgid = Some(1));
+        assert_eq!(
+            h.input(3, 10).await,
+            (true, Some(error_code::NOT_FOREGROUND.into()))
+        );
+        assert_eq!(h.fake.sent.lock().unwrap().len(), 1, "nothing written");
+    }
+
+    #[tokio::test]
+    async fn control_turned_off_refuses_and_ends_streams() {
+        let mut h = harness();
+        h.open(1, 10).await;
+        h.enabled.store(false, Ordering::SeqCst);
+        assert_eq!(
+            h.input(2, 10).await,
+            (false, Some(error_code::SOURCE_DISALLOWS_CONTROL.into()))
+        );
+        assert_eq!(
+            frame_of(&mut h.out, 10).await,
+            TerminalFrame::Ended {
+                reason: EndReason::SourceDisallowsControl
+            }
+        );
+        assert!(h.fake.sent.lock().unwrap().is_empty());
+        let refused = h
+            .bridge
+            .handle(RelayRequest::Open {
+                req: 3,
+                stream: 30,
+                invocation_id: h.initial.invocation_id.to_string(),
+            })
+            .await;
+        assert!(!refused);
+        assert!(matches!(
+            message(&mut h.out).await,
+            RelayMessage::Error { req: 3, code, .. } if code == error_code::SOURCE_DISALLOWS_CONTROL
+        ));
+    }
+
+    #[tokio::test]
+    async fn agent_exit_is_forwarded_unchanged() {
+        let mut h = harness();
+        h.open(1, 10).await;
+        h.app
+            .lifecycle_exit(&h.initial.invocation_id, "credential", Some(0), None)
+            .unwrap();
+        assert_eq!(
+            frame_of(&mut h.out, 10).await,
+            TerminalFrame::Ended {
+                reason: EndReason::AgentExited
+            }
+        );
+        assert_eq!(
+            h.input(2, 10).await,
+            (true, Some(error_code::TERMINAL_ENDED.into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_invocation_is_not_found() {
+        let mut h = harness();
+        assert!(
+            h.bridge
+                .handle(RelayRequest::Open {
+                    req: 1,
+                    stream: 10,
+                    invocation_id: "not-a-uuid".into(),
+                })
+                .await
+        );
+        assert!(matches!(
+            message(&mut h.out).await,
+            RelayMessage::Error { code, .. } if code == error_code::NOT_FOUND
+        ));
+    }
+}

@@ -461,6 +461,21 @@ impl HubStore {
         Ok(())
     }
 
+    /// Whether the hub holds agent `invocation_id` of `source_id`.
+    pub fn has_agent(&self, source_id: &str, invocation_id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .lock()
+            .expect("hub store mutex poisoned")
+            .query_row(
+                "SELECT 1 FROM public_agents WHERE source_id=?1 AND invocation_id=?2",
+                params![source_id, invocation_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
     pub fn has_source(&self, source_id: &str) -> Result<bool> {
         Ok(self
             .conn

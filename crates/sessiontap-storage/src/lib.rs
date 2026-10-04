@@ -1031,6 +1031,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "stdout".into(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },
@@ -1203,6 +1204,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "observer".into(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },
@@ -1420,6 +1422,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "observer".into(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },
@@ -1482,6 +1485,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "observer".into(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },
@@ -1600,6 +1604,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "observer".into(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },
@@ -1841,6 +1846,7 @@ mod tests {
         BTreeMap::from([(
             "hub".into(),
             SinkConfig::Hub {
+                control: false,
                 enabled: true,
                 url: "http://127.0.0.1:8931/ingest".into(),
                 token_env: None,
@@ -2022,6 +2028,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "remote".into(),
             SinkConfig::Http {
+                control: None,
                 enabled: true,
                 url: "http://127.0.0.1:8787/events".into(),
                 token_env: None,
@@ -2193,6 +2200,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "slow".into(),
             SinkConfig::Http {
+                control: None,
                 enabled: true,
                 url: "http://127.0.0.1:9/events".into(),
                 token_env: None,
@@ -2482,6 +2490,7 @@ mod tests {
         let sinks = BTreeMap::from([(
             "debug".into(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },

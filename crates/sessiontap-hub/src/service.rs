@@ -8,7 +8,10 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     net::IpAddr,
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -22,6 +25,7 @@ use crate::config::RemoteConfig;
 use crate::endpoints::{InterfaceAddr, endpoints_with};
 use crate::ingest::HubPublication;
 use crate::listen::{HubRequest, HubResponse, serve_unix_stream};
+use crate::relay::Relay;
 use crate::remote::AddressKey;
 use crate::scope::Scope;
 use crate::store::{Device, DeviceLookup, ForgetOutcome, HubStore};
@@ -176,6 +180,8 @@ pub enum PairAttempt {
 /// close it.
 #[derive(Debug, Clone)]
 pub struct ConnectionHandle {
+    /// Unique per connection; owns the connection's terminal streams.
+    pub id: u64,
     /// Revocation: closes with `CLOSE_REVOKED`.
     pub revoke: CancellationToken,
     /// Scope withdrawn: closes with `CLOSE_SCOPE_WITHDRAWN`.
@@ -187,8 +193,10 @@ pub struct ConnectionHandle {
 impl ConnectionHandle {
     #[must_use]
     pub fn new() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
         let revoke = CancellationToken::new();
         Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             withdraw: revoke.child_token(),
             revoke,
             stream_scopes: Arc::new(Mutex::new(Vec::new())),
@@ -212,6 +220,8 @@ impl Default for ConnectionHandle {
 
 pub struct Hub {
     pub store: Arc<HubStore>,
+    /// Source control channels and device terminal streams.
+    pub relay: Arc<Relay>,
     pub updates: broadcast::Sender<HubPublication>,
     pub remote: Option<RemoteInfo>,
     pair_ttl: Duration,
@@ -244,6 +254,7 @@ impl Hub {
     ) -> Self {
         Self {
             store,
+            relay: Arc::new(Relay::default()),
             updates,
             remote,
             pair_ttl,
@@ -253,6 +264,14 @@ impl Hub {
             pair_rate: PairRateLimiter::new(PAIR_RATE_BURST, PAIR_RATE_REFILL),
             device_gate: RwLock::new(()),
         }
+    }
+
+    /// Replaces the relay, for tests that shorten its answer timeout.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_relay(mut self, relay: Arc<Relay>) -> Self {
+        self.relay = relay;
+        self
     }
 
     /// Replaces the `pair.*` rate limit, for tests.
@@ -279,8 +298,9 @@ impl Hub {
         Ok(outcome)
     }
 
-    /// Deletes a device and closes its live remote connections.
-    /// Once it returns, no request from the device changes state.
+    /// Deletes a device and closes its live remote connections, releasing
+    /// their terminal streams on the sources. Once it returns, no request
+    /// from the device changes state or reaches a terminal.
     pub fn revoke(&self, prefix: &str) -> Result<DeviceLookup> {
         let _gate = self.device_gate.write().expect("device gate poisoned");
         let lookup = self.store.delete_device(prefix)?;
@@ -293,6 +313,7 @@ impl Hub {
                 .unwrap_or_default();
             for handle in handles {
                 handle.revoke.cancel();
+                self.relay.release_owner(handle.id);
             }
         }
         Ok(lookup)
@@ -340,6 +361,7 @@ impl Hub {
                 .any(|scope| !effective.contains(scope));
             if lost {
                 handle.withdraw.cancel();
+                self.relay.release_owner(handle.id);
             }
         }
         Ok(device)

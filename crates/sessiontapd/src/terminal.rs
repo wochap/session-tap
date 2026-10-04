@@ -387,6 +387,13 @@ pub struct Watcher {
 }
 
 impl Watcher {
+    /// Drops this watcher's pending output and asks for a fresh snapshot,
+    /// e.g. when the relay downstream fell behind.
+    pub fn resync(&mut self) {
+        self.synced = false;
+        let _ = self.session.control.request_snapshot();
+    }
+
     /// Next frame for this watcher: a snapshot first and after any lag,
     /// then output and input changes, ending with `ended`.
     pub async fn next(&mut self) -> Option<TerminalFrame> {

@@ -217,6 +217,7 @@ fn fixture_replay_matches_snapshot() {
         (
             "hub".to_owned(),
             SinkConfig::Hub {
+                control: false,
                 enabled: true,
                 url: "http://127.0.0.1:8931/ingest".into(),
                 token_env: None,
@@ -230,6 +231,7 @@ fn fixture_replay_matches_snapshot() {
         (
             "observer".to_owned(),
             SinkConfig::Stdout {
+                control: None,
                 enabled: true,
                 fields: vec![],
             },

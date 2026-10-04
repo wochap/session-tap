@@ -4,6 +4,7 @@ pub mod endpoints;
 pub mod ingest;
 pub mod listen;
 pub mod paths;
+pub mod relay;
 pub mod remote;
 pub mod routing;
 pub mod scope;
