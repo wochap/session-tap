@@ -120,7 +120,7 @@ The app SHALL compare each agent's previous persisted effective status with its 
 - entering `stopped` with root reason `completed`: "<provider> finished", on a default-importance channel;
 - any other transition: nothing.
 
-The notification title SHALL be the session name or the provider name. The text SHALL include the hub name, the event, the shortened cwd, and the branch. The expanded body SHALL hold the reason summary, and a footer line SHALL hold context percent and humanized tokens. A notification SHALL be cancelled when its agent leaves `blocked`, so a later re-block notifies again. The same transition SHALL NOT notify twice. Notifications SHALL be grouped per hub, SHALL hide the reason on a secure lock screen, and SHALL offer Open (to the session detail) and Mute hub for one hour, with no action that changes agent state.
+The notification title SHALL be the session name or the provider name. The text SHALL include the hub name, the event, the shortened cwd, and the branch. The expanded body SHALL hold the reason summary, and a footer line SHALL hold context percent and humanized tokens. A notification SHALL be cancelled when its agent leaves `blocked`, so a later re-block notifies again. The same transition SHALL NOT notify twice. Notifications SHALL be grouped per hub, SHALL hide the reason on a secure lock screen, and SHALL offer Open (to the session detail) and Mute hub for one hour, with no action that changes agent state. A needs-attention notification for an agent whose terminal this device can open with the `control` scope SHALL also offer "Open terminal", which opens the terminal screen for that agent after the device is unlocked.
 
 #### Scenario: Approval requested
 - **WHEN** an update moves an agent from running to blocked with reason `approval`
@@ -141,6 +141,14 @@ The notification title SHALL be the session name or the provider name. The text 
 #### Scenario: Lifecycle-only stop
 - **WHEN** an agent becomes stopped without a reason
 - **THEN** no notification is posted
+
+#### Scenario: Open terminal from a notification
+- **WHEN** the device has `control` and the user taps "Open terminal" on a needs-permission notification
+- **THEN** the app opens that agent's terminal screen
+
+#### Scenario: No control scope
+- **WHEN** the device has only `read` and `manage`
+- **THEN** needs-attention notifications offer only Open and Mute hub
 
 ### Requirement: Alert settings are local and trimmed
 The Alerts screen SHALL provide toggles for needs permission, needs input, and finished, applied to all hubs, plus a per-hub mute with an expiry that the notification Mute action also sets. Settings SHALL be stored only on the phone. The app SHALL NOT offer per-provider filters or quiet hours.
@@ -204,3 +212,134 @@ The app SHALL store the scopes from every `hub.info` result as the hub's granted
 #### Scenario: Read scope removed
 - **WHEN** after a `4403` close the hub reports scopes without `read`
 - **THEN** the app does not call `listen`, keeps the connection, and shows the hub as having no session access with a re-pair action
+
+### Requirement: Session detail offers the agent terminal by scope
+The session detail screen SHALL offer "Open terminal" when the hub's effective scopes for this device include `control` and the agent's public view carries a `terminal` descriptor, and SHALL offer "View terminal" when the effective scopes include `watch` but not `control`. When the terminal is available but the device has neither scope, the screen SHALL show a muted line saying the hub did not grant terminal access and how to re-pair with it, and SHALL NOT show a button that would fail. When the agent's public view carries no `terminal` descriptor (not in a multiplexer, headless, or stopped), the screen SHALL show no terminal entry. Session rows SHALL show a terminal icon when the device can open that agent's terminal.
+
+#### Scenario: Control scope
+- **WHEN** the device has `control` on the hub and the agent's terminal is available
+- **THEN** the detail screen shows "Open terminal" and the session row shows the terminal icon
+
+#### Scenario: Watch scope only
+- **WHEN** the device has `watch` but not `control`
+- **THEN** the detail screen shows "View terminal" with an eye icon
+
+#### Scenario: No terminal scope
+- **WHEN** the device has only `read` and `manage` and the agent's terminal is available
+- **THEN** the detail screen shows the no-access line with the re-pair hint and no terminal button
+
+#### Scenario: Headless agent
+- **WHEN** the agent's public view has no `terminal` descriptor
+- **THEN** the detail screen shows no terminal entry and the row shows no terminal icon
+
+### Requirement: Terminal screen shows only the agent's pane
+The terminal screen SHALL show exactly one agent's pane, opened with `terminal.open` for that source and invocation and closed with `terminal.close` when the user leaves. It SHALL NOT offer tabs, a new terminal, or any way to open a shell. It SHALL render each `snapshot` frame by resetting the view to its contents, cursor, and size, SHALL append `output` frames, SHALL render the pane at the desktop pane's size, SHALL show that size in a chip that updates when a new `snapshot` reports a new size, and SHALL NOT ask the hub to resize the pane. The top bar SHALL show the session name, the effective status, the branch and hub, and the connection state (live, connecting, reconnecting, input paused, ended, offline, closed).
+
+#### Scenario: Open from detail
+- **WHEN** the user taps "Open terminal"
+- **THEN** the app opens the agent's terminal stream and renders the hub's snapshot followed by live output
+
+#### Scenario: Desktop pane resizes
+- **WHEN** the desktop pane changes from 120x40 to 132x38 while the screen is open
+- **THEN** the terminal re-renders at 132x38 and the size chip reads 132x38, and the app sends no resize
+
+### Requirement: Terminal view is readable on a phone
+In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to keep the cursor in view when the pane is wider than the screen. Tapping the size chip or double-tapping the terminal SHALL toggle between that size and fit-to-width. Pinch SHALL zoom between fit-to-width and 200%. In landscape the terminal SHALL open at fit-to-width. The app SHALL keep the last 500 lines of scrollback; while the user is scrolled up, new output SHALL NOT move the view and a "Jump to live" pill with the count of new lines SHALL return to the live bottom. The terminal surface SHALL stay dark in both the light and dark app themes and SHALL map the 16 ANSI colors to the app's terminal palette, while 256-color and 24-bit colors render as sent.
+
+#### Scenario: Wide pane in portrait
+- **WHEN** a 160-column pane opens in portrait
+- **THEN** text renders at 9sp and the view pans so the cursor column is visible
+
+#### Scenario: Scrolled up while output arrives
+- **WHEN** the user scrolls up and the agent prints 12 lines
+- **THEN** the view stays put and a "Jump to live" pill shows 12 new lines
+
+#### Scenario: Light theme
+- **WHEN** the app uses the light theme
+- **THEN** the top bar, key bar, and reply field are light and the terminal surface stays dark
+
+### Requirement: Control scope sends input to the agent
+With the `control` scope the terminal screen SHALL show a key bar with Esc, Tab, Shift+Tab, Up, Down, Left, Right, Enter, Space, Backspace, Ctrl+C, and Paste, and a reply field with a Send button. Each key SHALL send that named key to the agent as `terminal.input` `keys`. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error.
+
+#### Scenario: Answer a menu with arrows
+- **WHEN** the agent shows an approval menu and the user taps Down then Enter
+- **THEN** the app sends the Down key and then the Enter key to the agent
+
+#### Scenario: Ctrl+C needs a second tap
+- **WHEN** the user taps Ctrl+C once and waits 3 seconds
+- **THEN** nothing is sent and the key returns to its normal state
+
+#### Scenario: Paste from clipboard
+- **WHEN** the user taps Paste with text on the clipboard
+- **THEN** the text appears in the reply field and nothing is sent until the user taps Send
+
+#### Scenario: Send without Enter
+- **WHEN** the user long-presses Send with "see CI run 4821" in the field
+- **THEN** the app sends that text without Enter
+
+### Requirement: Agent questions get answer helpers
+When the agent's effective status is blocked on approval, the device has `control`, and the agent's `terminal` descriptor has quick-pick `digits`, the terminal screen SHALL show an "Agent is asking" banner with digit chips 1 to 4 that each send that digit as a one-character key; the chips SHALL carry no option labels. When the agent waits for input, the banner SHALL say to reply below and SHALL show no chips. When the descriptor's quick-pick is `none`, no chips SHALL show. The banner SHALL include the hint "Space toggles · Enter confirms" for multi-select menus.
+
+#### Scenario: Approval with digit answers
+- **WHEN** a Claude agent waits for approval and the device has `control`
+- **THEN** the banner shows chips 1 2 3 4, and tapping 1 sends the digit 1
+
+#### Scenario: Open question
+- **WHEN** the agent waits for input
+- **THEN** the banner says "Agent is asking — reply below" with no chips
+
+### Requirement: Watch-only and refused input are read-only
+With `watch` but not `control`, the terminal screen SHALL show the live pane with no key bar and no reply field, and a strip saying this phone cannot type into agents on the hub with a "How to allow" link. When `terminal.input` is answered `forbidden` because the device lost `control`, the screen SHALL switch to the same watch-only layout and keep any typed reply out of the request. When `terminal.open` is answered `source_disallows_control`, or the stream ends with that reason, the screen SHALL show no pane and a message that the agent's source does not share its terminals, with "Back to session".
+
+#### Scenario: Watch only
+- **WHEN** a device with only `watch` opens the terminal
+- **THEN** the pane streams live and no key bar or reply field is shown
+
+#### Scenario: Source does not share terminals
+- **WHEN** `terminal.open` is answered `source_disallows_control`
+- **THEN** the screen shows the source message with "Back to session" and no pane
+
+#### Scenario: Control withdrawn mid-stream
+- **WHEN** the user sends input and the hub answers `forbidden`
+- **THEN** the key bar and reply field disappear, the watch-only strip shows, and the pane keeps streaming
+
+### Requirement: Input pauses while the agent is not in front
+When an `input` frame (or a snapshot's input availability) reports input unavailable with reason `not_foreground`, or an input is answered `not_foreground`, the screen SHALL keep streaming the live pane, SHALL grey out the key bar and reply field without hiding them, SHALL keep any typed reply, and SHALL show a banner that input returns when the agent is in front again. When the reason is `pane_in_mode`, the banner SHALL say so and that input resumes when they leave scroll mode. When an `input` frame reports input available again, the controls SHALL re-enable without user action.
+
+#### Scenario: Agent suspended on the desktop
+- **WHEN** the desktop user suspends the agent
+- **THEN** the pane keeps streaming, the controls are greyed, and the paused banner shows
+
+#### Scenario: Desktop scrolling
+- **WHEN** the desktop user enters scroll mode in the pane
+- **THEN** the controls are greyed and the banner says the desktop is scrolling this pane
+
+#### Scenario: Agent back in front
+- **WHEN** an `input` frame reports input available again
+- **THEN** the key bar and reply field re-enable with the typed reply still in the field
+
+### Requirement: Ended terminals keep the last frame
+When an `ended` frame arrives with reason `agent_exited` ("Agent exited"), `pane_closed` or `session_closed` ("Pane closed on desktop"), or `multiplexer_stopped` ("tmux server stopped"), the screen SHALL keep the last frame dimmed and scrollable, SHALL replace the key bar and reply field with an end card naming the reason and the time, and SHALL offer "Back to session" and "Copy last screen". No action on an ended terminal SHALL reopen input. When the stream ends with reason `identity_changed`, the screen SHALL hide the pane and show "Terminal closed for safety" without naming the process now in the pane.
+
+#### Scenario: Agent exits
+- **WHEN** the agent exits while the terminal is open
+- **THEN** the last frame stays dimmed with an "Agent exited" end card and no input controls
+
+#### Scenario: Copy last screen
+- **WHEN** the user taps "Copy last screen" on an ended terminal
+- **THEN** the visible screen text is copied to the clipboard
+
+#### Scenario: Pane identity changed
+- **WHEN** the stream ends with reason `identity_changed`
+- **THEN** the screen shows "Terminal closed for safety" and no pane content
+
+### Requirement: Terminal connection states are explicit
+While the stream opens, the screen SHALL show a connecting placeholder naming the hub. When the hub connection drops, the connection closes with `4403`, or the stream ends with `source_unavailable`, the screen SHALL keep the last frame, show reconnecting, disable input, keep any typed reply, and reopen the terminal with a fresh snapshot after reconnecting; it SHALL NOT send the kept reply until the user taps Send. When a later `snapshot` arrives on an open stream, the screen SHALL show "Catching up" until it renders. When the device is revoked (close `4401`), or after reconnecting the hub's effective scopes no longer include `watch`, the screen SHALL show that terminal access was revoked; when they include `watch` but not `control`, it SHALL reopen in the watch-only layout. Access revoked, hub unreachable, source does not share terminals, and safety refusal SHALL each have distinct copy; revoked SHALL offer only a return to the session detail.
+
+#### Scenario: Reconnect keeps the reply
+- **WHEN** the connection drops with "use the backoff helper" typed and then recovers
+- **THEN** the terminal reopens with a fresh snapshot, the text is still in the field, and nothing was sent
+
+#### Scenario: Terminal scope revoked mid-stream
+- **WHEN** the device is re-paired without `watch` while the terminal is open, so the hub closes the connection with `4403` and `hub.info` no longer lists `watch`
+- **THEN** the screen shows "Terminal access was revoked" and offers only "Back to session"
