@@ -14,7 +14,7 @@ The broker SHALL send no session event over the network unless the user explicit
 - **THEN** all snapshots and events remain on the local machine
 
 ### Requirement: Sink configuration follows XDG conventions
-SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sessiontap/config.toml`, falling back to `$HOME/.config/sessiontap/config.toml` when `XDG_CONFIG_HOME` is unset, and SHALL support named stdout, HTTP, and hub sinks plus a stable source ID and optional source display name.
+SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sessiontap/config.toml`, falling back to `$HOME/.config/sessiontap/config.toml` when `XDG_CONFIG_HOME` is unset, and SHALL support named stdout, HTTP, and hub sinks plus a stable source ID and optional source display name. A hub sink SHALL send its configured credential as a bearer token on every snapshot and update delivery.
 
 #### Scenario: Environment-referenced credential
 - **WHEN** an HTTP or hub sink specifies `token_env`
@@ -22,11 +22,11 @@ SessionTap SHALL read a versioned TOML configuration from `$XDG_CONFIG_HOME/sess
 
 #### Scenario: File-referenced hub credential
 - **WHEN** a hub sink specifies `token_file`
-- **THEN** the broker reads a private non-symlinked credential file at delivery time and does not copy its contents into delivered state
+- **THEN** the broker reads a private non-symlinked credential file at delivery time, sends it as the bearer token, and does not copy its contents into delivered state
 
 #### Scenario: Hub sink omits a credential
-- **WHEN** a hub sink and receiver are intentionally configured without a token for a local deployment
-- **THEN** SessionTap permits unauthenticated delivery subject to the configured network safety policy
+- **WHEN** a hub sink delivers to a loopback destination and neither it nor the hub configures a token
+- **THEN** SessionTap permits unauthenticated delivery
 
 ### Requirement: Forwarded data is normalized, complete, and selectable
 The broker SHALL send hub sinks canonical source snapshot and update envelopes containing stable source and delivery identities, revision, deterministic changed public field paths, and complete resulting `PublicAgentView` values. SessionTap SHALL exclude internal invocation snapshots, lifecycle/activity/event enums, process and multiplexer control metadata, raw hook bodies, transcripts, complete prompt and assistant text, unselected tool inputs and responses, credentials, and arbitrary provider payloads from every sink. Explicitly selected bounded current status summaries SHALL be public fields eligible for configured sink delivery. When a stdout or HTTP sink configures a non-empty `fields` list, the delivered view SHALL contain only those public fields plus the invocation identity; an empty list delivers the complete public view. Hub sinks SHALL ignore field selection.
@@ -72,7 +72,7 @@ The broker SHALL send hub sinks canonical source snapshot and update envelopes c
 - **THEN** the public view leaves usage absent or partially populated rather than reporting estimated values
 
 ### Requirement: HTTP delivery is durable and deduplicable
-The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public-view transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped delivery ID that permits receiver idempotency. Registration, normalized hook changes, lifecycle exit, reconciliation, and future normalized enrichment SHALL be sink-visible only when they change projected public state. Each HTTP and hub delivery SHALL use that sink's configured `timeout_ms`. A hub conflict response SHALL be interpreted by its structured error code: `snapshot_required` resets the sink's baseline and retries the update after the snapshot; any other conflict or client error is a permanent rejection subject to the bounded drop policy. The outbox poll interval, outbox batch size, artifact-collection worker limit, stale-working sweep interval, and update broadcast capacity SHALL be configurable in a `[daemon]` configuration section whose defaults are 250 ms, 100 records, 4 workers, 60 seconds, and 1024 updates.
+The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public-view transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped delivery ID that permits receiver idempotency. Registration, normalized hook changes, lifecycle exit, reconciliation, and future normalized enrichment SHALL be sink-visible only when they change projected public state. Each HTTP and hub delivery SHALL use that sink's configured `timeout_ms`. A hub conflict response SHALL be interpreted by its structured error code: `snapshot_required` resets the sink's baseline and retries the update after the snapshot; `401` and `403` are retried with backoff because they indicate a credential the operator must fix; any other conflict or client error is a permanent rejection subject to the bounded drop policy. The outbox poll interval, outbox batch size, artifact-collection worker limit, stale-working sweep interval, and update broadcast capacity SHALL be configurable in a `[daemon]` configuration section whose defaults are 250 ms, 100 records, 4 workers, 60 seconds, and 1024 updates.
 
 #### Scenario: Receiver is temporarily unavailable
 - **WHEN** HTTP or hub delivery fails with a transient network or server error
@@ -114,6 +114,10 @@ The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as
 - **WHEN** the configuration file has no `[daemon]` section
 - **THEN** the daemon runs with the stated defaults and behaves as before
 
+#### Scenario: Hub rejects the credential
+- **WHEN** the hub answers a hub sink delivery with HTTP 401 or 403
+- **THEN** the broker logs a diagnostic naming the sink and status, keeps the delivery in the outbox, and retries it with backoff instead of dropping it
+
 ### Requirement: Hub sinks repair receiver state with source snapshots
 An enabled hub sink SHALL deliver a complete source snapshot at a consistent source revision when delivery is established or repair is required, and SHALL order subsequent updates after that revision.
 
@@ -133,11 +137,19 @@ SessionTap SHALL require a stable source ID for hub delivery, SHALL include it a
 - **THEN** every received snapshot and update is unambiguously attributable to its originating daemon
 
 ### Requirement: Network transport defaults are safe
-HTTP sinks SHALL require HTTPS except for explicit loopback destinations, SHALL use bounded connection and response timeouts, and SHALL cap queued payload size.
+HTTP sinks SHALL require HTTPS except for explicit loopback destinations, SHALL use bounded connection and response timeouts, and SHALL cap queued payload size. A hub sink that sends cleartext HTTP to a non-loopback address listed in its `trusted_addresses` SHALL configure `token_env` or `token_file`.
 
 #### Scenario: Insecure remote URL
 - **WHEN** configuration specifies plain HTTP to a non-loopback host
 - **THEN** SessionTap rejects or disables that sink with a diagnostic
+
+#### Scenario: Trusted sandbox address without a credential
+- **WHEN** a hub sink sets `url = "http://192.168.100.10:8931/ingest"` and `trusted_addresses = ["192.168.100.10"]` but neither `token_env` nor `token_file`
+- **THEN** configuration validation fails with an error naming the sink and stating that a credential is required
+
+#### Scenario: Trusted sandbox address with a credential
+- **WHEN** the same hub sink also sets `token_file`
+- **THEN** the configuration is valid and every delivery carries the bearer token
 
 ### Requirement: Example receiver demonstrates the protocol
 The repository SHALL include a minimal non-production receiver that accepts versioned SessionTap events, deduplicates event IDs for its process lifetime, and prints each newly accepted event as JSON.

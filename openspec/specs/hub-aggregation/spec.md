@@ -7,7 +7,7 @@ Define canonical multi-source ingestion, persistence, repair, and live observati
 ## Requirements
 
 ### Requirement: Hub ingests only canonical SessionTap envelopes
-The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks. The hub SHALL distinguish transport-level rejections by status code: 400 for a request line or headers it cannot parse, 411 for a missing or non-numeric `content-length`, 431 for headers exceeding the header limit, and 413 only for a body exceeding the configured body limit. Every rejection body SHALL carry a structured error code.
+The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks. When per-source ingestion tokens are configured, the hub SHALL authenticate each ingestion request before interpreting its body and SHALL accept an envelope only when its source ID is bound to the presented token. The hub SHALL distinguish rejections by status code: 400 for a request line or headers it cannot parse, 401 for a missing or unrecognized bearer token, 403 for a valid token presented with an envelope whose source ID is not bound to it, 411 for a missing or non-numeric `content-length`, 431 for headers exceeding the header limit, and 413 only for a body exceeding the configured body limit. Every rejection body SHALL carry a structured error code, and a rejected request SHALL NOT change persisted state, publish to listeners or remote devices, or invoke subscriptions.
 
 #### Scenario: Canonical update arrives
 - **WHEN** a source sends a valid public update containing source identity, delivery identity, changed public field paths, and complete resulting public agent view
@@ -40,6 +40,14 @@ The hub SHALL accept canonical source snapshot and update envelopes produced by 
 #### Scenario: Headers exceed the limit
 - **WHEN** the request headers exceed the header size limit
 - **THEN** the hub responds 431 with error code `headers_too_large`
+
+#### Scenario: Request without a token reaches an authenticated hub
+- **WHEN** source tokens are configured and a `POST` carries no bearer token or one matching no configured source token
+- **THEN** the hub responds 401 with error code `unauthorized` without parsing the envelope, changing state, notifying devices, or running subscriptions
+
+#### Scenario: Valid token writes another source
+- **WHEN** a request presents the `sandbox` source's token with an envelope whose source ID is `host`
+- **THEN** the hub responds 403 with error code `source_not_permitted`, leaves the `host` agents unchanged, and publishes nothing
 
 ### Requirement: Hub merges stable source identities
 Each source SHALL have a configured stable ID and optional display name, and the hub SHALL identify an agent by the pair of source ID and invocation ID.
@@ -144,3 +152,44 @@ The hub SHALL provide `sessiontap-hub forget <source_id> <invocation_id>`, serve
 #### Scenario: New run of the same project
 - **WHEN** the user starts the agent again, producing a new invocation ID
 - **THEN** the hub ingests the new invocation normally
+
+### Requirement: Hub binds ingestion tokens to source identities
+The hub configuration SHALL support a `sources` map from source ID to a private token file. A token SHALL authorize writes only for the source IDs whose configured token file yields that token. The hub SHALL read token files at request time with the same private, non-symlink file rules used for other SessionTap credentials and SHALL compare tokens in constant time. A token file that is missing, a symlink, or readable by group or others SHALL authorize nothing. When `sources` is configured, every ingestion envelope SHALL name a configured source ID.
+
+#### Scenario: Source writes its own state
+- **WHEN** the `sandbox` source posts a snapshot with source ID `sandbox` and the bearer read from `sources.sandbox.token_file`
+- **THEN** the hub applies the snapshot
+
+#### Scenario: Unconfigured source ID
+- **WHEN** a request presents a valid token for `sandbox` with an envelope whose source ID is `rogue`, which has no `sources` entry
+- **THEN** the hub responds 403 with error code `source_not_permitted` and changes no state
+
+#### Scenario: Token file loses its private mode
+- **WHEN** a configured source's token file becomes group- or world-readable
+- **THEN** requests presenting that token are rejected with 401 until the file is private again
+
+#### Scenario: Token is rotated
+- **WHEN** the operator replaces the contents of a source's token file while the hub runs
+- **THEN** subsequent requests are authenticated against the new token without restarting the hub
+
+### Requirement: Hub refuses unauthenticated non-loopback ingestion
+The hub SHALL reject a configuration whose ingestion `listen` address is not a loopback address, including the wildcard addresses `0.0.0.0` and `::`, unless the `sources` map configures at least one source token. The validation error SHALL name the offending address, and the hub SHALL NOT bind that address. A loopback `listen` address without `sources` SHALL remain valid, and ingestion on it SHALL accept envelopes without a bearer token.
+
+#### Scenario: Wildcard ingestion without tokens
+- **WHEN** the hub configuration sets `listen: "0.0.0.0:8931"` and no `sources`
+- **THEN** configuration validation fails with an error naming `0.0.0.0:8931` and the hub does not accept ingestion on that address
+
+#### Scenario: Wildcard ingestion with tokens
+- **WHEN** the hub configuration sets `listen: "0.0.0.0:8931"` and a `sources` map with token files for `host` and `sandbox`
+- **THEN** the configuration is valid and every ingestion request must authenticate
+
+#### Scenario: Loopback ingestion without tokens
+- **WHEN** the hub configuration sets `listen: "127.0.0.1:8931"` and no `sources`
+- **THEN** the configuration is valid and local sources deliver without a bearer token
+
+### Requirement: Hub health probe reveals no state
+The hub SHALL answer `GET /health` on the ingestion address with status 200 and the body `{"status":"ok"}` without requiring authentication, and the response SHALL NOT include the hub revision or any other stored state.
+
+#### Scenario: Unauthenticated health probe
+- **WHEN** any client sends `GET /health` to the ingestion address
+- **THEN** the hub responds 200 with exactly `{"status":"ok"}`
