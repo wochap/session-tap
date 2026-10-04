@@ -93,7 +93,7 @@ The app SHALL compute each agent's effective status: `blocked` if the agent or a
 - **THEN** it appears grayed in the Stale section
 
 ### Requirement: Session list and detail present hub data
-Each session row SHALL show the effective status, session name (or the provider name when there is none), a provider mark, repository branch, a one-line reason or summary, a relative update time, and a child count when children exist. Expanding a row SHALL list its children with status, agent type, summary, and elapsed time. The detail screen SHALL show provider metadata (model, effort, permission mode), the hub and source, the status reason, cwd shortened against the home directory, branch, dirty flag, short head, context window percent, humanized input and output tokens, children, and created and updated times. Filter chips SHALL offer All, Needs attention, Running, and Stale.
+Each session row SHALL show the effective status, session name (or the provider name when there is none), a provider mark, repository branch, a one-line reason or summary, a relative update time, and a child count when children exist. Expanding a row SHALL list its children with status, agent type, summary, and elapsed time. The detail screen SHALL show provider metadata (model, effort, permission mode), the hub and source, the status reason, cwd shortened against the home directory, branch, dirty flag, short head, context window percent, humanized input and output tokens, children, and created and updated times. Filter chips SHALL offer All, Needs attention, Running, and Stale. When the session list is scrolled to its very top and its content changes, it SHALL stay scrolled to the top so items added or moved above the old first item are visible. When the user has scrolled away from the top, content changes SHALL NOT move the list.
 
 #### Scenario: Open detail
 - **WHEN** the user taps a session row
@@ -102,6 +102,14 @@ Each session row SHALL show the effective status, session name (or the provider 
 #### Scenario: Filter with no matches
 - **WHEN** the user selects Stale and no agent is stale
 - **THEN** the list shows an empty filter state
+
+#### Scenario: Agent moves to the top while at the top
+- **WHEN** the list is scrolled to the top and an update moves another agent above the first row
+- **THEN** the list stays at the top and that agent's row is visible
+
+#### Scenario: Agent moves to the top while scrolled down
+- **WHEN** the user has scrolled down the list and an update moves an agent to the top
+- **THEN** the rows on screen stay where they are
 
 ### Requirement: Stopped sessions can be forgotten
 For a hub where the device has the `manage` scope, the app SHALL offer forget on stopped sessions by swiping a row and from the detail screen. It SHALL show an undo snackbar for a few seconds and send the hub `forget` only when the undo window ends. Non-stopped sessions SHALL NOT offer forget. A hub error SHALL restore the row and show the error.
@@ -248,7 +256,7 @@ The terminal screen SHALL show exactly one agent's pane, opened with `terminal.o
 - **THEN** the terminal re-renders at 132x38 and the size chip reads 132x38, and the app sends no resize
 
 ### Requirement: Terminal view is readable on a phone
-In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to keep the cursor in view when the pane is wider than the screen. Tapping the size chip or double-tapping the terminal SHALL toggle between that size and fit-to-width. Pinch SHALL zoom between fit-to-width and 200%. In landscape the terminal SHALL open at fit-to-width. The app SHALL keep the last 500 lines of scrollback; while the user is scrolled up, new output SHALL NOT move the view and a "Jump to live" pill with the count of new lines SHALL return to the live bottom. The terminal surface SHALL stay dark in both the light and dark app themes and SHALL map the 16 ANSI colors to the app's terminal palette, while 256-color and 24-bit colors render as sent.
+In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to keep the cursor in view when the pane is wider than the screen. Tapping the size chip or double-tapping the terminal SHALL toggle between that size and fit-to-width. Pinch SHALL zoom between fit-to-width and 200%. In landscape the terminal SHALL open at fit-to-width. The app SHALL keep the last 500 lines of scrollback; while the user is scrolled up, new output SHALL NOT move the view and a "Jump to live" pill with the count of new lines SHALL return to the live bottom. The terminal surface SHALL stay dark in both the light and dark app themes and SHALL map the 16 ANSI colors to the app's terminal palette, while 256-color and 24-bit colors render as sent. The terminal font SHALL include the Nerd Font glyph set (Powerline symbols and icons), and each such glyph SHALL render within one cell.
 
 #### Scenario: Wide pane in portrait
 - **WHEN** a 160-column pane opens in portrait
@@ -262,8 +270,12 @@ In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to 
 - **WHEN** the app uses the light theme
 - **THEN** the top bar, key bar, and reply field are light and the terminal surface stays dark
 
+#### Scenario: Nerd Font icons in a prompt
+- **WHEN** the pane shows a prompt with a Powerline separator and a Nerd Font folder icon
+- **THEN** both glyphs render as their icons, each one cell wide, and the following text stays aligned to the column grid
+
 ### Requirement: Control scope sends input to the agent
-With the `control` scope the terminal screen SHALL show a key bar with Esc, Tab, Shift+Tab, Up, Down, Left, Right, Enter, Space, Backspace, Ctrl+C, and Paste, and a reply field with a Send button. Each key SHALL send that named key to the agent as `terminal.input` `keys`. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error.
+With the `control` scope the terminal screen SHALL show a key bar with Esc, Tab, Shift+Tab, Up, Down, Left, Right, Enter, Space, Backspace, Ctrl+C, and Paste, and a reply field with a Send button. Each key SHALL send that named key to the agent as `terminal.input` `keys`. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error. Tapping the reply field SHALL focus it and open the soft keyboard, and the field SHALL keep focus while the controls rearrange around the keyboard.
 
 #### Scenario: Answer a menu with arrows
 - **WHEN** the agent shows an approval menu and the user taps Down then Enter
@@ -280,6 +292,10 @@ With the `control` scope the terminal screen SHALL show a key bar with Esc, Tab,
 #### Scenario: Send without Enter
 - **WHEN** the user long-presses Send with "see CI run 4821" in the field
 - **THEN** the app sends that text without Enter
+
+#### Scenario: Keyboard stays open in the reply field
+- **WHEN** the user taps "Reply to agent…" in portrait
+- **THEN** the soft keyboard opens, the reply field moves above the key bar, the field keeps focus, and typed text appears in it
 
 ### Requirement: Agent questions get answer helpers
 When the agent's effective status is blocked on approval, the device has `control`, and the agent's `terminal` descriptor has quick-pick `digits`, the terminal screen SHALL show an "Agent is asking" banner with digit chips 1 to 4 that each send that digit as a one-character key; the chips SHALL carry no option labels. When the agent waits for input, the banner SHALL say to reply below and SHALL show no chips. When the descriptor's quick-pick is `none`, no chips SHALL show. The banner SHALL include the hint "Space toggles · Enter confirms" for multi-select menus.
@@ -347,3 +363,18 @@ While the stream opens, the screen SHALL show a connecting placeholder naming th
 #### Scenario: Terminal scope revoked mid-stream
 - **WHEN** the device is re-paired without `watch` while the terminal is open, so the hub closes the connection with `4403` and `hub.info` no longer lists `watch`
 - **THEN** the screen shows "Terminal access was revoked" and offers only "Back to session"
+
+### Requirement: App icon is the prompt caret
+The launcher icon SHALL be an adaptive icon showing a prompt chevron followed by an accent-colored cursor bar, inside the adaptive icon safe zone, on a dark background with a radial accent gradient. The icon SHALL provide a monochrome layer for Android themed icons. The notification small icon SHALL use the same chevron and cursor glyph as a single-color silhouette.
+
+#### Scenario: Launcher
+- **WHEN** the app is installed on a launcher that uses circle or squircle masks
+- **THEN** the full chevron and cursor bar are visible inside the mask
+
+#### Scenario: Themed icons
+- **WHEN** the user enables themed icons in Android settings
+- **THEN** the launcher shows the chevron and cursor glyph in the system theme color
+
+#### Scenario: Notification
+- **WHEN** the app posts a status or background connection notification
+- **THEN** the status bar shows the chevron and cursor glyph
