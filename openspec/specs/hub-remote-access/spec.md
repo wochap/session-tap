@@ -6,8 +6,10 @@ Lets paired remote devices, such as the Android companion app, observe merged hu
 
 ## Requirements
 
-### Requirement: Remote listener binds only explicit addresses
-The hub SHALL serve remote access only when the configuration names one or more `remote.listen` socket addresses. Each address SHALL be a concrete IP and port. The hub SHALL refuse to start the remote listener for an unspecified address (`0.0.0.0` or `::`) and SHALL report the offending address. Without a `remote` section the hub SHALL open no remote port. Ingestion and the local unix socket SHALL behave the same with or without remote access.
+### Requirement: Remote listener binds configured addresses and retries until bound
+The hub SHALL serve remote access only when the configuration names one or more `remote.listen` socket addresses. Each address SHALL be either a concrete IP and port or a wildcard bind (`0.0.0.0:<port>` or `[::]:<port>`). A wildcard bind SHALL be opt-in only and SHALL be the sole `remote.listen` entry; a configuration that combines a wildcard with any other entry, names an empty list, or holds an entry that is not an IP and port SHALL be invalid, and the error SHALL name the offending entry. Without a `remote` section the hub SHALL open no remote port. Ingestion and the local unix socket SHALL behave the same with or without remote access.
+
+When binding a configured address fails, the hub SHALL keep running, SHALL log the failure once with the address and the error, and SHALL retry that address with exponential backoff starting at 1 second and doubling up to a 30 second cap, without a retry limit. The hub SHALL log once more when the address binds. When a bound remote listener fails while accepting connections, the hub SHALL log it and return that address to the same retry loop. Failed or retrying addresses SHALL NOT affect other remote addresses, ingestion, or the local unix socket. Authorization SHALL NOT depend on which address or bind mode accepted the connection.
 
 #### Scenario: Tailnet address configured
 - **WHEN** the configuration sets `remote.listen: ["100.64.0.7:8932"]`
@@ -15,7 +17,23 @@ The hub SHALL serve remote access only when the configuration names one or more 
 
 #### Scenario: Wildcard address configured
 - **WHEN** the configuration sets `remote.listen: ["0.0.0.0:8932"]`
-- **THEN** the hub reports that wildcard addresses are not allowed and does not open the remote listener
+- **THEN** the hub accepts remote connections on port 8932 of every IPv4 interface, and pairing and device authentication work as they do for an explicit address
+
+#### Scenario: Wildcard combined with another address
+- **WHEN** the configuration sets `remote.listen: ["0.0.0.0:8932", "100.64.0.7:8932"]`
+- **THEN** the configuration is invalid, the error names the wildcard entry, and the hub opens no remote listener
+
+#### Scenario: Address not yet assigned at start
+- **WHEN** the hub starts before the interface holding `192.168.0.165` has that address, and the configuration sets `remote.listen: ["192.168.0.165:8932", "100.64.0.7:8932"]`
+- **THEN** the hub logs one bind failure for `192.168.0.165:8932`, serves `100.64.0.7:8932`, ingestion, and the unix socket at once, and accepts remote connections on `192.168.0.165:8932` within 30 seconds of the address appearing, logging that it is now bound
+
+#### Scenario: Persistent bind failure
+- **WHEN** a configured address keeps failing to bind
+- **THEN** the hub keeps retrying at most every 30 seconds, does not log each retry, and does not exit
+
+#### Scenario: Bound address goes away
+- **WHEN** the accept loop of a bound remote listener fails
+- **THEN** the hub logs the failure and retries binding that address with the same backoff, without affecting other listeners
 
 #### Scenario: Remote access not configured
 - **WHEN** the configuration has no `remote` section
@@ -232,3 +250,22 @@ When accepting a TCP connection on a remote listen address fails, the hub SHALL 
 #### Scenario: File descriptors exhausted
 - **WHEN** accepting on a remote address fails because the process is out of file descriptors
 - **THEN** the hub logs the error, backs off, and accepts connections on that address again once descriptors are available
+
+### Requirement: Pairing endpoint hints reflect the current bind mode
+The hub SHALL compute the pairing QR endpoint hints (`ep`) at the time `sessiontap-hub pair` opens a window. When every `remote.listen` entry is a concrete IP, the hints SHALL be every configured listen address in configuration order, followed by every `remote.advertise` entry. When `remote.listen` is a wildcard, the hints SHALL be every address currently assigned to a host interface that is up, formatted with the wildcard's port in the order the operating system reports them, followed by every `remote.advertise` entry. For `0.0.0.0` the interface addresses SHALL be IPv4; for `[::]` they SHALL be IPv6 and IPv4. Interface addresses SHALL exclude loopback addresses, IPv4 and IPv6 link-local addresses, and addresses on interfaces whose names start with `docker`, `veth`, `virbr`, or `br-`. IPv6 hints SHALL use the bracketed `[addr]:port` form. The list SHALL contain no duplicates, keeping the first occurrence. When the computed list is empty, `sessiontap-hub pair` SHALL fail with a clear message instead of rendering a QR code the device cannot use. Endpoint hints SHALL only tell the device where to connect; they SHALL NOT grant trust, and the device SHALL still pin the hub ID from the QR code.
+
+#### Scenario: Explicit addresses configured
+- **WHEN** the configuration sets `remote.listen: ["100.64.0.7:8932", "192.168.1.20:8932"]` and `remote.advertise: ["macbook.tailnet.ts.net:8932"]`
+- **THEN** the QR `ep` is `["100.64.0.7:8932", "192.168.1.20:8932", "macbook.tailnet.ts.net:8932"]`
+
+#### Scenario: Wildcard with LAN, Tailscale, and container interfaces
+- **WHEN** `remote.listen` is `["0.0.0.0:8932"]`, `remote.advertise` is `["macbook.tailnet.ts.net:8932"]`, and the host has `lo` 127.0.0.1, `wlan0` 192.168.0.165, `tailscale0` 100.64.0.7, `docker0` 172.17.0.1, and `eth1` 169.254.3.4
+- **THEN** the QR `ep` is `["192.168.0.165:8932", "100.64.0.7:8932", "macbook.tailnet.ts.net:8932"]`
+
+#### Scenario: Wildcard address changes between pairings
+- **WHEN** `remote.listen` is a wildcard and the LAN address changes from 192.168.0.165 to 192.168.0.170 while the hub runs
+- **THEN** the next `sessiontap-hub pair` shows `192.168.0.170:<port>` and not the old address, without restarting the hub
+
+#### Scenario: Wildcard with no usable interface address
+- **WHEN** `remote.listen` is a wildcard, no interface has a usable address, and `remote.advertise` is empty
+- **THEN** `sessiontap-hub pair` opens no window, reports that no endpoint hints are available and that `remote.advertise` can name one, and exits non-zero
