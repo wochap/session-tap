@@ -341,3 +341,21 @@ Each long-lived remote stream SHALL depend on one scope: `listen` depends on `re
 #### Scenario: Re-pairing keeps the needed scope
 - **WHEN** a device with a live `listen` stream is re-paired with `read` only, dropping `manage`
 - **THEN** the `listen` stream stays open and a later `forget` on that connection is answered `forbidden`
+
+### Requirement: Remote protocol carries terminal methods
+The remote protocol SHALL support the methods `terminal.open` (scope `watch`), `terminal.input` (scope `control`), and `terminal.close` (scope `watch`), with the behavior defined by the `hub-terminal-relay` capability. The hub SHALL check the device's effective scopes when it handles each terminal request. Pushed terminal messages SHALL carry no `id`, SHALL have type `terminal`, and SHALL name their stream ID. Terminal streams SHALL share the connection's existing request, message size, and ping limits; output larger than the frame limit SHALL be split by the sender into several `output` frames rather than rejected.
+
+#### Scenario: Watch-only device opens and closes a terminal
+- **WHEN** a device with `read` and `watch` sends `terminal.open` and later `terminal.close` for the same stream
+- **THEN** both requests succeed and pushed messages for that stream stop after the close
+
+#### Scenario: Control disabled on the hub
+- **WHEN** the hub's `remote.control` is off and a device stored with `watch` sends `terminal.open`
+- **THEN** the hub answers `forbidden`, because `watch` is not an effective scope
+
+### Requirement: Revocation releases terminal streams
+Revoking a device SHALL release each of its open terminal streams on the sources before `revoke` returns. Once `revoke` has returned, no terminal input from that device SHALL reach a source, and no terminal message SHALL be sent to it.
+
+#### Scenario: Revoke during input
+- **WHEN** a device sends `terminal.input` and the user revokes the device while the hub handles it
+- **THEN** either the input is forwarded before `revoke` returns, or it is not forwarded and the device gets no success response

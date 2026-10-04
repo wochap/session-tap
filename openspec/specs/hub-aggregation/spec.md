@@ -123,16 +123,27 @@ The hub SHALL retain only the optional bounded public status reason carried insi
 - **WHEN** a stopped public view without a reason replaces a running, blocked, or idle view
 - **THEN** the hub clears the prior reason and does not infer completed or failed
 
-### Requirement: Hub control remains unavailable
-The hub SHALL NOT expose agent screen inspection, capture, input, or command-control operations, locally or remotely, while source envelopes SHALL remain versioned and MAY advertise capabilities for a future separately specified bidirectional transport. Remote observation, device administration, and forgetting stopped agents change only hub state and SHALL NOT count as agent control.
+### Requirement: Hub relays agent terminals only for opted-in sources
+The hub SHALL expose agent terminal viewing and input only as the scoped relay defined by the `hub-terminal-relay` capability, and only for sources that keep a control channel open. The hub SHALL NOT capture panes, run multiplexer commands, or write to terminals itself, and SHALL NOT store terminal content. Ingestion, merged state, listeners, subscriptions, and forget SHALL behave the same whether or not any terminal stream is open. Forgetting a stopped agent SHALL change only hub state and SHALL send nothing to the source daemon.
 
-#### Scenario: Consumer requests agent control
-- **WHEN** a client attempts to send input or inspect an agent through the hub
-- **THEN** the hub exposes no such operation
+#### Scenario: Source without control channel
+- **WHEN** a device asks to view or control an agent whose source never opened a control channel
+- **THEN** the hub refuses without contacting the source and its merged state is unchanged
 
 #### Scenario: Remote device forgets an agent
 - **WHEN** a paired device forgets a stopped agent
 - **THEN** the hub changes only its own state and sends nothing to the source daemon or the agent's terminal
+
+### Requirement: Hub carries the public terminal descriptor
+The optional `terminal` descriptor of `PublicAgentView` (its quick-pick mode) SHALL be part of the canonical public schema the hub ingests. The hub SHALL persist it with the agent's view, SHALL include it in `sessiontap-hub listen` and remote `listen` snapshots and updates, SHALL report `terminal` in changed field paths when it appears, changes, or disappears, and SHALL keep the key absent for agents whose source sent none. The descriptor SHALL be descriptive only: the hub SHALL NOT treat its presence as permission to open a terminal.
+
+#### Scenario: Interactive agent in tmux
+- **WHEN** a source sends a view whose `terminal` descriptor has quick-pick `digits`
+- **THEN** remote `listen` consumers receive that agent with the same `terminal` descriptor
+
+#### Scenario: Agent stops
+- **WHEN** a later update removes the `terminal` descriptor
+- **THEN** the hub persists the view without it and the pushed update lists `terminal` among the changed field paths
 
 ### Requirement: Hub forgets stopped agents with tombstones
 The hub SHALL provide `sessiontap-hub forget <source_id> <invocation_id>`, served by the running service, that deletes a stopped agent from the merged state, records a tombstone for that source and invocation pair, increments the hub revision, and re-baselines every live listener with a fresh snapshot. The hub SHALL refuse to forget an agent that does not exist or whose status is not `stopped`. While a tombstone exists, the hub SHALL acknowledge updates for that pair without persisting them, publishing them, or evaluating subscriptions, and SHALL leave that pair out when it materializes a source snapshot. The hub SHALL delete tombstones older than twice `retention_days`.

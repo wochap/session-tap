@@ -157,3 +157,18 @@ The repository SHALL include a minimal non-production receiver that accepts vers
 #### Scenario: Event is posted twice
 - **WHEN** the example receiver receives the same event ID twice
 - **THEN** it prints the event once and acknowledges both deliveries safely
+
+### Requirement: Hub sinks opt in to terminal control
+A hub sink SHALL accept an optional boolean `control`, defaulting to `false`. Only an enabled hub sink with `control: true` SHALL open the outbound control channel defined by the `hub-terminal-relay` capability, and the daemon SHALL refuse every relayed terminal request and input while `control` is not `true`. Non-hub sinks SHALL reject the `control` field with a validation error naming the sink. A sink with `control: true` SHALL follow the same transport safety rules as its ingestion, including the credential requirement for cleartext delivery to a trusted non-loopback address.
+
+#### Scenario: Default hub sink
+- **WHEN** a hub sink omits `control`
+- **THEN** the daemon delivers envelopes as before and opens no control channel
+
+#### Scenario: Control on an HTTP sink
+- **WHEN** an `http` sink sets `control: true`
+- **THEN** configuration validation fails with an error naming the sink
+
+#### Scenario: Control to a trusted sandbox address
+- **WHEN** a hub sink sets `control: true`, a cleartext `url` to an address in `trusted_addresses`, and `token_file`
+- **THEN** the control channel carries the same bearer token as ingestion
