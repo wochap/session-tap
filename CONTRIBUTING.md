@@ -3,7 +3,7 @@
 SessionTap is a clean-room MIT implementation. Read `docs/clean-room.md` before
 contributing provider behavior or fixtures.
 
-Before submitting a change, run:
+Before submitting a change, run `make check`, which runs:
 
 ```sh
 cargo fmt --all --check

@@ -156,7 +156,7 @@ points the hooks at your development build. When you finish, rerun `setup`
 with your installed `sessiontap` to point the hooks back at it, or run
 `sessiontap hooks remove <provider>` to remove them.
 
-Checks before submitting a change (same as `make check`):
+Run `make check` before submitting a change. It runs:
 
 ```sh
 cargo fmt --all --check

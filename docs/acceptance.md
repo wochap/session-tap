@@ -19,11 +19,8 @@ Automated Linux/Wayland checks on 2026-08-25:
   subscription races and reconnects, disconnect cleanup, transient HTTP retry
   with event-ID deduplication and acknowledgement, permissions/symlink matrix,
   concurrent sessions, burst hooks, slow listeners, and bounded outbox load)
-- Linux-only scope audit: pass (macOS CI and compatibility fallbacks removed;
-  no first-party Windows or X11 compatibility code found)
-- Linux CI starts a headless Weston session before running formatting, lint, and
-  workspace tests. This checkout has no Git remote configured from which to
-  dispatch or inspect the hosted workflow.
+- Linux-only scope audit: pass (no macOS, first-party Windows, or X11
+  compatibility code found)
 
 Manual account-backed TUI smoke tests are not claimed. Follow
 `docs/smoke-tests.md` from a Linux Wayland session and record results separately
