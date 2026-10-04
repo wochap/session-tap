@@ -46,6 +46,14 @@ class ProtocolTest {
     }
 
     @Test
+    fun hubInfoEndpointsAreOptional() {
+        val with = ProtocolJson.decodeFromString(HubInfo.serializer(), """{"hub_id":"ab","hub_name":"MacBook","protocol":1,"endpoints":["192.168.1.20:8932","[fd00::1]:8932"]}""")
+        assertEquals(listOf("192.168.1.20:8932", "[fd00::1]:8932"), with.endpoints)
+        val without = ProtocolJson.decodeFromString(HubInfo.serializer(), """{"hub_id":"ab","hub_name":"MacBook","protocol":1}""")
+        assertEquals(emptyList<String>(), without.endpoints)
+    }
+
+    @Test
     fun parsesFullPublicAgentView() {
         val json = """{"invocation_id":"7f3c","provider":"claude","status":"running","cwd":"/home/me/x","created_at":"2026-10-03T14:00:00.123456Z","updated_at":"2026-10-03T14:01:00Z",
             "session":{"id":"s1","name":"Fix"},"metadata":{"model":"opus","effort":"high","permission_mode":"default"},

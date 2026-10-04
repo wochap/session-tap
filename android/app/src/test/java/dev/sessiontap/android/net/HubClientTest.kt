@@ -30,7 +30,11 @@ class HubClientTest {
         val connected = Channel<String>(Channel.UNLIMITED)
         val envelopes = Channel<HubEnvelope>(Channel.UNLIMITED)
         val revoked = Channel<String>(Channel.UNLIMITED)
-        override suspend fun onConnected(hubId: String, endpoint: String, info: HubInfo) { connected.send(info.hubName) }
+        val infos = Channel<HubInfo>(Channel.UNLIMITED)
+        override suspend fun onConnected(hubId: String, endpoint: String, info: HubInfo) {
+            infos.send(info)
+            connected.send(info.hubName)
+        }
         override suspend fun onEnvelope(hubId: String, envelope: HubEnvelope) { envelopes.send(envelope) }
         override suspend fun onRevoked(hubId: String) { revoked.send(hubId) }
     }
@@ -117,6 +121,35 @@ class HubClientTest {
         c.start()
         withTimeout(10_000) { assertEquals(hub.hubId, rec.revoked.receive()) }
         assertTrue(c.state.value == ConnState.Revoked)
+    }
+
+    @Test
+    fun hubInfoEndpointsReachOnConnected() = runBlocking {
+        val reported = listOf("192.168.1.37:8932", "macbook.tailnet.ts.net:8932")
+        hub.enqueue { ws, id, method ->
+            when (method) {
+                "hub.info" -> ws.send(hub.info(id, reported))
+                "listen" -> ws.send("""{"id":$id,"result":{}}""")
+            }
+        }
+        val rec = Recorder()
+        val c = client(rec)
+        c.start()
+        withTimeout(10_000) { assertEquals(reported, rec.infos.receive().endpoints) }
+        c.stop()
+    }
+
+    @Test
+    fun pinMismatchReportsNoEndpoints() = runBlocking {
+        hub.enqueue { ws, id, method -> if (method == "hub.info") ws.send(hub.info(id, listOf("evil.example:8932"))) }
+        val wrongId = "0".repeat(64)
+        val rec = Recorder()
+        val c = HubClient(wrongId, { listOf(hub.endpoint) }, null, rec, scope, { HubTls.client(wrongId, hub.keyManager()) }, initialBackoffMs = 50)
+        c.start()
+        withTimeout(10_000) { c.state.first { it is ConnState.Reconnecting } }
+        c.stop()
+        assertTrue(rec.infos.tryReceive().isFailure)
+        assertEquals(0, hub.server.requestCount)
     }
 
     @Test

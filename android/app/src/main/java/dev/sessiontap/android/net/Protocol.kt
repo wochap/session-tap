@@ -43,6 +43,7 @@ data class HubInfo(
     @SerialName("hub_name") val hubName: String,
     val protocol: Int,
     val scopes: List<String> = emptyList(),
+    val endpoints: List<String> = emptyList(),
 )
 
 @Serializable

@@ -9,6 +9,7 @@ import dev.sessiontap.android.domain.AgentNotice
 import dev.sessiontap.android.net.AgentEntry
 import dev.sessiontap.android.net.AgentView
 import dev.sessiontap.android.net.HubEnvelope
+import dev.sessiontap.android.net.HubInfo
 import dev.sessiontap.android.net.ReasonKind
 import dev.sessiontap.android.net.Status
 import kotlinx.coroutines.CoroutineScope
@@ -150,16 +151,46 @@ class HubRepositoryTest {
     }
 
     @Test
-    fun repairReplacesEndpointsAndUnpairDeletesEverything() = runBlocking {
+    fun repairMergesEndpointsAndUnpairDeletesEverything() = runBlocking {
         repo.applyEnvelope(hubId, snapshot(view(Status.Running, id = "a")))
-        repo.savePaired(hubId, "MacBook", listOf("100.64.0.7:8932"), listOf("read"), "100.64.0.7:8932")
+        val pairedAt = db.hubs().hub(hubId)!!.pairedAt
+        now += 1_000
+        repo.savePaired(hubId, "MacBook", listOf("192.168.1.37:8932", "100.64.0.7:8932"), listOf("read"), "100.64.0.7:8932")
         val hubs = db.hubs().allHubs()
         assertEquals(1, hubs.size)
-        assertEquals(listOf("100.64.0.7:8932"), hubs[0].endpoints)
+        assertEquals(listOf("100.64.0.7:8932", "192.168.1.37:8932", "10.0.2.2:8932"), hubs[0].endpoints)
         assertEquals(listOf("read"), hubs[0].scopes)
+        assertEquals(pairedAt, hubs[0].pairedAt)
+        assertEquals(setOf("a"), stored().keys)
         repo.unpair(hubId)
         assertTrue(db.hubs().allHubs().isEmpty())
         assertTrue(stored().isEmpty())
         assertEquals(listOf("cancelHub $hubId"), notifier.events)
+    }
+
+    @Test
+    fun differentHubIdIsANewHub() = runBlocking {
+        val before = db.hubs().hub(hubId)!!
+        val other = "b".repeat(64)
+        repo.savePaired(other, "MacBook", listOf("10.0.2.2:8932"), listOf("read"), "10.0.2.2:8932")
+        assertEquals(2, db.hubs().allHubs().size)
+        assertEquals(before, db.hubs().hub(hubId))
+        assertEquals(listOf("10.0.2.2:8932"), db.hubs().hub(other)!!.endpoints)
+    }
+
+    @Test
+    fun onConnectedMergesReportedEndpoints() = runBlocking {
+        repo.savePaired(hubId, "MacBook", listOf("192.168.1.20:8932", "macbook.tailnet.ts.net:8932"), listOf("read"), "192.168.1.20:8932")
+        db.hubs().upsertHub(db.hubs().hub(hubId)!!.copy(endpoints = listOf("192.168.1.20:8932", "macbook.tailnet.ts.net:8932")))
+        val info = HubInfo(hubId, "MacBook", 1, listOf("read"), listOf("192.168.1.37:8932", "macbook.tailnet.ts.net:8932", "", "bad"))
+        repo.onConnected(hubId, "macbook.tailnet.ts.net:8932", info)
+        assertEquals(
+            listOf("macbook.tailnet.ts.net:8932", "192.168.1.37:8932", "192.168.1.20:8932"),
+            db.hubs().hub(hubId)!!.endpoints,
+        )
+
+        val many = (1..10).map { "10.1.0.$it:8932" }
+        repo.onConnected(hubId, "macbook.tailnet.ts.net:8932", info.copy(endpoints = many))
+        assertEquals(listOf("macbook.tailnet.ts.net:8932") + many.take(7), db.hubs().hub(hubId)!!.endpoints)
     }
 }

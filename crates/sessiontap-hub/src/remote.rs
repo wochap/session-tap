@@ -668,6 +668,7 @@ fn hub_info(connection: &Connection, id: Value, device: &Device) -> Value {
             "hub_name": remote.hub_name,
             "protocol": PROTOCOL_VERSION,
             "scopes": device.scopes,
+            "endpoints": remote.endpoints(),
         }),
     )
 }

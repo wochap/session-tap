@@ -715,6 +715,30 @@ fn secret_of(payload: &Value) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn hub_info_reports_pairing_endpoints() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let expected = json!([hub.addr.to_string(), "hub.tailnet.ts.net:8932"]);
+
+    let manager = paired(&hub, &["read", "manage"]);
+    let mut ws = connect(&hub, Some(&manager)).await;
+    let info = call(&mut ws, 1, "hub.info", json!({})).await;
+    assert_eq!(info["result"]["endpoints"], expected);
+
+    let reader = paired(&hub, &["read"]);
+    let mut ws = connect(&hub, Some(&reader)).await;
+    let info = call(&mut ws, 1, "hub.info", json!({})).await;
+    assert_eq!(info["result"]["endpoints"], expected);
+
+    let mut anonymous = connect(&hub, None).await;
+    let response = call(&mut anonymous, 1, "hub.info", json!({})).await;
+    assert_eq!(response["error"]["code"], "unauthorized");
+    assert!(response.get("result").is_none());
+
+    let (payload, _lines) = open_window(&hub, vec!["read".into()]).await;
+    assert_eq!(payload["ep"], expected);
+}
+
+#[tokio::test]
 async fn pairing_confirm_repair_and_wrong_secret() {
     let hub = Arc::new(start_hub(Duration::from_secs(60)).await);
     seed(&hub);

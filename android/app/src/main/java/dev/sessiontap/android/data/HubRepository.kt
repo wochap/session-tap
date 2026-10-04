@@ -4,6 +4,7 @@ import dev.sessiontap.android.domain.AgentNotice
 import dev.sessiontap.android.domain.NotificationRules
 import dev.sessiontap.android.domain.NotifyDecision
 import dev.sessiontap.android.domain.effectiveStatus
+import dev.sessiontap.android.domain.mergeEndpoints
 import dev.sessiontap.android.net.AgentView
 import dev.sessiontap.android.net.ConnState
 import dev.sessiontap.android.net.HubEnvelope
@@ -111,17 +112,24 @@ class HubRepository(
         }
     }
 
-    /** Stores a paired hub; re-pairing replaces endpoints and scopes of the same hub id. */
+    /**
+     * Stores a paired hub keyed by its authenticated hub id. Re-pairing the same id updates
+     * name, scopes, and revoked state in place and merges [endpoints] into the stored hints
+     * after [endpoint]; a different id is a new hub.
+     */
     suspend fun savePaired(hubId: String, name: String, endpoints: List<String>, scopes: List<String>, endpoint: String) = mutex.withLock {
         val existing = dao.hub(hubId)
-        val hub = existing?.copy(name = name, endpoints = endpoints, scopes = scopes, lastGoodEndpoint = endpoint, revoked = false, lastSeenAt = now())
-            ?: HubEntity(hubId, name, endpoints, scopes, endpoint, pairedAt = now(), lastSeenAt = now())
+        val merged = mergeEndpoints(endpoint, endpoints, existing?.endpoints.orEmpty())
+        val hub = existing?.copy(name = name, endpoints = merged, scopes = scopes, lastGoodEndpoint = endpoint, revoked = false, lastSeenAt = now())
+            ?: HubEntity(hubId, name, merged, scopes, endpoint, pairedAt = now(), lastSeenAt = now())
         dao.upsertHub(hub)
     }
 
+    /** Called only after a pinned connection; merges the hub-reported endpoint hints. */
     suspend fun onConnected(hubId: String, endpoint: String, info: HubInfo) = mutex.withLock {
         val hub = dao.hub(hubId) ?: return@withLock
-        dao.upsertHub(hub.copy(name = info.hubName.ifEmpty { hub.name }, scopes = info.scopes, lastGoodEndpoint = endpoint, lastSeenAt = now(), revoked = false))
+        val endpoints = mergeEndpoints(endpoint, info.endpoints, hub.endpoints)
+        dao.upsertHub(hub.copy(name = info.hubName.ifEmpty { hub.name }, scopes = info.scopes, endpoints = endpoints, lastGoodEndpoint = endpoint, lastSeenAt = now(), revoked = false))
     }
 
     suspend fun markRevoked(hubId: String) = mutex.withLock {
