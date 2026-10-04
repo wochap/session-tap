@@ -11,7 +11,11 @@ use sessiontap_hub::{
     config::RemoteConfig,
     ingest::{IngestAuth, IngestedRequest, handle_ingest},
     listen::{HubRequest, HubResponse, HubStreamEnvelope},
-    remote::{Backoff, CLOSE_REVOKED, RemoteGate, RemoteLimits, serve_remote, supervise_listener},
+    remote::{
+        Backoff, CLOSE_REVOKED, CLOSE_SCOPE_WITHDRAWN, RemoteGate, RemoteLimits, serve_remote,
+        supervise_listener,
+    },
+    scope::Scope,
     service::{self, Hub, RemoteInfo, pair_mac},
     store::HubStore,
     tls::{Identity, client_config, client_config_with_versions, server_config},
@@ -79,6 +83,11 @@ async fn start_hub(ping: Duration) -> TestHub {
 /// Starts a hub with the given limits. Unless `real_rate_limit`, the
 /// `pair.*` rate limit is effectively off.
 async fn start_hub_with(limits: RemoteLimits, real_rate_limit: bool) -> TestHub {
+    start_hub_full(limits, real_rate_limit, false).await
+}
+
+/// Like `start_hub_with`, with `remote.control` set to `control`.
+async fn start_hub_full(limits: RemoteLimits, real_rate_limit: bool, control: bool) -> TestHub {
     let temp = tempfile::tempdir().unwrap();
     let identity = Identity::generate("test-hub").unwrap();
     let hub_id = identity.spki_sha256();
@@ -92,7 +101,10 @@ async fn start_hub_with(limits: RemoteLimits, real_rate_limit: bool) -> TestHub 
             hub_id: hub_id.clone(),
             hub_name: "Test Hub".into(),
             hub_spki: identity.spki.clone(),
-            remote: remote_config(&[&addr.to_string()], &["hub.tailnet.ts.net:8932"]),
+            remote: RemoteConfig {
+                control,
+                ..remote_config(&[&addr.to_string()], &["hub.tailnet.ts.net:8932"])
+            },
             interfaces: Vec::new,
         }),
     );
@@ -127,6 +139,7 @@ fn remote_config(listen: &[&str], advertise: &[&str]) -> RemoteConfig {
         name: None,
         listen: listen.iter().map(|entry| (*entry).to_owned()).collect(),
         advertise: advertise.iter().map(|entry| (*entry).to_owned()).collect(),
+        control: false,
     }
 }
 
@@ -363,7 +376,7 @@ async fn unix_admin_requests_answer_once() {
     let response = cli::request_once(&hub.socket, &HubRequest::Devices)
         .await
         .unwrap();
-    assert!(matches!(response, HubResponse::Devices { devices } if devices.len() == 1));
+    assert!(matches!(response, HubResponse::Devices { devices, .. } if devices.len() == 1));
     let forget = |invocation_id: &str| HubRequest::Forget {
         source_id: "host".into(),
         invocation_id: invocation_id.into(),
@@ -971,7 +984,7 @@ async fn bind_that_fails_then_succeeds() {
     let response = cli::request_once(&hub.socket, &HubRequest::Devices)
         .await
         .unwrap();
-    assert!(matches!(response, HubResponse::Devices { devices } if devices.len() == 1));
+    assert!(matches!(response, HubResponse::Devices { devices, .. } if devices.len() == 1));
     drop(blocker);
     let info = info_when_bound(&hub, &phone).await;
     assert!(info["result"].is_object(), "{info}");
@@ -1461,4 +1474,92 @@ async fn revoke_races_inflight_forget() {
             "iteration {iteration}: success without effect"
         );
     }
+}
+
+#[tokio::test]
+async fn terminal_scopes_follow_remote_control() {
+    for (control, expected, listed) in [
+        (
+            false,
+            json!(["read"]),
+            "read,watch(disabled),control(disabled)",
+        ),
+        (
+            true,
+            json!(["read", "watch", "control"]),
+            "read,watch,control",
+        ),
+    ] {
+        let hub = start_hub_full(roomy(Duration::from_secs(60)), false, control).await;
+        let device = paired(&hub, &["read", "watch", "control"]);
+        let mut ws = connect(&hub, Some(&device)).await;
+        let info = call(&mut ws, 1, "hub.info", json!({})).await;
+        assert_eq!(info["result"]["scopes"], expected);
+        let mut out = Vec::new();
+        cli::devices(&hub.socket, &mut out).await.unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains(listed), "{out}");
+    }
+}
+
+#[tokio::test]
+async fn pair_with_terminal_scope_needs_remote_control() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let error = cli::pair(
+        &hub.socket,
+        vec!["control".into()],
+        &mut Vec::new(),
+        false,
+        |_, _| true,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("remote.control"), "{error}");
+    assert!(hub.hub.pairing_secret().is_none());
+
+    let hub = start_hub_full(roomy(Duration::from_secs(60)), false, true).await;
+    let (payload, _lines) = open_window(&hub, vec!["control".into()]).await;
+    assert_eq!(payload["sc"], json!(["read", "watch", "control"]));
+}
+
+#[tokio::test]
+async fn repairing_without_read_withdraws_listen() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    seed(&hub);
+    let device = paired(&hub, &["read", "manage"]);
+    let mut ws = connect(&hub, Some(&device)).await;
+    call(&mut ws, 1, "listen", json!({})).await;
+    recv(&mut ws).await;
+    hub.hub
+        .pair_device(&device.spki_sha256(), "Phone", &[Scope::Manage])
+        .unwrap();
+    let (_, close) = wait_closed(&mut ws).await;
+    assert_eq!(close, Some(CLOSE_SCOPE_WITHDRAWN));
+    let mut ws = connect(&hub, Some(&device)).await;
+    let response = call(&mut ws, 1, "listen", json!({})).await;
+    assert_eq!(response["error"]["code"], "forbidden");
+}
+
+#[tokio::test]
+async fn repairing_that_keeps_read_keeps_listen() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let (stopped, running) = seed(&hub);
+    let device = paired(&hub, &["read", "manage"]);
+    let mut ws = connect(&hub, Some(&device)).await;
+    call(&mut ws, 1, "listen", json!({})).await;
+    recv(&mut ws).await;
+    hub.hub
+        .pair_device(&device.spki_sha256(), "Phone", &[Scope::Read])
+        .unwrap();
+    let response = call(
+        &mut ws,
+        2,
+        "forget",
+        json!({"source_id": "host", "invocation_id": stopped}),
+    )
+    .await;
+    assert_eq!(response["error"]["code"], "forbidden");
+    publish_update(&hub, &running, 3);
+    let pushed = recv(&mut ws).await;
+    assert_eq!(pushed["data"]["type"], "update");
 }

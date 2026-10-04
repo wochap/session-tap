@@ -6,6 +6,7 @@ pub mod listen;
 pub mod paths;
 pub mod remote;
 pub mod routing;
+pub mod scope;
 pub mod service;
 pub mod store;
 pub mod tls;

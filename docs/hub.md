@@ -347,6 +347,7 @@ remote:
   name: MacBook                                 # default: host name
   listen: ["100.64.0.7:8932", "192.168.1.20:8932"]
   advertise: ["macbook.tailnet.ts.net:8932"]    # extra QR endpoint hints
+  control: false                                # default; true allows terminal scopes
 ```
 
 Explicit IP addresses are the recommended setup: the hub listens only where
@@ -403,9 +404,33 @@ then needs the tailnet address.
 ### Pairing
 
 ```sh
-sessiontap-hub pair                 # scopes read and manage
-sessiontap-hub pair --scope read    # read-only device
+sessiontap-hub pair                    # scopes read and manage
+sessiontap-hub pair --scope read       # read-only device
+sessiontap-hub pair --scope control    # read, watch, and control (needs remote.control)
 ```
+
+Each device holds a subset of four scopes:
+
+| Scope | Grants | Implies |
+|---|---|---|
+| `read` | observe merged hub state (`listen`) | |
+| `manage` | change hub state, such as `forget` | |
+| `watch` | view an agent's live terminal, read-only | `read` |
+| `control` | send input to an agent's live terminal | `watch` |
+
+Without `--scope` a device gets `read` and `manage`. One or more `--scope`
+options (`--scope=<name>` works too) replace that default with exactly the
+named scopes plus their implications, so `--scope control` requests `read`,
+`watch`, and `control`. Scopes are stored and reported in the order `read`,
+`manage`, `watch`, `control`. An unknown name fails before any window opens and
+lists the valid names.
+
+`watch` and `control` are terminal scopes. They are never part of the default
+set, and they need `remote.control: true`. While `remote.control` is `false`
+(the default), `pair` refuses a request that includes either one with an error
+naming `remote.control`, and the hub treats stored terminal scopes as not
+granted. Turning the setting off keeps them stored, so turning it back on
+restores them without pairing again. The hub reads `remote.control` at start.
 
 `pair` asks the running service to open a pairing window and prints a QR code
 with a countdown. The window lasts 120 seconds and allows one successful
@@ -460,8 +485,9 @@ sessiontap-hub devices
 sessiontap-hub revoke 3f9a
 ```
 
-`devices` prints each device ID, name, scopes, pairing time, and last-seen
-time. `revoke` takes a device ID or unique prefix, deletes the device, and
+`devices` prints each device ID, name, stored scopes, pairing time, and
+last-seen time. While `remote.control` is off, terminal scopes are marked
+disabled, for example `read,watch(disabled),control(disabled)`. `revoke` takes a device ID or unique prefix, deletes the device, and
 closes its open connections with WebSocket close code 4401. An ambiguous prefix
 lists the matches and revokes nothing; both cases exit non-zero.
 
@@ -480,7 +506,7 @@ frames.
 
 | Method | Scope | Params | Result |
 |---|---|---|---|
-| `hub.info` | paired | none | `{"hub_id","hub_name","protocol":1,"scopes"}` |
+| `hub.info` | paired | none | `{"hub_id","hub_name","protocol":1,"scopes","endpoints"}` |
 | `listen` | `read` | none | `{}`, then stream events |
 | `forget` | `manage` | `source_id`, `invocation_id` | `{"hub_revision"}` |
 | `pair.begin` | none | none | `{"nonce"}` (base64url) |
@@ -489,7 +515,9 @@ frames.
 `listen` sends a complete snapshot, then each update after it, and a new
 snapshot whenever the hub re-baselines (a source snapshot, a forget, or a
 lagging consumer). Requests are still answered while a stream runs. One
-connection carries at most one stream. The hub pings every 60 seconds and
+connection carries at most one stream. `hub.info` reports the device's
+effective scopes: the stored scopes, minus `watch` and `control` while
+`remote.control` is off. The hub pings every 60 seconds and
 closes a connection that missed the previous pong.
 
 Pairing runs on a connection that presents the device certificate: call
@@ -511,6 +539,18 @@ device paired or re-paired on another connection takes effect on the next
 request of every open connection with that key. After `revoke` returns, no
 request from the revoked device changes state or gets a success response, and
 its connections send nothing after the 4401 close.
+
+Each stream depends on one scope: `listen` depends on `read`. When re-pairing
+changes a device's effective scopes so that an open stream's scope is gone,
+the hub closes that connection with WebSocket close code 4403 and reason
+`scope withdrawn`, and the connection sends no further stream data. A client
+reconnects and reads its new scopes from `hub.info`. Connections whose streams
+keep their scope stay open, and the new scopes apply to their next request.
+
+| Close code | Reason | Meaning |
+|---|---|---|
+| 4401 | `device revoked` | the device was revoked; pair again |
+| 4403 | `scope withdrawn` | an open stream lost its scope; reconnect |
 
 ### Connection limits
 

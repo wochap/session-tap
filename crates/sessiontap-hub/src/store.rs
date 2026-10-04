@@ -1,3 +1,4 @@
+use crate::scope::Scope;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -484,11 +485,7 @@ fn device_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Device> {
         device_id: r.get(0)?,
         spki_sha256: r.get(1)?,
         name: r.get(2)?,
-        scopes: scopes
-            .split(',')
-            .filter(|scope| !scope.is_empty())
-            .map(str::to_owned)
-            .collect(),
+        scopes: Scope::names(&Scope::parse_stored(&scopes)),
         paired_at: r.get(4)?,
         last_seen_at: r.get(5)?,
     })
@@ -808,6 +805,26 @@ mod tests {
             changed: BTreeSet::from([PublicField::UpdatedAt]),
             view: Box::new(view),
         }
+    }
+
+    #[test]
+    fn device_scopes_round_trip_and_drop_unknown_names() {
+        let store = HubStore::memory().unwrap();
+        let scopes = vec!["read".to_owned(), "watch".to_owned(), "control".to_owned()];
+        let device = store
+            .upsert_device("ab12", "spki1", "Pixel", &scopes)
+            .unwrap();
+        assert_eq!(device.scopes, scopes);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE devices SET scopes='read,write,control'", [])
+            .unwrap();
+        assert_eq!(
+            store.device_by_spki("spki1").unwrap().unwrap().scopes,
+            ["read", "control"]
+        );
     }
 
     #[test]

@@ -364,4 +364,44 @@ class AppFlowTest {
         compose.waitGone("hub:TestHub2")
         compose.onNodeWithTag("hub:TestHub").assertExists()
     }
+    // Scopes: requested chips while waiting, granted chips on the hub card, narrowing by re-pairing.
+    @Test
+    fun a12_scopeChips() {
+        // Answer only after the waiting screen is checked, so it stays up.
+        launch(Control.link(1, scopes = listOf("manage", "control")))
+        compose.waitTag("scope-chip-control", 60_000)
+        listOf("read", "manage", "watch").forEach { compose.onNodeWithTag("scope-chip-$it").assertExists() }
+        compose.onNodeWithTag("scope-control-warning").assertExists()
+        compose.onNodeWithText("Control terminal can type into agents, which can run commands on TestHub.").assertExists()
+        screenshot("8a-scopes-requested")
+        Control.bg(1, "answer", "y")
+        compose.waitTag("pair:Paired", 60_000)
+        assertTrue(Control.run(1, "hub", "devices").contains("read,manage,watch,control"))
+        compose.onNodeWithTag("view-sessions").performClick()
+        compose.waitTag("tab:Hubs")
+        compose.onNodeWithTag("tab:Hubs").performClick()
+        compose.waitTag("hub-scope-control")
+        listOf("read", "manage", "watch").forEach { compose.onNodeWithTag("hub-scope-$it").assertExists() }
+        screenshot("8b-hub-scopes")
+
+        // Re-pair with read only: Manage leaves the card and the session list keeps updating.
+        val link = Control.link(1, scopes = listOf("read"))
+        Control.bg(1, "answer", "y")
+        launch(link)
+        compose.waitTag("pair:Paired", 60_000)
+        compose.onNodeWithTag("view-sessions").performClick()
+        compose.waitTag("tab:Hubs")
+        compose.onNodeWithTag("tab:Hubs").performClick()
+        compose.waitTag("hub-scope-read")
+        compose.waitGone("hub-scope-manage")
+        listOf("watch", "control").forEach { compose.onNodeWithTag("hub-scope-$it").assertDoesNotExist() }
+        compose.onNodeWithTag("tab:Sessions").performClick()
+        compose.waitTag("row:Triage open issues")
+        compose.onNodeWithTag("filter:Running").performClick()
+        compose.waitGone("row:Triage open issues")
+        Control.run(1, "post", "triage", "running")
+        compose.waitTag("row:Triage open issues")
+        compose.onNodeWithTag("filter:All").performClick()
+        Control.run(1, "snapshot")
+    }
 }

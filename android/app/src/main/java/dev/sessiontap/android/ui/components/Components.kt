@@ -93,7 +93,7 @@ fun StatusGlyph(glyph: Glyph, modifier: Modifier = Modifier, small: Boolean = fa
 enum class Conn { Live, Reconnecting, Offline, Revoked }
 
 fun connOf(state: ConnState?): Conn = when (state) {
-    is ConnState.Live -> Conn.Live
+    is ConnState.Live, is ConnState.NoAccess -> Conn.Live
     is ConnState.Reconnecting -> if (state.offline) Conn.Offline else Conn.Reconnecting
     ConnState.Revoked -> Conn.Revoked
     ConnState.Connecting -> Conn.Reconnecting

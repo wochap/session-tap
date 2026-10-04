@@ -23,6 +23,7 @@ use crate::endpoints::{InterfaceAddr, endpoints_with};
 use crate::ingest::HubPublication;
 use crate::listen::{HubRequest, HubResponse, serve_unix_stream};
 use crate::remote::AddressKey;
+use crate::scope::Scope;
 use crate::store::{Device, DeviceLookup, ForgetOutcome, HubStore};
 
 /// Pairing MAC label; bumping it invalidates older clients.
@@ -40,9 +41,6 @@ pub const PAIR_RATE_BURST: u32 = 5;
 pub const PAIR_RATE_REFILL: Duration = Duration::from_secs(2);
 /// Rate limiter entries kept before full buckets are pruned.
 const PAIR_RATE_MAX_ENTRIES: usize = 1024;
-pub const SCOPE_READ: &str = "read";
-pub const SCOPE_MANAGE: &str = "manage";
-pub const SCOPES: [&str; 2] = [SCOPE_READ, SCOPE_MANAGE];
 
 /// Source of host interface addresses for wildcard endpoint hints.
 pub type InterfaceSource = fn() -> Vec<InterfaceAddr>;
@@ -174,17 +172,56 @@ pub enum PairAttempt {
     Locked,
 }
 
+/// A live remote connection, tracked so revocation and scope changes can
+/// close it.
+#[derive(Debug, Clone)]
+pub struct ConnectionHandle {
+    /// Revocation: closes with `CLOSE_REVOKED`.
+    pub revoke: CancellationToken,
+    /// Scope withdrawn: closes with `CLOSE_SCOPE_WITHDRAWN`.
+    pub withdraw: CancellationToken,
+    /// Scopes the connection's open streams depend on.
+    pub stream_scopes: Arc<Mutex<Vec<Scope>>>,
+}
+
+impl ConnectionHandle {
+    #[must_use]
+    pub fn new() -> Self {
+        let revoke = CancellationToken::new();
+        Self {
+            withdraw: revoke.child_token(),
+            revoke,
+            stream_scopes: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Records that an open stream depends on `scope`.
+    pub fn add_stream_scope(&self, scope: Scope) {
+        let mut scopes = self.stream_scopes.lock().expect("stream scopes poisoned");
+        if !scopes.contains(&scope) {
+            scopes.push(scope);
+        }
+    }
+}
+
+impl Default for ConnectionHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Hub {
     pub store: Arc<HubStore>,
     pub updates: broadcast::Sender<HubPublication>,
     pub remote: Option<RemoteInfo>,
     pair_ttl: Duration,
-    connections: Mutex<HashMap<String, Vec<CancellationToken>>>,
+    connections: Mutex<HashMap<String, Vec<ConnectionHandle>>>,
     pairing: Mutex<PairingState>,
     generation: Mutex<u64>,
     pair_rate: PairRateLimiter,
-    /// Revocation takes it for writing; remote requests that act for a
-    /// device hold it for reading from the device re-read to the action.
+    /// Revocation and re-pairing take it for writing; remote requests that
+    /// act for a device hold it for reading from the device re-read to the
+    /// action.
     pub device_gate: RwLock<()>,
 }
 
@@ -248,33 +285,81 @@ impl Hub {
         let _gate = self.device_gate.write().expect("device gate poisoned");
         let lookup = self.store.delete_device(prefix)?;
         if let DeviceLookup::Found(device) = &lookup {
-            let tokens = self
+            let handles = self
                 .connections
                 .lock()
                 .expect("connections mutex poisoned")
                 .remove(&device.device_id)
                 .unwrap_or_default();
-            for token in tokens {
-                token.cancel();
+            for handle in handles {
+                handle.revoke.cancel();
             }
         }
         Ok(lookup)
     }
 
-    /// Tracks a live connection so revocation can close it.
-    pub fn register_connection(&self, device_id: &str, token: CancellationToken) {
-        let mut connections = self.connections.lock().expect("connections mutex poisoned");
-        let tokens = connections.entry(device_id.to_owned()).or_default();
-        tokens.retain(|token| !token.is_cancelled());
-        tokens.push(token);
+    /// Whether `remote.control` makes terminal scopes effective.
+    #[must_use]
+    pub fn control_enabled(&self) -> bool {
+        self.remote
+            .as_ref()
+            .is_some_and(|remote| remote.remote.control)
     }
 
-    /// Drops a finished connection; its token must already be cancelled.
+    /// Stored scopes the hub grants right now: terminal scopes drop out
+    /// while `remote.control` is off.
+    #[must_use]
+    pub fn effective_scopes(&self, device: &Device) -> Vec<Scope> {
+        let control = self.control_enabled();
+        device
+            .scopes
+            .iter()
+            .filter_map(|name| Scope::parse(name))
+            .filter(|scope| control || !scope.is_terminal())
+            .collect()
+    }
+
+    /// Stores a paired device and withdraws streams from its live
+    /// connections whose scope it no longer has.
+    pub fn pair_device(&self, spki_sha256: &str, name: &str, scopes: &[Scope]) -> Result<Device> {
+        let _gate = self.device_gate.write().expect("device gate poisoned");
+        let device = self.store.upsert_device(
+            &device_id(spki_sha256),
+            spki_sha256,
+            name,
+            &Scope::names(scopes),
+        )?;
+        let effective = self.effective_scopes(&device);
+        let connections = self.connections.lock().expect("connections mutex poisoned");
+        for handle in connections.get(&device.device_id).into_iter().flatten() {
+            let lost = handle
+                .stream_scopes
+                .lock()
+                .expect("stream scopes poisoned")
+                .iter()
+                .any(|scope| !effective.contains(scope));
+            if lost {
+                handle.withdraw.cancel();
+            }
+        }
+        Ok(device)
+    }
+
+    /// Tracks a live connection so revocation and scope changes can close it.
+    pub fn register_connection(&self, device_id: &str, handle: ConnectionHandle) {
+        let mut connections = self.connections.lock().expect("connections mutex poisoned");
+        let handles = connections.entry(device_id.to_owned()).or_default();
+        handles.retain(|known| !known.revoke.is_cancelled());
+        handles.push(handle);
+    }
+
+    /// Drops a finished connection; its revoke token must already be
+    /// cancelled.
     pub fn unregister_connection(&self, device_id: &str) {
         let mut connections = self.connections.lock().expect("connections mutex poisoned");
-        if let Some(tokens) = connections.get_mut(device_id) {
-            tokens.retain(|known| !known.is_cancelled());
-            if tokens.is_empty() {
+        if let Some(handles) = connections.get_mut(device_id) {
+            handles.retain(|known| !known.revoke.is_cancelled());
+            if handles.is_empty() {
                 connections.remove(device_id);
             }
         }
@@ -487,6 +572,7 @@ pub async fn serve_unix(stream: UnixStream, hub: Arc<Hub>) -> Result<()> {
         }
         HubRequest::Devices => HubResponse::Devices {
             devices: hub.store.devices()?,
+            control: hub.control_enabled(),
         },
         HubRequest::Revoke { device } => match hub.revoke(&device)? {
             DeviceLookup::Found(device) => HubResponse::Revoked { device },
@@ -521,26 +607,6 @@ fn forget_response(hub: &Hub, source_id: &str, invocation_id: &str) -> Result<Hu
     })
 }
 
-/// Validates requested scopes; an empty request means every scope.
-pub fn normalize_scopes(requested: &[String]) -> Result<Vec<String>, String> {
-    if requested.is_empty() {
-        return Ok(SCOPES.iter().map(|scope| (*scope).to_owned()).collect());
-    }
-    if let Some(unknown) = requested
-        .iter()
-        .find(|scope| !SCOPES.contains(&scope.as_str()))
-    {
-        return Err(format!(
-            "unknown scope '{unknown}' (expected read or manage)"
-        ));
-    }
-    Ok(SCOPES
-        .iter()
-        .filter(|scope| requested.iter().any(|requested| requested == *scope))
-        .map(|scope| (*scope).to_owned())
-        .collect())
-}
-
 /// The `pair` conversation: open a window, send the QR payload, relay one
 /// operator confirmation, and report the outcome.
 async fn pair_conversation<R, W>(
@@ -564,13 +630,29 @@ where
         .await?;
         return Ok(());
     };
-    let scopes = match normalize_scopes(&scopes) {
+    let scopes = match Scope::parse_request(&scopes) {
         Ok(scopes) => scopes,
         Err(message) => {
             write_json_line(write, &HubResponse::error("bad_request", message)).await?;
             return Ok(());
         }
     };
+    if !remote.remote.control
+        && let Some(terminal) = scopes.iter().find(|scope| scope.is_terminal())
+    {
+        write_json_line(
+            write,
+            &HubResponse::error(
+                "control_disabled",
+                format!(
+                    "the '{terminal}' scope needs remote.control: true in the hub configuration"
+                ),
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+    let scope_names = Scope::names(&scopes);
     let endpoints = remote.endpoints();
     if endpoints.is_empty() {
         write_json_line(
@@ -583,14 +665,14 @@ where
         .await?;
         return Ok(());
     }
-    let (generation, secret, expires, mut events) = hub.open_pairing(scopes.clone());
+    let (generation, secret, expires, mut events) = hub.open_pairing(scope_names.clone());
     let expires_at = unix_seconds(expires);
     let payload = serde_json::json!({
         "v": 1,
         "hub": remote.hub_name,
         "id": remote.hub_id,
         "ep": endpoints,
-        "sc": scopes,
+        "sc": scope_names,
         "s": URL_SAFE_NO_PAD.encode(secret),
         "exp": expires_at,
     });
@@ -641,12 +723,7 @@ where
                 None => false,
             };
             if accepted {
-                let device = hub.store.upsert_device(
-                    &device_id(&spki_sha256),
-                    &spki_sha256,
-                    &name,
-                    &scopes,
-                )?;
+                let device = hub.pair_device(&spki_sha256, &name, &scopes)?;
                 let response = HubResponse::PairDone {
                     device_id: device.device_id.clone(),
                     name: device.name.clone(),
@@ -682,6 +759,7 @@ mod tests {
                     name: None,
                     listen: vec!["127.0.0.1:8932".into()],
                     advertise: vec![],
+                    control: false,
                 },
                 interfaces: Vec::new,
             }),
@@ -874,13 +952,43 @@ mod tests {
         assert!(fp.split(' ').all(|group| group.len() == 8));
     }
 
+    #[tokio::test]
+    async fn terminal_scope_refused_while_control_is_off() {
+        let hub = hub(PAIR_TTL);
+        let (client, server) = tokio::io::duplex(4096);
+        let (read, mut write) = tokio::io::split(server);
+        let mut lines = BufReader::new(read).lines();
+        pair_conversation(&hub, vec!["watch".into()], &mut lines, &mut write)
+            .await
+            .unwrap();
+        let answer = BufReader::new(client)
+            .lines()
+            .next_line()
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(answer.contains("control_disabled"), "{answer}");
+        assert!(answer.contains("remote.control"), "{answer}");
+        assert!(hub.pairing_secret().is_none());
+    }
+
     #[test]
-    fn scopes_default_and_validate() {
-        assert_eq!(normalize_scopes(&[]).unwrap(), vec!["read", "manage"]);
+    fn effective_scopes_follow_remote_control() {
+        let device = Device {
+            device_id: "d".into(),
+            spki_sha256: "s".into(),
+            name: "n".into(),
+            scopes: vec!["read".into(), "watch".into(), "control".into()],
+            paired_at: String::new(),
+            last_seen_at: None,
+        };
+        let off = hub(PAIR_TTL);
+        assert_eq!(off.effective_scopes(&device), [Scope::Read]);
+        let mut on = hub(PAIR_TTL);
+        on.remote.as_mut().unwrap().remote.control = true;
         assert_eq!(
-            normalize_scopes(&["read".into()]).unwrap(),
-            vec!["read".to_owned()]
+            on.effective_scopes(&device),
+            [Scope::Read, Scope::Watch, Scope::Control]
         );
-        assert!(normalize_scopes(&["write".into()]).is_err());
     }
 }

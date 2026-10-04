@@ -932,9 +932,19 @@ mod tests {
         let mut buffer = [0_u8; 16];
         let size = live.recv(&mut buffer).unwrap();
         assert_eq!(&buffer[..size], b"still-live");
-        // Once the owner is gone the stale file is replaced.
+        // Once the owner is gone the stale file is replaced. A child that
+        // another test forks can briefly inherit the lock taken by the failed
+        // bind above, until it execs, so retry for a moment.
         drop(live);
-        let (_socket, _endpoint) = bind_inspection_endpoint(&paths).unwrap();
+        let mut bound = bind_inspection_endpoint(&paths);
+        for _ in 0..50 {
+            if bound.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            bound = bind_inspection_endpoint(&paths);
+        }
+        let (_socket, _endpoint) = bound.unwrap();
     }
 
     #[test]

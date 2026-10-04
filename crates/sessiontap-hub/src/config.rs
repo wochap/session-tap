@@ -73,6 +73,9 @@ pub struct RemoteConfig {
     /// Extra `host:port` endpoint hints placed in the pairing QR code.
     #[serde(default)]
     pub advertise: Vec<String>,
+    /// Makes the terminal scopes (`watch`, `control`) grantable and effective.
+    #[serde(default)]
+    pub control: bool,
 }
 
 /// How the remote listener binds, derived from a validated `remote.listen`.
@@ -394,6 +397,22 @@ subscriptions:
         let remote = config.remote.unwrap();
         assert_eq!(remote.listen_mode().addresses().len(), 2);
         assert_eq!(remote.display_name(), "MacBook");
+    }
+
+    #[test]
+    fn remote_control_defaults_off() {
+        let parse = |extra: &str| {
+            HubConfig::parse(&format!(
+                "version: 1\nremote:\n  listen: [\"127.0.0.1:8932\"]\n{extra}"
+            ))
+            .unwrap()
+            .remote
+            .unwrap()
+            .control
+        };
+        assert!(!parse(""));
+        assert!(parse("  control: true\n"));
+        assert!(!parse("  control: false\n"));
     }
 
     fn remote(listen: &str) -> HubConfig {

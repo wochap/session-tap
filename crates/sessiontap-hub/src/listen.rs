@@ -60,6 +60,9 @@ pub enum HubRequest {
 pub enum HubResponse {
     Devices {
         devices: Vec<Device>,
+        /// Whether `remote.control` makes terminal scopes effective.
+        #[serde(default)]
+        control: bool,
     },
     Revoked {
         device: Device,

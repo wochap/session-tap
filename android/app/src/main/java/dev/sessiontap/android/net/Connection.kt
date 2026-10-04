@@ -27,6 +27,9 @@ data class CloseInfo(val code: Int, val reason: String, val error: Throwable? = 
 
 const val CLOSE_REVOKED = 4401
 
+/** Close code: an open stream's scope was withdrawn by re-pairing. */
+const val CLOSE_SCOPE_WITHDRAWN = 4403
+
 /** One open WebSocket to a hub with request id correlation. */
 class Connection internal constructor(val endpoint: String, val trust: PinnedTrustManager?) {
     internal lateinit var socket: WebSocket

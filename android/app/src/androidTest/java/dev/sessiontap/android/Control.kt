@@ -21,8 +21,11 @@ object Control {
 
     fun available(): Boolean = runCatching { Socket(HOST, PORT).close() }.isSuccess
 
-    fun link(hub: Int, expired: Boolean = false): Uri =
-        Uri.parse((if (expired) run(hub, "link", "expired") else run(hub, "link")).trim().lines().last())
+    /** Pairing deep link; [scopes] empty means the hub default. */
+    fun link(hub: Int, expired: Boolean = false, scopes: List<String> = emptyList()): Uri {
+        val args = listOfNotNull("link", if (expired) "expired" else null) + scopes
+        return Uri.parse(run(hub, *args.toTypedArray()).trim().lines().last())
+    }
 
     private fun get(path: String, hub: Int, args: Array<out String>): String {
         val query = (listOf("hub=$hub") + args.map { "arg=" + URLEncoder.encode(it, "UTF-8") }).joinToString("&")

@@ -40,6 +40,7 @@ import dev.sessiontap.android.net.ConnState
 import dev.sessiontap.android.ui.components.Conn
 import dev.sessiontap.android.ui.components.ConnDot
 import dev.sessiontap.android.ui.components.PrimaryButton
+import dev.sessiontap.android.ui.components.ScopeChips
 import dev.sessiontap.android.ui.components.StCard
 import dev.sessiontap.android.ui.components.connOf
 import dev.sessiontap.android.ui.sessions.connText
@@ -84,7 +85,7 @@ fun HubsScreen(
         ) {
             hubs.forEach { hub ->
                 val state = conn[hub.hubId] ?: if (hub.revoked) ConnState.Revoked else null
-                val endpoint = (state as? ConnState.Live)?.endpoint ?: hub.lastGoodEndpoint ?: hub.endpoints.firstOrNull().orEmpty()
+                val endpoint = (state as? ConnState.Live)?.endpoint ?: (state as? ConnState.NoAccess)?.endpoint ?: hub.lastGoodEndpoint ?: hub.endpoints.firstOrNull().orEmpty()
                 StCard(Modifier.fillMaxWidth().testTag("hub:${hub.name}"), padding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 8.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -96,10 +97,17 @@ fun HubsScreen(
                             Field("Endpoint", "${endpointKind(endpoint)} · $endpoint")
                             Field("Hub key", hubKeyShort(hub.hubId))
                             Field("Last seen", hub.lastSeenAt?.let { relativeAge(Instant.ofEpochMilli(it), now) + " ago" } ?: "never")
-                            Field("Access", hub.scopes.joinToString(", ").ifEmpty { "none" })
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Access", fontSize = 12.5.sp, color = c.mute, modifier = Modifier.width(84.dp))
+                            if (hub.scopes.isEmpty()) {
+                                Text("none", fontFamily = Mono, fontSize = 12.sp)
+                            } else {
+                                ScopeChips(hub.scopes, tagPrefix = "hub-scope-", compact = true)
+                            }
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            if (connOf(state) == Conn.Revoked) {
+                            if (connOf(state) == Conn.Revoked || state is ConnState.NoAccess) {
                                 TextButton(onClick = onPair) { Text("Pair again", color = c.acc, fontSize = 13.sp) }
                             }
                             TextButton(onClick = { confirm = hub }, modifier = Modifier.testTag("unpair:${hub.name}")) {

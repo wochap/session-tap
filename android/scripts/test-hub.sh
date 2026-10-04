@@ -5,7 +5,8 @@
 #   test-hub.sh stop                stop the hub and delete its state
 #   test-hub.sh post <agent> <state>  send one update (see FIXTURES below)
 #   test-hub.sh snapshot            clear forget tombstones and re-send the fixture snapshot
-#   test-hub.sh link [expired]      print a debug pairing deep link from a fresh pair window
+#   test-hub.sh link [expired] [scope...]  print a debug pairing deep link from a fresh pair
+#                                   window (scopes default to the hub default: read, manage)
 #   test-hub.sh answer y|n          answer the pending pairing confirmation
 #   test-hub.sh hub <args...>       run sessiontap-hub against this instance (listen, devices, revoke, ...)
 #   test-hub.sh install-link        `link` and send it to the emulator with adb
@@ -21,7 +22,8 @@ set -Eeuo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 N=${TEST_HUB:-1}
 NAME=$([[ $N == 1 ]] && echo TestHub || echo "TestHub$N")
-REMOTE_PORT=$((8931 + N))
+# Off the production 8931/8932 so a running hub service never collides.
+REMOTE_PORT=$((18940 + N))
 INGEST_PORT=$((18930 + N))
 BASE=${XDG_CACHE_HOME:-$HOME/.cache}/sessiontap/test-hub-$N
 export XDG_CONFIG_HOME=$BASE/config XDG_STATE_HOME=$BASE/state XDG_RUNTIME_DIR=$BASE/run
@@ -125,6 +127,7 @@ remote:
   name: $NAME
   listen: ["127.0.0.1:$REMOTE_PORT"]
   advertise: ["10.0.2.2:$REMOTE_PORT"]
+  control: true
 YAML
   "$HUB_BIN" run >"$BASE/hub.log" 2>&1 &
   echo $! >"$BASE/pid"
@@ -134,6 +137,10 @@ YAML
     waited=$((waited + 1))
     ((waited < 100)) || { cat "$BASE/hub.log" >&2; die "hub did not start"; }
   done
+  if grep -q "cannot bind remote address" "$BASE/hub.log"; then
+    cat "$BASE/hub.log" >&2
+    die "remote port $REMOTE_PORT is in use"
+  fi
   snapshot
   echo "test-hub.sh: $NAME on 127.0.0.1:$REMOTE_PORT (emulator: 10.0.2.2:$REMOTE_PORT), state in $BASE"
 }
@@ -150,13 +157,15 @@ stop_quiet() {
 # Opens a pair window through the hub socket. The session stays open in the
 # background; `answer` replies to its confirmation.
 link() {
-  local expired=${1-} fifo=$BASE/pair.in out=$BASE/pair.out payload
+  local expired= fifo=$BASE/pair.in out=$BASE/pair.out payload request
+  if [[ ${1-} == expired ]]; then expired=expired; shift; fi
+  request=$(jq -cn '{type: "pair", scopes: $ARGS.positional}' --args "$@")
   [[ -S $SOCK ]] || die "hub is not running"
   [[ -f $BASE/pair.pid ]] && kill "$(<"$BASE/pair.pid")" 2>/dev/null || true
   rm -f "$fifo" "$out"
   mkfifo "$fifo"
   # Keep the fifo open for writing so socat does not see EOF before `answer`.
-  (exec 3<>"$fifo"; echo '{"type":"pair","scopes":["read","manage"]}' >&3; socat - "UNIX-CONNECT:$SOCK" <&3 >"$out") </dev/null >/dev/null 2>&1 &
+  (exec 3<>"$fifo"; echo "$request" >&3; socat - "UNIX-CONNECT:$SOCK" <&3 >"$out") </dev/null >/dev/null 2>&1 &
   echo $! >"$BASE/pair.pid"
   local waited=0
   until payload=$(jq -r 'select(.type=="pair_window") | .payload' "$out" 2>/dev/null) && [[ -n $payload ]]; do

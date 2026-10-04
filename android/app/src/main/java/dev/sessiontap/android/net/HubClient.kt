@@ -1,6 +1,7 @@
 package dev.sessiontap.android.net
 
 import dev.sessiontap.android.crypto.PinnedTrustManager
+import dev.sessiontap.android.domain.Scopes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -18,6 +19,8 @@ import kotlin.math.min
 sealed interface ConnState {
     data object Connecting : ConnState
     data class Live(val endpoint: String) : ConnState
+    /** Connected, but the hub grants no `read` scope, so there is no session stream. */
+    data class NoAccess(val endpoint: String) : ConnState
     /** Waiting until [retryAt] (epoch ms). After a few failures the hub counts as offline. */
     data class Reconnecting(val retryAt: Long, val failures: Int, val lastError: String?) : ConnState {
         val offline: Boolean get() = failures >= OFFLINE_AFTER_FAILURES
@@ -37,7 +40,8 @@ interface HubClientListener {
 
 /**
  * Keeps one authenticated connection to a hub: races endpoint hints, calls
- * `hub.info` and `listen`, and reconnects with exponential backoff capped at 60s.
+ * `hub.info` and `listen` (when the hub grants `read`), and reconnects with
+ * exponential backoff capped at 60s. A scope-withdrawn close reconnects at once.
  */
 class HubClient(
     val hubId: String,
@@ -99,8 +103,12 @@ class HubClient(
                     val info = ProtocolJson.decodeFromJsonElement(HubInfo.serializer(), conn.call("hub.info")!!)
                     listener.onConnected(hubId, conn.endpoint, info)
                     val streamJob = scope.launch { for (envelope in conn.stream) listener.onEnvelope(hubId, envelope) }
-                    conn.call("listen")
-                    _state.value = ConnState.Live(conn.endpoint)
+                    if (Scopes.READ in info.scopes) {
+                        conn.call("listen")
+                        _state.value = ConnState.Live(conn.endpoint)
+                    } else {
+                        _state.value = ConnState.NoAccess(conn.endpoint)
+                    }
                     failures = 0
                     backoffMs = initialBackoffMs
                     val close = conn.closed.await()
@@ -108,6 +116,11 @@ class HubClient(
                     if (close.code == CLOSE_REVOKED) {
                         revoked()
                         return
+                    }
+                    if (close.code == CLOSE_SCOPE_WITHDRAWN) {
+                        // re-paired with other scopes: reconnect at once and re-read hub.info
+                        backoffMs = initialBackoffMs
+                        continue
                     }
                     error = close.reason.ifEmpty { close.error?.message }
                 } finally {

@@ -14,6 +14,7 @@ use tokio::{
 };
 
 use crate::listen::{HubRequest, HubResponse};
+use crate::scope::Scope;
 use crate::store::Device;
 
 async fn connect(socket: &Path) -> Result<UnixStream> {
@@ -61,15 +62,17 @@ fn fail(response: HubResponse) -> anyhow::Error {
 /// `sessiontap-hub devices`
 pub async fn devices(socket: &Path, out: &mut impl Write) -> Result<()> {
     match request_once(socket, &HubRequest::Devices).await? {
-        HubResponse::Devices { devices } => {
-            write_devices(out, &devices)?;
+        HubResponse::Devices { devices, control } => {
+            write_devices(out, &devices, control)?;
             Ok(())
         }
         other => Err(fail(other)),
     }
 }
 
-fn write_devices(out: &mut impl Write, devices: &[Device]) -> Result<()> {
+/// Lists stored scopes; terminal scopes are marked `(disabled)` while
+/// `remote.control` is off.
+fn write_devices(out: &mut impl Write, devices: &[Device], control: bool) -> Result<()> {
     if devices.is_empty() {
         writeln!(out, "no paired devices")?;
         return Ok(());
@@ -85,12 +88,23 @@ fn write_devices(out: &mut impl Write, devices: &[Device]) -> Result<()> {
             "{:<16}  {:<20}  {:<12}  {:<25}  {}",
             device.device_id,
             device.name,
-            device.scopes.join(","),
+            scope_column(&device.scopes, control),
             device.paired_at,
             device.last_seen_at.as_deref().unwrap_or("never")
         )?;
     }
     Ok(())
+}
+
+fn scope_column(scopes: &[String], control: bool) -> String {
+    scopes
+        .iter()
+        .map(|name| match Scope::parse(name) {
+            Some(scope) if scope.is_terminal() && !control => format!("{name}(disabled)"),
+            _ => name.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// `sessiontap-hub revoke <device>`
@@ -213,4 +227,28 @@ pub fn prompt_yes_no(question: &str) -> bool {
         return false;
     }
     matches!(answer.trim(), "y" | "Y" | "yes" | "Yes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn devices_mark_terminal_scopes_disabled_while_control_is_off() {
+        let device = Device {
+            device_id: "ab12".into(),
+            spki_sha256: "spki".into(),
+            name: "Pixel".into(),
+            scopes: vec!["read".into(), "watch".into(), "control".into()],
+            paired_at: "2026-01-01T00:00:00Z".into(),
+            last_seen_at: None,
+        };
+        let render = |control| {
+            let mut out = Vec::new();
+            write_devices(&mut out, std::slice::from_ref(&device), control).unwrap();
+            String::from_utf8(out).unwrap()
+        };
+        assert!(render(false).contains("read,watch(disabled),control(disabled)"));
+        assert!(render(true).contains("read,watch,control "));
+    }
 }

@@ -11,6 +11,7 @@ import androidx.room.Transaction
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.Upsert
+import dev.sessiontap.android.domain.Scopes
 import dev.sessiontap.android.net.ProtocolJson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
@@ -32,7 +33,10 @@ data class HubEntity(
     /** source_id -> display name from the latest snapshot. */
     val sources: Map<String, String> = emptyMap(),
 ) {
-    val canManage: Boolean get() = "manage" in scopes
+    val canRead: Boolean get() = Scopes.READ in scopes
+    val canManage: Boolean get() = Scopes.MANAGE in scopes
+    val canWatch: Boolean get() = Scopes.WATCH in scopes
+    val canControl: Boolean get() = Scopes.CONTROL in scopes
 }
 
 @Entity(tableName = "agents", primaryKeys = ["hubId", "sourceId", "invocationId"])

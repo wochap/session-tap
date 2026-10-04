@@ -23,7 +23,14 @@ import kotlinx.coroutines.launch
 sealed interface PairState {
     data object Idle : PairState
     data class Connecting(val hubName: String) : PairState
-    data class Waiting(val hubName: String, val deviceName: String, val fingerprint: List<String>, val expiresAt: Long) : PairState
+    data class Waiting(
+        val hubName: String,
+        val deviceName: String,
+        val fingerprint: List<String>,
+        val expiresAt: Long,
+        /** Scopes the QR code requests. */
+        val scopes: List<String> = emptyList(),
+    ) : PairState
     data class Paired(val hubName: String, val endpoint: String, val hubId: String) : PairState
     data object Expired : PairState
     data class Rejected(val hubName: String) : PairState
@@ -83,7 +90,7 @@ class PairViewModel(application: Application) : AndroidViewModel(application) {
                 deviceName = deviceName,
                 deviceSpki = spki,
                 clientFor = { HubTls.client(valid.payload.id, DeviceKey.keyManager()) },
-                onWaiting = { _state.value = PairState.Waiting(hubName, deviceName, fingerprint, valid.payload.exp * 1000) },
+                onWaiting = { _state.value = PairState.Waiting(hubName, deviceName, fingerprint, valid.payload.exp * 1000, valid.payload.sc) },
             )
             _state.value = when (outcome) {
                 is PairOutcome.Paired -> {

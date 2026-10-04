@@ -73,7 +73,7 @@ fun WelcomeScreen(onScan: () -> Unit, contentPadding: PaddingValues) {
         Spacer(Modifier.weight(1f))
         Text("Watch your coding agents from your pocket.", fontSize = 34.sp, lineHeight = 37.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.68).sp, modifier = Modifier.padding(bottom = 12.dp))
         Text(
-            "Pair with the computer running Claude Code, Codex, Pi or Qwen. SessionTap only reads — it never sends commands.",
+            "Pair with the computer running Claude Code, Codex, Pi or Qwen. Follow every session, and on hubs that allow it, answer agents in their live terminal.",
             fontSize = 15.sp,
             color = c.mute,
             modifier = Modifier.padding(bottom = 24.dp),

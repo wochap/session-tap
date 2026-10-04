@@ -117,6 +117,7 @@ mod tests {
             name: None,
             listen: listen.iter().map(|entry| (*entry).to_owned()).collect(),
             advertise: advertise.iter().map(|entry| (*entry).to_owned()).collect(),
+            control: false,
         };
         remote.validate().unwrap();
         remote

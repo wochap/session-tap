@@ -50,9 +50,10 @@ class TestHub {
         )
     }
 
-    fun info(id: Int, endpoints: List<String> = listOf(endpoint)): String {
+    fun info(id: Int, endpoints: List<String> = listOf(endpoint), scopes: List<String> = listOf("read", "manage")): String {
         val ep = endpoints.joinToString(",") { "\"$it\"" }
-        return """{"id":$id,"result":{"hub_id":"$hubId","hub_name":"TestHub","protocol":1,"scopes":["read","manage"],"endpoints":[$ep]}}"""
+        val sc = scopes.joinToString(",") { "\"$it\"" }
+        return """{"id":$id,"result":{"hub_id":"$hubId","hub_name":"TestHub","protocol":1,"scopes":[$sc],"endpoints":[$ep]}}"""
     }
 
     fun snapshot(revision: Long, vararg statuses: String): String {

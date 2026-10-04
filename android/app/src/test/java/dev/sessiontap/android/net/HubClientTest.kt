@@ -39,14 +39,14 @@ class HubClientTest {
         override suspend fun onRevoked(hubId: String) { revoked.send(hubId) }
     }
 
-    private fun client(listener: HubClientListener) = HubClient(
+    private fun client(listener: HubClientListener, initialBackoffMs: Long = 50) = HubClient(
         hubId = hub.hubId,
         endpoints = { listOf(hub.endpoint) },
         lastGood = null,
         listener = listener,
         scope = scope,
         clientFor = { HubTls.client(hub.hubId, hub.keyManager()) },
-        initialBackoffMs = 50,
+        initialBackoffMs = initialBackoffMs,
     )
 
     @Test
@@ -111,6 +111,56 @@ class HubClientTest {
         }
         Thread.sleep(300)
         assertEquals(1, hub.server.requestCount)
+    }
+
+    @Test
+    fun scopeWithdrawnReconnectsAtOnce() = runBlocking {
+        hub.enqueue { ws, id, method ->
+            when (method) {
+                "hub.info" -> ws.send(hub.info(id))
+                "listen" -> {
+                    ws.send("""{"id":$id,"result":{}}""")
+                    ws.close(4403, "scope withdrawn")
+                }
+            }
+        }
+        hub.enqueue { ws, id, method ->
+            when (method) {
+                "hub.info" -> ws.send(hub.info(id, scopes = listOf("read")))
+                "listen" -> ws.send("""{"id":$id,"result":{}}""")
+            }
+        }
+        val rec = Recorder()
+        // a normal retry would wait 30s; the second connection must come at once
+        val c = client(rec, initialBackoffMs = 30_000)
+        c.start()
+        withTimeout(10_000) {
+            assertEquals(listOf("read", "manage"), rec.infos.receive().scopes)
+            assertEquals(listOf("read"), rec.infos.receive().scopes)
+            c.state.first { it is ConnState.Live }
+        }
+        c.stop()
+        assertEquals(2, hub.server.requestCount)
+    }
+
+    @Test
+    fun noListenWithoutReadScope() = runBlocking {
+        val methods = Channel<String>(Channel.UNLIMITED)
+        hub.enqueue { ws, id, method ->
+            methods.trySend(method)
+            when (method) {
+                "hub.info" -> ws.send(hub.info(id, scopes = listOf("manage")))
+                "listen" -> ws.send("""{"id":$id,"result":{}}""")
+            }
+        }
+        val rec = Recorder()
+        val c = client(rec)
+        c.start()
+        withTimeout(10_000) { c.state.first { it is ConnState.NoAccess } }
+        Thread.sleep(300)
+        c.stop()
+        assertEquals("hub.info", methods.receive())
+        assertTrue(methods.tryReceive().isFailure)
     }
 
     @Test

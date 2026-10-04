@@ -5,6 +5,7 @@ use sessiontap_hub::listen::HubRequest;
 use sessiontap_hub::paths::HubPaths;
 use sessiontap_hub::remote::{self, RemoteGate, RemoteLimits};
 use sessiontap_hub::routing::CommandLimits;
+use sessiontap_hub::scope::Scope;
 use sessiontap_hub::service::{self, Hub, RemoteInfo};
 use sessiontap_hub::store::HubStore;
 use sessiontap_hub::{cli, endpoints, tls};
@@ -23,7 +24,7 @@ use tokio::{
 const BROADCAST_CAPACITY: usize = 1024;
 const USAGE: &str = "usage: sessiontap-hub [run]
        sessiontap-hub listen
-       sessiontap-hub pair [--scope read|manage]...
+       sessiontap-hub pair [--scope read|manage|watch|control]...
        sessiontap-hub devices
        sessiontap-hub revoke <device>
        sessiontap-hub forget <source_id> <invocation_id>";
@@ -76,7 +77,7 @@ fn parse_scopes(args: &[&str]) -> Result<Vec<String>> {
         match *arg {
             "--scope" => {
                 let Some(scope) = args.next() else {
-                    bail!("--scope needs a value (read or manage)");
+                    bail!("--scope needs a value ({})", Scope::valid_names());
                 };
                 scopes.push((*scope).to_owned());
             }
@@ -86,7 +87,8 @@ fn parse_scopes(args: &[&str]) -> Result<Vec<String>> {
             },
         }
     }
-    service::normalize_scopes(&scopes).map_err(anyhow::Error::msg)
+    let scopes = Scope::parse_request(&scopes).map_err(anyhow::Error::msg)?;
+    Ok(Scope::names(&scopes))
 }
 
 async fn run_service() -> Result<()> {

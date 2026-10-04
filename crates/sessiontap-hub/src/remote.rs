@@ -28,13 +28,16 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ingest::HubPublication;
 use crate::listen::{HubStreamEnvelope, StreamSink, stream_merged};
-use crate::service::{Hub, PairAttempt, PairEvent, SCOPE_MANAGE, SCOPE_READ, fingerprint};
+use crate::scope::Scope;
+use crate::service::{ConnectionHandle, Hub, PairAttempt, PairEvent, fingerprint};
 use crate::store::{Device, ForgetOutcome};
 use crate::tls::sha256_hex;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 /// WebSocket close code sent when a device is revoked.
 pub const CLOSE_REVOKED: u16 = 4401;
+/// WebSocket close code sent when an open stream's scope is withdrawn.
+pub const CLOSE_SCOPE_WITHDRAWN: u16 = 4403;
 pub const PING_INTERVAL: Duration = Duration::from_secs(60);
 /// Limit for the TLS handshake, and separately for the WebSocket upgrade.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -284,6 +287,8 @@ struct Connection {
     out: mpsc::Sender<Message>,
     /// Revocation: close with `CLOSE_REVOKED`.
     cancel: CancellationToken,
+    /// Registry entry; its `withdraw` token is a child of `cancel`.
+    handle: ConnectionHandle,
     /// Policy violation: close with 1008.
     kill: CancellationToken,
 }
@@ -323,7 +328,7 @@ impl Connection {
         *self.device.lock().expect("device mutex poisoned") = Some(device.clone());
         if !self.authenticated.swap(true, Ordering::SeqCst) {
             self.hub
-                .register_connection(&device.device_id, self.cancel.clone());
+                .register_connection(&device.device_id, self.handle.clone());
             self.ticket.lock().expect("ticket mutex poisoned").take();
             self.requests
                 .add_permits(self.max_inflight_requests.saturating_sub(1));
@@ -383,7 +388,9 @@ async fn serve_connection(
         .and_then(|certs| certs.first())
         .and_then(|cert| crate::tls::spki_of(cert).ok());
     let (out, mut outbound) = mpsc::channel::<Message>(OUTBOUND_CAPACITY);
-    let cancel = CancellationToken::new();
+    let handle = ConnectionHandle::new();
+    let cancel = handle.revoke.clone();
+    let withdraw = handle.withdraw.clone();
     let kill = CancellationToken::new();
     let connection = Arc::new(Connection {
         hub: Arc::clone(&hub),
@@ -399,6 +406,7 @@ async fn serve_connection(
         max_inflight_requests: limits.max_inflight_requests,
         out,
         cancel: cancel.clone(),
+        handle,
         kill: kill.clone(),
     });
     let known = {
@@ -438,6 +446,11 @@ async fn serve_connection(
             () = cancel.cancelled() => {
                 connection.device.lock().expect("device mutex poisoned").take();
                 let close = close_frame(CloseCode::from(CLOSE_REVOKED), "device revoked");
+                let _ = timeout(limits.write_timeout, ws_tx.send(close)).await;
+                break Ok(());
+            }
+            () = withdraw.cancelled() => {
+                let close = close_frame(CloseCode::from(CLOSE_SCOPE_WITHDRAWN), "scope withdrawn");
                 let _ = timeout(limits.write_timeout, ws_tx.send(close)).await;
                 break Ok(());
             }
@@ -610,7 +623,7 @@ fn device_request(connection: &Connection, id: Value, method: &str, params: &Val
         .device_gate
         .read()
         .expect("device gate poisoned");
-    if connection.cancel.is_cancelled() {
+    if connection.handle.withdraw.is_cancelled() {
         return Dispatch::Silent;
     }
     let device = match connection.current_device() {
@@ -626,8 +639,8 @@ fn device_request(connection: &Connection, id: Value, method: &str, params: &Val
     };
     let required = match method {
         "hub.info" => None,
-        "listen" => Some(SCOPE_READ),
-        "forget" => Some(SCOPE_MANAGE),
+        "listen" => Some(Scope::Read),
+        "forget" => Some(Scope::Manage),
         _ => {
             return Dispatch::Respond(error_response(
                 id,
@@ -636,8 +649,9 @@ fn device_request(connection: &Connection, id: Value, method: &str, params: &Val
             ));
         }
     };
+    let effective = connection.hub.effective_scopes(&device);
     if let Some(scope) = required
-        && !device.scopes.iter().any(|granted| granted == scope)
+        && !effective.contains(&scope)
     {
         return Dispatch::Respond(error_response(
             id,
@@ -646,18 +660,19 @@ fn device_request(connection: &Connection, id: Value, method: &str, params: &Val
         ));
     }
     match method {
-        "hub.info" => Dispatch::Respond(hub_info(connection, id, &device)),
+        "hub.info" => Dispatch::Respond(hub_info(connection, id, &effective)),
         "listen" => {
             if connection.streaming.swap(true, Ordering::SeqCst) {
                 return Dispatch::Respond(error_response(id, "bad_request", "already listening"));
             }
+            connection.handle.add_stream_scope(Scope::Read);
             Dispatch::Listen(id, connection.hub.updates.subscribe())
         }
         _ => Dispatch::Respond(forget(connection, id, params)),
     }
 }
 
-fn hub_info(connection: &Connection, id: Value, device: &Device) -> Value {
+fn hub_info(connection: &Connection, id: Value, scopes: &[Scope]) -> Value {
     let Some(remote) = &connection.hub.remote else {
         return error_response(id, "internal", "remote access is not configured");
     };
@@ -667,7 +682,7 @@ fn hub_info(connection: &Connection, id: Value, device: &Device) -> Value {
             "hub_id": remote.hub_id,
             "hub_name": remote.hub_name,
             "protocol": PROTOCOL_VERSION,
-            "scopes": device.scopes,
+            "scopes": Scope::names(scopes),
             "endpoints": remote.endpoints(),
         }),
     )
@@ -685,7 +700,7 @@ async fn listen(
         sink,
         Arc::clone(&connection.hub.store),
         receiver,
-        connection.cancel.clone(),
+        connection.handle.withdraw.clone(),
     )
     .await;
 }

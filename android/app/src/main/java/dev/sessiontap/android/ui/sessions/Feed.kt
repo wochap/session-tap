@@ -172,6 +172,7 @@ data class FeedInput(
 
 fun connText(hub: HubEntity, state: ConnState?, now: Instant): String = when (state) {
     is ConnState.Live -> "live"
+    is ConnState.NoAccess -> "no session access"
     ConnState.Connecting -> "connecting"
     is ConnState.Reconnecting -> {
         val secs = ((state.retryAt - now.toEpochMilli()) / 1000).coerceAtLeast(0)

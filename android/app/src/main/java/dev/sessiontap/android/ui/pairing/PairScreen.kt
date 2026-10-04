@@ -36,16 +36,20 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Bold
+import com.adamglin.phosphoricons.Fill
 import com.adamglin.phosphoricons.Regular
 import com.adamglin.phosphoricons.bold.CheckCircle
 import com.adamglin.phosphoricons.bold.Prohibit
 import com.adamglin.phosphoricons.bold.X
+import com.adamglin.phosphoricons.fill.Warning as WarningFill
 import com.adamglin.phosphoricons.regular.Plugs
 import com.adamglin.phosphoricons.regular.Timer
 import com.adamglin.phosphoricons.regular.Warning
 import com.adamglin.phosphoricons.regular.X as XRegular
+import dev.sessiontap.android.domain.Scopes
 import dev.sessiontap.android.ui.components.PrimaryButton
 import dev.sessiontap.android.ui.components.RunningArc
+import dev.sessiontap.android.ui.components.ScopeChips
 import dev.sessiontap.android.ui.components.SecondaryButton
 import dev.sessiontap.android.ui.components.StCard
 import dev.sessiontap.android.ui.hubs.endpointKind
@@ -117,6 +121,18 @@ fun PairScreen(
                                             modifier = Modifier.fillMaxWidth().testTag("fp"),
                                         )
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if (state.scopes.isNotEmpty()) {
+                        Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Access requested", fontSize = 12.sp, color = c.mute)
+                            ScopeChips(state.scopes, tagPrefix = "scope-chip-")
+                            if (Scopes.CONTROL in state.scopes) {
+                                Row(Modifier.testTag("scope-control-warning"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(PhosphorIcons.Fill.WarningFill, null, tint = c.run, modifier = Modifier.size(15.dp).padding(top = 1.dp))
+                                    Text("Control terminal can type into agents, which can run commands on ${state.hubName}.", fontSize = 12.5.sp)
                                 }
                             }
                         }
