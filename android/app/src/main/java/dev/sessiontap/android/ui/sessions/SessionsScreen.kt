@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
@@ -39,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -186,7 +188,15 @@ fun SessionsScreen(
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f).testTag("feed"), contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding() + 12.dp)) {
+        val listState = rememberLazyListState()
+        // Read while idle: after a change lands, key anchoring has already moved the first visible index.
+        var atTop by remember { mutableStateOf(true) }
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 }.collect { atTop = it }
+        }
+        val wasAtTop = atTop
+        LaunchedEffect(feed.map { it.id }) { if (wasAtTop) listState.scrollToItem(0) }
+        LazyColumn(Modifier.weight(1f).testTag("feed"), state = listState, contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding() + 12.dp)) {
             items(feed, key = { it.id }) { item ->
                 when (item) {
                     is FeedItem.Section -> SectionHeader(item) { collapsed[item.key] = !item.collapsed }

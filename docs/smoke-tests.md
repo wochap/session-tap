@@ -72,3 +72,11 @@ need a real phone and a hub with a `remote` section:
    (`/exit`). Verify the pane stays dimmed with the "Agent exited" end card,
    no key bar or reply field, and "Copy last screen" puts the screen text on
    the clipboard.
+7. Terminal reply with Claude vim mode: turn on vim mode in Claude Code
+   (`/vim`), open its terminal from the phone, and tap "Reply to agent…".
+   Verify the keyboard opens and stays open, the field keeps focus, and typed
+   text appears. Clear the field, type `i`, long-press Send, and record whether
+   Claude enters INSERT mode.
+8. Nerd Font prompt: with a shell prompt that uses Powerline separators and
+   Nerd Font icons (for example starship), open its terminal and verify the
+   icons render as glyphs, not boxes, and the text after them stays aligned.

@@ -96,7 +96,7 @@ fun PaneView(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val typeface = remember { ResourcesCompat.getFont(context, R.font.jetbrains_mono) ?: Typeface.MONOSPACE }
+    val typeface = remember { ResourcesCompat.getFont(context, R.font.jetbrains_mono_nerd) ?: Typeface.MONOSPACE }
     val ratio = remember(typeface) { advanceRatio(typeface) }
     val readPx = with(density) { READ_SIZE.toPx() }
     val padPx = with(density) { 6.dp.toPx() }

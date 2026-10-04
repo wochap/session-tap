@@ -4,6 +4,8 @@ import android.app.NotificationManager
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
@@ -12,6 +14,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.core.app.NotificationCompat
@@ -405,6 +409,53 @@ class AppFlowTest {
         Control.run(1, "snapshot")
     }
 
+    /** Row tags drawn inside the feed, top to bottom. */
+    private fun visibleRows(): List<String> {
+        val feed = compose.onNodeWithTag("feed").fetchSemanticsNode().boundsInRoot
+        val tag = androidx.compose.ui.semantics.SemanticsProperties.TestTag
+        val row = androidx.compose.ui.test.SemanticsMatcher("row") { it.config.getOrElseNullable(tag) { null }?.startsWith("row:") == true }
+        return compose.onAllNodes(row).fetchSemanticsNodes()
+            .filter { it.boundsInRoot.bottom > feed.top && it.boundsInRoot.top < feed.bottom }
+            .sortedBy { it.boundsInRoot.top }
+            .map { it.config[tag] }
+    }
+
+    // Feed top anchor: at the top, an agent moving above the first row stays visible; scrolled down, nothing moves.
+    @Test
+    fun a12b_feedTopAnchor() {
+        Control.run(1, "snapshot")
+        // A larger font and density make the short fixture list scroll.
+        val scale = shell("settings get system font_scale").trim().toFloatOrNull() ?: 1f
+        shell("settings put system font_scale 2.0")
+        shell("wm density 720")
+        try {
+            launch()
+            compose.waitTag("row:Fix flaky auth tests")
+            compose.waitForIdle()
+            val first = visibleRows().first()
+            assertTrue("triage must not start first", first != "row:Triage open issues")
+            Control.run(1, "post", "triage", "approval")
+            runCatching { compose.waitUntil(15_000) { visibleRows().firstOrNull() == "row:Triage open issues" } }
+                .onFailure { throw AssertionError("first row not triage: ${visibleRows()}", it) }
+
+            // Scroll to the bottom so only rows below the attention section are on screen.
+            compose.onNodeWithTag("feed").performScrollToNode(hasTestTag("row:Migrate to Vite 6"))
+            compose.waitForIdle()
+            val before = visibleRows()
+            screenshot("feed-scrolled")
+            assertTrue("feed did not scroll: $before", before.firstOrNull() != "row:Triage open issues")
+            // Devbox moves to the top of the attention section, above the screen.
+            Control.run(1, "post", "devbox", "approval")
+            Thread.sleep(1_500)
+            compose.waitForIdle()
+            assertTrue("visible rows moved: $before -> ${visibleRows()}", visibleRows() == before)
+        } finally {
+            shell("settings put system font_scale $scale")
+            shell("wm density reset")
+            Control.run(1, "snapshot")
+        }
+    }
+
     // Terminal: pair with control, open the fixture agent's terminal, answer its approval, see it end.
     @Test
     fun a13_terminal() {
@@ -437,6 +488,31 @@ class AppFlowTest {
             }
             compose.onNodeWithTag("digit:1").assertDoesNotExist()
             screenshot("9b-terminal-answered")
+
+            // The emulator has a hardware keyboard; force the soft keyboard so the layout swap happens.
+            val imeSetting = shell("settings get secure show_ime_with_hard_keyboard").trim()
+            shell("settings put secure show_ime_with_hard_keyboard 1")
+            try {
+                compose.onNodeWithTag("reply").performClick()
+                // With the keyboard open the reply field moves above the key bar.
+                fun replyAboveKeys() =
+                    compose.onNodeWithTag("reply").fetchSemanticsNode().boundsInRoot.top <
+                        compose.onNodeWithTag("key-bar").fetchSemanticsNode().boundsInRoot.top
+                runCatching { compose.waitUntil(15_000) { replyAboveKeys() } }.onFailure {
+                    screenshot("9b2-fail")
+                    throw AssertionError("keyboard: ${shell("dumpsys input_method").lines().filter { l -> "mInputShown" in l || "mServedView" in l || "isInputViewShown" in l }}", it)
+                }
+                compose.waitForIdle()
+                Thread.sleep(1_000)
+                compose.waitForIdle()
+                assertTrue("keyboard closed after focusing the reply field", replyAboveKeys())
+                compose.onNodeWithTag("reply").assertIsFocused()
+                compose.onNodeWithTag("reply").performTextInput("see CI run 4821")
+                compose.onNodeWithTag("reply").assertTextContains("see CI run 4821")
+                screenshot("9b2-terminal-reply-keyboard")
+            } finally {
+                shell("settings put secure show_ime_with_hard_keyboard ${imeSetting.toIntOrNull() ?: 0}")
+            }
 
             Control.run(1, "terminal", "exit")
             compose.waitTag("end-card", 30_000)

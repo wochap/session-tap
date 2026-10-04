@@ -145,7 +145,7 @@ class HubService : Service(), HubClientListener, HubOps {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, Channels.SERVICE)
-            .setSmallIcon(R.drawable.ic_stat_broadcast)
+            .setSmallIcon(R.drawable.ic_stat_caret)
             .setContentTitle(text)
             .setOngoing(true)
             .setSilent(true)

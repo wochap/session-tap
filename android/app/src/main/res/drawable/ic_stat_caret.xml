@@ -1,0 +1,20 @@
+<!-- Glyph bounds are 47.5 by 37 viewport units; the square viewport centers them vertically. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="47.5"
+    android:viewportHeight="47.5">
+    <group
+        android:translateX="-29.5"
+        android:translateY="-30.25">
+        <path
+            android:pathData="M33,39l16,15 -16,15"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="7"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M59.5,62h15a2.5,2.5 0,0 1,2.5 2.5v2a2.5,2.5 0,0 1,-2.5 2.5h-15a2.5,2.5 0,0 1,-2.5 -2.5v-2a2.5,2.5 0,0 1,2.5 -2.5z" />
+    </group>
+</vector>

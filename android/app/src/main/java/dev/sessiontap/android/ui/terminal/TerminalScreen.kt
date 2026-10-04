@@ -380,12 +380,11 @@ private fun Controls(ui: TerminalUi, actions: TerminalActions, ime: Boolean, lan
                             KeyBar(enabled, ui.ctrlArmed, actions, Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 6.dp))
                             ReplyRow(ui, enabled, note, actions, ime, Modifier.width(360.dp).padding(top = 6.dp, bottom = 6.dp, end = 8.dp))
                         }
-                    } else if (ime) {
-                        ReplyRow(ui, enabled, note, actions, ime, Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp))
-                        KeyBar(enabled, ui.ctrlArmed, actions, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp))
                     } else {
-                        KeyBar(enabled, ui.ctrlArmed, actions, Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 6.dp))
-                        ReplyRow(ui, enabled, note, actions, ime, Modifier.padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 8.dp))
+                        // One ReplyRow call site keeps the field's focus while the key bar swaps sides around the keyboard.
+                        if (!ime) KeyBar(enabled, ui.ctrlArmed, actions, Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 6.dp))
+                        ReplyRow(ui, enabled, note, actions, ime, if (ime) Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp) else Modifier.padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 8.dp))
+                        if (ime) KeyBar(enabled, ui.ctrlArmed, actions, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp))
                     }
                     ui.error?.let { Text(it, fontSize = 12.sp, color = c.block, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).testTag("input-error")) }
                 }
