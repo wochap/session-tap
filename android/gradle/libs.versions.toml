@@ -21,6 +21,7 @@ androidxTestRunner = "1.7.0"
 androidxTestCore = "1.7.0"
 uiautomator = "2.3.0"
 robolectric = "4.16"
+termux = "v0.118.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -57,6 +58,8 @@ androidx-test-runner = { module = "androidx.test:runner", version.ref = "android
 androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
 androidx-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
 room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
+termux-terminal-emulator = { module = "com.github.termux.termux-app:terminal-emulator", version.ref = "termux" }
+termux-terminal-view = { module = "com.github.termux.termux-app:terminal-view", version.ref = "termux" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 [plugins]

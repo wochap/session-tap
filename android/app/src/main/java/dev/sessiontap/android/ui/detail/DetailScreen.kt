@@ -44,8 +44,12 @@ import com.adamglin.phosphoricons.regular.ArrowLeft
 import com.adamglin.phosphoricons.regular.Copy
 import com.adamglin.phosphoricons.regular.DotsThreeVertical
 import com.adamglin.phosphoricons.regular.Eraser
+import com.adamglin.phosphoricons.regular.Eye
+import com.adamglin.phosphoricons.regular.TerminalWindow
 import dev.sessiontap.android.data.AgentItem
 import dev.sessiontap.android.data.HubEntity
+import dev.sessiontap.android.domain.TerminalAccess
+import dev.sessiontap.android.domain.TerminalLevel
 import dev.sessiontap.android.domain.blockCause
 import dev.sessiontap.android.domain.humanizeTokens
 import dev.sessiontap.android.domain.isStale
@@ -58,6 +62,7 @@ import dev.sessiontap.android.net.ConnState
 import dev.sessiontap.android.net.ReasonKind
 import dev.sessiontap.android.net.Status
 import dev.sessiontap.android.ui.components.Glyph
+import dev.sessiontap.android.ui.components.PrimaryButton
 import dev.sessiontap.android.ui.components.SecondaryButton
 import dev.sessiontap.android.ui.components.StCard
 import dev.sessiontap.android.ui.components.StatusGlyph
@@ -89,6 +94,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onForget: () -> Unit,
     contentPadding: PaddingValues,
+    onTerminal: () -> Unit = {},
 ) {
     val c = St.colors
     var menu by remember { mutableStateOf(false) }
@@ -167,6 +173,7 @@ fun DetailScreen(
                     }
                 }
             }
+            TerminalEntry(TerminalAccess.of(hub?.canWatch == true, hub?.canControl == true, v), hub?.name ?: "The hub", onTerminal)
             Group("Location") {
                 StCard(Modifier.fillMaxWidth()) {
                     Column {
@@ -262,6 +269,22 @@ fun DetailScreen(
                 Text("Forget becomes available once this session stops.", fontSize = 12.sp, color = c.mute, modifier = Modifier.padding(horizontal = 4.dp))
             }
         }
+    }
+}
+
+/** "Open terminal" with control, "View terminal" with watch, a no-access hint otherwise; nothing without a live terminal. */
+@Composable
+private fun TerminalEntry(access: TerminalAccess, hubName: String, onTerminal: () -> Unit) {
+    if (!access.available) return
+    when (access.level) {
+        TerminalLevel.Control -> PrimaryButton("Open terminal", onTerminal, Modifier.fillMaxWidth().testTag("open-terminal"), height = 48.dp, icon = PhosphorIcons.Regular.TerminalWindow)
+        TerminalLevel.View -> SecondaryButton("View terminal", onTerminal, Modifier.fillMaxWidth().testTag("view-terminal"), height = 48.dp, icon = PhosphorIcons.Regular.Eye)
+        TerminalLevel.None -> Text(
+            "$hubName didn't grant this phone terminal access. To watch or answer agents here, pair again with sessiontap-hub pair --scope watch (or --scope control).",
+            fontSize = 12.sp,
+            color = St.colors.mute,
+            modifier = Modifier.padding(horizontal = 4.dp).testTag("terminal-no-access"),
+        )
     }
 }
 

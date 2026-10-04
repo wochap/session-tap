@@ -404,4 +404,47 @@ class AppFlowTest {
         compose.onNodeWithTag("filter:All").performClick()
         Control.run(1, "snapshot")
     }
+
+    // Terminal: pair with control, open the fixture agent's terminal, answer its approval, see it end.
+    @Test
+    fun a13_terminal() {
+        val link = Control.link(1, scopes = listOf("control"))
+        Control.bg(1, "answer", "y")
+        launch(link)
+        compose.waitTag("pair:Paired", 60_000)
+        try {
+            Control.run(1, "terminal", "start")
+            compose.onNodeWithTag("view-sessions").performClick()
+            val icon = androidx.compose.ui.test.SemanticsMatcher("terminal icon") {
+                it.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.TestTag) { null }?.startsWith("term:") == true
+            }
+            compose.waitUntil(30_000) { compose.onAllNodes(icon, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            val name = compose.onAllNodes(icon, useUnmergedTree = true).fetchSemanticsNodes().first()
+                .config[androidx.compose.ui.semantics.SemanticsProperties.TestTag].removePrefix("term:")
+            compose.onNodeWithTag("row:$name").performClick()
+            compose.waitTag("detail")
+            compose.onNodeWithTag("open-terminal").performScrollTo().performClick()
+            compose.waitTag("terminal")
+            compose.waitTag("digit:1", 30_000)
+            compose.onNodeWithTag("terminal-status").assertTextContainsAny("waiting for you")
+            screenshot("9a-terminal-approval")
+
+            compose.onNodeWithTag("digit:1").performClick()
+            compose.waitUntil(30_000) {
+                val status = compose.onNodeWithTag("terminal-status").fetchSemanticsNode()
+                    .config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text }
+                status != "waiting for you"
+            }
+            compose.onNodeWithTag("digit:1").assertDoesNotExist()
+            screenshot("9b-terminal-answered")
+
+            Control.run(1, "terminal", "exit")
+            compose.waitTag("end-card", 30_000)
+            compose.onNodeWithText("Agent exited").assertExists()
+            compose.onNodeWithTag("key-bar").assertDoesNotExist()
+            screenshot("9c-terminal-ended")
+        } finally {
+            Control.run(1, "terminal", "stop")
+        }
+    }
 }

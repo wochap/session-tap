@@ -28,6 +28,7 @@ import dev.sessiontap.android.net.HubInfo
 import dev.sessiontap.android.net.HubTls
 import dev.sessiontap.android.net.RpcException
 import dev.sessiontap.android.net.Status
+import dev.sessiontap.android.net.TerminalHub
 import dev.sessiontap.android.notify.Channels
 import dev.sessiontap.android.notify.NotificationPoster
 import kotlinx.coroutines.CoroutineScope
@@ -128,6 +129,8 @@ class HubService : Service(), HubClientListener, HubOps {
     }
 
     override fun reconnectAll() = clients.values.forEach { it.kick() }
+
+    override fun terminalHub(hubId: String): TerminalHub? = clients[hubId]
 
     private fun summaryText(hubs: Int, attention: Int): String {
         val watching = "Watching $hubs ${if (hubs == 1) "hub" else "hubs"}"

@@ -42,10 +42,16 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
+    packaging {
+        // Termux's JNI library only spawns PTY sessions; the app feeds the emulator relay bytes instead.
+        jniLibs.excludes += "**/libtermux.so"
+    }
+
     lint {
         abortOnError = true
         warningsAsErrors = false
-        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
+        // Aligned16KB only flags libtermux.so, which packaging excludes.
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion", "Aligned16KB")
     }
 }
 
@@ -83,6 +89,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.phosphor.icon)
+    implementation(libs.termux.terminal.emulator)
+    implementation(libs.termux.terminal.view)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 
@@ -93,6 +101,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.room.testing)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)

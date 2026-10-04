@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
+import java.util.Base64
 
 /** Shared JSON settings: tolerant of fields newer hubs may add. */
 val ProtocolJson = Json {
@@ -59,6 +60,8 @@ data class PairComplete(
 sealed interface Incoming {
     data class Response(val id: Long, val result: JsonElement?, val error: RpcError?) : Incoming
     data class Stream(val envelope: HubEnvelope) : Incoming
+    /** A pushed frame of an open terminal stream. */
+    data class Terminal(val stream: Long, val frame: TerminalFrame) : Incoming
 }
 
 fun parseIncoming(text: String): Incoming? {
@@ -66,6 +69,11 @@ fun parseIncoming(text: String): Incoming? {
     if (obj["event"] == JsonPrimitive("stream")) {
         val data = obj["data"] ?: return null
         return runCatching { Incoming.Stream(ProtocolJson.decodeFromJsonElement<HubEnvelope>(data)) }.getOrNull()
+    }
+    if (obj["type"] == JsonPrimitive("terminal")) {
+        val stream = (obj["stream"] as? JsonPrimitive)?.longOrNull ?: return null
+        val frame = obj["frame"] ?: return null
+        return runCatching { Incoming.Terminal(stream, ProtocolJson.decodeFromJsonElement<TerminalFrame>(frame)) }.getOrNull()
     }
     val id = (obj["id"] as? JsonPrimitive)?.longOrNull ?: return null
     val error = obj["error"]?.let { runCatching { ProtocolJson.decodeFromJsonElement<RpcError>(it) }.getOrNull() }
@@ -186,4 +194,111 @@ data class AgentView(
     val usage: Usage? = null,
     val repository: Repository? = null,
     val children: List<ChildView>? = null,
+    /** Present only while a live terminal is available for this agent. */
+    val terminal: TerminalDescriptor? = null,
 )
+
+@Serializable
+enum class QuickPick {
+    @SerialName("digits") Digits,
+    @SerialName("none") None,
+}
+
+/** The agent's public `terminal` descriptor. */
+@Serializable
+data class TerminalDescriptor(@SerialName("quick_pick") val quickPick: QuickPick = QuickPick.None)
+
+/** Error codes answered by `terminal.open` and `terminal.input`. */
+object TerminalErrors {
+    const val FORBIDDEN = "forbidden"
+    const val NOT_FOUND = "not_found"
+    const val TERMINAL_UNAVAILABLE = "terminal_unavailable"
+    const val UNSUPPORTED_BACKEND = "unsupported_backend"
+    const val NOT_FOREGROUND = "not_foreground"
+    const val PANE_IN_MODE = "pane_in_mode"
+    const val TERMINAL_ENDED = "terminal_ended"
+    const val BAD_REQUEST = "bad_request"
+    const val SOURCE_UNAVAILABLE = "source_unavailable"
+    const val SOURCE_DISALLOWS_CONTROL = "source_disallows_control"
+}
+
+/** Named keys accepted by `terminal.input`; any other key is one printable character. */
+object TerminalKeys {
+    const val UP = "up"
+    const val DOWN = "down"
+    const val LEFT = "left"
+    const val RIGHT = "right"
+    const val ESCAPE = "escape"
+    const val TAB = "tab"
+    const val BACK_TAB = "back_tab"
+    const val ENTER = "enter"
+    const val SPACE = "space"
+    const val BACKSPACE = "backspace"
+    const val CTRL_C = "ctrl_c"
+}
+
+@Serializable
+enum class InputUnavailable {
+    @SerialName("not_foreground") NotForeground,
+    @SerialName("pane_in_mode") PaneInMode,
+}
+
+@Serializable
+data class InputState(val available: Boolean, val reason: InputUnavailable? = null)
+
+@Serializable
+data class TerminalCursor(val x: Int, val y: Int, val visible: Boolean = true)
+
+@Serializable
+enum class EndReason {
+    @SerialName("agent_exited") AgentExited,
+    @SerialName("pane_closed") PaneClosed,
+    @SerialName("session_closed") SessionClosed,
+    @SerialName("multiplexer_stopped") MultiplexerStopped,
+    @SerialName("identity_changed") IdentityChanged,
+    @SerialName("source_unavailable") SourceUnavailable,
+    @SerialName("source_disallows_control") SourceDisallowsControl,
+    @SerialName("closed") Closed,
+}
+
+/** One frame of a terminal stream; `data` is base64 pane bytes. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@JsonClassDiscriminator("type")
+sealed class TerminalFrame {
+    @Serializable
+    @SerialName("snapshot")
+    data class Snapshot(
+        val seq: Long,
+        val cols: Int,
+        val rows: Int,
+        val cursor: TerminalCursor,
+        @SerialName("alternate_screen") val alternateScreen: Boolean = false,
+        val data: String,
+        val input: InputState,
+    ) : TerminalFrame() {
+        val bytes: ByteArray get() = Base64.getDecoder().decode(data)
+    }
+
+    @Serializable
+    @SerialName("output")
+    data class Output(val seq: Long, val data: String) : TerminalFrame() {
+        val bytes: ByteArray get() = Base64.getDecoder().decode(data)
+    }
+
+    @Serializable
+    @SerialName("input")
+    data class Input(val available: Boolean, val reason: InputUnavailable? = null) : TerminalFrame() {
+        val state: InputState get() = InputState(available, reason)
+    }
+
+    @Serializable
+    @SerialName("ended")
+    data class Ended(val reason: EndReason) : TerminalFrame()
+}
+
+/** Body of one `terminal.input` request: named keys or characters, or a paste. */
+sealed interface TerminalInput {
+    data class Keys(val keys: List<String>) : TerminalInput
+    data class Paste(val text: String, val enter: Boolean) : TerminalInput
+}

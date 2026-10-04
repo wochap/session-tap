@@ -43,6 +43,24 @@ The app keeps one foreground service connection per paired hub. Allow the
 battery optimization exemption when asked, or Android may stop it.
 To pair another hub, open Hubs and tap "Pair another hub" (or use the top bar menu).
 
+## Terminal
+
+With the `watch` scope (`sessiontap-hub pair --scope watch`) the session detail
+offers "View terminal"; with `control` it offers "Open terminal" and the phone
+can type into the agent. Session rows show a terminal icon when the agent's
+terminal can be opened, and needs-attention notifications gain an "Open
+terminal" action with `control`.
+
+The terminal screen shows only the agent's tmux pane, at the desktop pane size;
+it never resizes it. Portrait opens at 9sp and follows the cursor sideways; tap
+the size chip or double-tap to fit the width, pinch up to 200%. The key bar
+sends Esc, Tab, Shift+Tab, arrows, Enter, Space, Backspace, and Ctrl+C (tap
+twice within 2.5 s). Paste fills the reply field; Send pastes the reply and
+presses Enter, long-press Send pastes without Enter. When the agent waits for
+approval and answers digits, chips 1-4 send that digit. Input pauses while the
+agent is not in front or the desktop scrolls the pane, and nothing typed is
+sent after a reconnect until you tap Send.
+
 ## Tailscale
 
 - Put the machine's tailnet address in `remote.listen` (for example
@@ -66,7 +84,11 @@ adb uninstall dev.sessiontap.android       # the flow test starts from a fresh i
 android/scripts/test-hub.sh install-link   # pair manually via the debug deep link
 ```
 
-Instrumented tests skip when `test-control.py` is not reachable.
+Instrumented tests skip when `test-control.py` is not reachable. The terminal
+flow (`a13_terminal`) pairs with `test-hub.sh link control`, starts the terminal
+fixture with `test-hub.sh terminal start` (needs `tmux`), answers the fake
+agent's approval with digit chip 1, ends it with `test-hub.sh terminal exit`,
+and stops the fixture afterwards.
 
 `android/scripts/emulator.sh run <cmd>` boots the emulator, runs a command, and
 shuts it down. Phone-only checks are listed in `docs/smoke-tests.md`.

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -37,6 +38,8 @@ class Connection internal constructor(val endpoint: String, val trust: PinnedTru
     private val nextId = AtomicLong(1)
     private val pending = ConcurrentHashMap<Long, CompletableDeferred<Incoming.Response>>()
     val stream = Channel<HubEnvelope>(Channel.UNLIMITED)
+    /** Frames per terminal stream id. A frame may arrive before its open call returns, so channels are made on demand. */
+    private val terminals = ConcurrentHashMap<Long, Channel<TerminalFrame>>()
     val closed = CompletableDeferred<CloseInfo>()
 
     suspend fun call(method: String, params: JsonObject? = null, timeoutMs: Long = 15_000): JsonElement? {
@@ -62,13 +65,26 @@ class Connection internal constructor(val endpoint: String, val trust: PinnedTru
         when (val frame = parseIncoming(text)) {
             is Incoming.Response -> pending[frame.id]?.complete(frame)
             is Incoming.Stream -> stream.trySend(frame.envelope)
+            is Incoming.Terminal -> terminalChannel(frame.stream).trySend(frame.frame)
             null -> {}
         }
+    }
+
+    private fun terminalChannel(id: Long): Channel<TerminalFrame> =
+        terminals.computeIfAbsent(id) { Channel<TerminalFrame>(Channel.UNLIMITED).also { if (closed.isCompleted) it.close() } }
+
+    /** Frames of terminal stream [id], in order; closes when the connection closes. */
+    fun terminalFrames(id: Long): ReceiveChannel<TerminalFrame> = terminalChannel(id)
+
+    /** Drops the frames of a stream the app no longer shows. */
+    fun releaseTerminal(id: Long) {
+        terminals.remove(id)?.close()
     }
 
     internal fun onClosed(info: CloseInfo) {
         closed.complete(info)
         stream.close()
+        terminals.values.forEach { it.close() }
         val failure = RpcException("closed", info.reason.ifEmpty { "connection closed" })
         pending.values.forEach { it.completeExceptionally(failure) }
     }

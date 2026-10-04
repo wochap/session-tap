@@ -21,6 +21,7 @@ object Fixtures {
         provider: String = "claude",
         id: String = "7f3c2a1e-0000-4000-8000-000000000001",
         sessionName: String? = "Fix flaky auth tests",
+        terminal: dev.sessiontap.android.net.TerminalDescriptor? = null,
     ) = AgentView(
         invocationId = id,
         provider = provider,
@@ -33,6 +34,7 @@ object Fixtures {
         usage = Usage(inputTokens = 15_300, outputTokens = 2_100, contextWindowPercent = 42),
         repository = Repository("/home/me/code/api", "feat/auth-retry", "a41f9c2d", true),
         children = children,
+        terminal = terminal,
     )
 
     fun child(status: Status, kind: ReasonKind? = null, type: String = "Explore", summary: String? = null) = ChildView(

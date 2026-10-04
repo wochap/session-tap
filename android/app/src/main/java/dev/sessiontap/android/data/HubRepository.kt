@@ -11,6 +11,7 @@ import dev.sessiontap.android.net.HubEnvelope
 import dev.sessiontap.android.net.HubInfo
 import dev.sessiontap.android.net.ProtocolJson
 import dev.sessiontap.android.net.Status
+import dev.sessiontap.android.net.TerminalHub
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,6 +40,8 @@ interface AgentNotifier {
 interface HubOps {
     suspend fun forget(key: AgentKey)
     fun reconnectAll()
+    /** Terminal calls on the hub's connection, or null when the hub has no client. */
+    fun terminalHub(hubId: String): TerminalHub?
 }
 
 /**
@@ -83,7 +86,7 @@ class HubRepository(
                 val rows = envelope.agents.map { entry ->
                     val key = AgentKey(hubId, entry.sourceId, entry.view.invocationId)
                     val prev = old[key]?.effective?.let(::statusOf)
-                    decisions += key to NotificationRules.evaluate(prev, entry.view, hub.name, alerts, muted)
+                    decisions += key to NotificationRules.evaluate(prev, entry.view, hub.name, alerts, muted, hub.canControl)
                     entry.view.toEntity(key)
                 }
                 val present = rows.map { AgentKey(hubId, it.sourceId, it.invocationId) }.toSet()
@@ -98,7 +101,7 @@ class HubRepository(
             is HubEnvelope.Update -> {
                 val key = AgentKey(hubId, envelope.sourceId, envelope.view.invocationId)
                 val prev = dao.agent(hubId, key.sourceId, key.invocationId)?.effective?.let(::statusOf)
-                decisions += key to NotificationRules.evaluate(prev, envelope.view, hub.name, alerts, muted)
+                decisions += key to NotificationRules.evaluate(prev, envelope.view, hub.name, alerts, muted, hub.canControl)
                 dao.upsertAgents(listOf(envelope.view.toEntity(key)))
                 dao.upsertHub(hub.copy(hubRevision = envelope.hubRevision, lastSyncAt = now(), lastSeenAt = now()))
             }
@@ -149,6 +152,8 @@ class HubRepository(
     fun reconnectAll() {
         ops?.reconnectAll()
     }
+
+    fun terminalHub(hubId: String): TerminalHub? = ops?.terminalHub(hubId)
 
     fun hide(key: AgentKey) = _hidden.update { it + key }
     fun unhide(key: AgentKey) = _hidden.update { it - key }

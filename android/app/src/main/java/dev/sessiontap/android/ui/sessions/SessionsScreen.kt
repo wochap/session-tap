@@ -269,6 +269,9 @@ private fun SessionRow(row: RowModel, onOpen: () -> Unit, onToggleKids: () -> Un
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(row.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     ProviderMark(row.mark)
+                    if (row.terminal) {
+                        Icon(PhosphorIcons.Regular.TerminalWindow, "Terminal available", tint = c.mute, modifier = Modifier.size(14.dp).testTag("term:${row.name}"))
+                    }
                     row.hubTag?.let {
                         Text(it, fontSize = 11.sp, color = c.mute, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.line).padding(horizontal = 6.dp))
                     }

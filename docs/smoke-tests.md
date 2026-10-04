@@ -62,3 +62,13 @@ need a real phone and a hub with a `remote` section:
 4. OEM background kill recovery: swipe the app away, wait at least 30 minutes
    with the screen off, then trigger an approval prompt and verify the
    notification arrives. Record the phone model and Android version.
+5. Terminal approval from the phone: pair with `sessiontap-hub pair --scope
+   control`, start a real Claude Code session in tmux on the hub machine, and
+   ask it for something that needs approval. Open the agent from the
+   notification's "Open terminal" action (unlock first), verify the terminal
+   shows the approval menu with chips 1-4, tap 1, and verify the agent proceeds
+   and the status leaves "waiting for you".
+6. Terminal end: with the terminal open, exit Claude Code on the desktop
+   (`/exit`). Verify the pane stays dimmed with the "Agent exited" end card,
+   no key bar or reply field, and "Copy last screen" puts the screen text on
+   the clipboard.

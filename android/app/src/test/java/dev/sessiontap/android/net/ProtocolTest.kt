@@ -81,4 +81,61 @@ class ProtocolTest {
         assertNull(parseIncoming("not json"))
         assertNull(parseIncoming("""{"event":"stream","data":{"type":"weird"}}"""))
     }
+
+    private fun terminal(frame: String) = parseIncoming("""{"type":"terminal","stream":7,"frame":$frame}""") as Incoming.Terminal
+
+    @Test
+    fun parsesTerminalSnapshot() {
+        val t = terminal("""{"type":"snapshot","seq":0,"cols":160,"rows":40,"cursor":{"x":3,"y":7,"visible":true},"alternate_screen":true,"data":"G1sxbWhp/w==","input":{"available":true}}""")
+        assertEquals(7L, t.stream)
+        val s = t.frame as TerminalFrame.Snapshot
+        assertEquals(160, s.cols)
+        assertEquals(40, s.rows)
+        assertEquals(TerminalCursor(3, 7, true), s.cursor)
+        assertTrue(s.alternateScreen)
+        assertEquals(InputState(true), s.input)
+        assertEquals(listOf(0x1b, '['.code, '1'.code, 'm'.code, 'h'.code, 'i'.code, 0xff), s.bytes.map { it.toInt() and 0xff })
+    }
+
+    @Test
+    fun parsesTerminalOutputInputAndEnded() {
+        val out = terminal("""{"type":"output","seq":4,"data":"aGk="}""").frame as TerminalFrame.Output
+        assertEquals(4L, out.seq)
+        assertEquals("hi", out.bytes.decodeToString())
+        val paused = terminal("""{"type":"input","available":false,"reason":"not_foreground"}""").frame as TerminalFrame.Input
+        assertEquals(InputState(false, InputUnavailable.NotForeground), paused.state)
+        val mode = terminal("""{"type":"input","available":false,"reason":"pane_in_mode"}""").frame as TerminalFrame.Input
+        assertEquals(InputUnavailable.PaneInMode, mode.reason)
+        val back = terminal("""{"type":"input","available":true}""").frame as TerminalFrame.Input
+        assertEquals(InputState(true), back.state)
+        val reasons = mapOf(
+            "agent_exited" to EndReason.AgentExited,
+            "pane_closed" to EndReason.PaneClosed,
+            "session_closed" to EndReason.SessionClosed,
+            "multiplexer_stopped" to EndReason.MultiplexerStopped,
+            "identity_changed" to EndReason.IdentityChanged,
+            "source_unavailable" to EndReason.SourceUnavailable,
+            "source_disallows_control" to EndReason.SourceDisallowsControl,
+            "closed" to EndReason.Closed,
+        )
+        reasons.forEach { (wire, reason) ->
+            assertEquals(TerminalFrame.Ended(reason), terminal("""{"type":"ended","reason":"$wire"}""").frame)
+        }
+    }
+
+    @Test
+    fun parsesTerminalDescriptor() {
+        val digits = parseIncoming("""{"event":"stream","data":{"type":"update","hub_revision":1,"source_id":"term","view":{"invocation_id":"i","provider":"claude","status":"blocked","terminal":{"quick_pick":"digits"}}}}""") as Incoming.Stream
+        assertEquals(TerminalDescriptor(QuickPick.Digits), (digits.envelope as HubEnvelope.Update).view.terminal)
+        val none = parseIncoming("""{"event":"stream","data":{"type":"update","hub_revision":1,"source_id":"term","view":{"invocation_id":"i","provider":"codex","status":"running","terminal":{"quick_pick":"none"}}}}""") as Incoming.Stream
+        assertEquals(QuickPick.None, (none.envelope as HubEnvelope.Update).view.terminal?.quickPick)
+        val headless = parseIncoming("""{"event":"stream","data":$updateLine}""") as Incoming.Stream
+        assertNull((headless.envelope as HubEnvelope.Update).view.terminal)
+    }
+
+    @Test
+    fun ignoresUnknownTerminalFrames() {
+        assertNull(parseIncoming("""{"type":"terminal","stream":1,"frame":{"type":"weird"}}"""))
+        assertNull(parseIncoming("""{"type":"terminal","frame":{"type":"output","seq":1,"data":""}}"""))
+    }
 }

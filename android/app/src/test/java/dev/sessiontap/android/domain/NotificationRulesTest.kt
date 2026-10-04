@@ -12,8 +12,8 @@ import org.junit.Test
 class NotificationRulesTest {
     private val on = AlertSettings()
 
-    private fun eval(prev: Status?, v: dev.sessiontap.android.net.AgentView, settings: AlertSettings = on, muted: Boolean = false) =
-        NotificationRules.evaluate(prev, v, "MacBook", settings, muted)
+    private fun eval(prev: Status?, v: dev.sessiontap.android.net.AgentView, settings: AlertSettings = on, muted: Boolean = false, canControl: Boolean = false) =
+        NotificationRules.evaluate(prev, v, "MacBook", settings, muted, canControl)
 
     private fun post(d: NotifyDecision) = (d as NotifyDecision.Post).notice
 
@@ -118,5 +118,14 @@ class NotificationRulesTest {
     fun muteSuppressesPostsButStillCancels() {
         assertEquals(NotifyDecision.None, eval(Status.Running, view(Status.Blocked, Fixtures.approval()), muted = true))
         assertEquals(NotifyDecision.Cancel, eval(Status.Blocked, view(Status.Running), muted = true))
+    }
+
+    @Test
+    fun openTerminalNeedsControlAndALiveTerminal() {
+        val term = dev.sessiontap.android.net.TerminalDescriptor(dev.sessiontap.android.net.QuickPick.Digits)
+        assertTrue(post(eval(Status.Running, view(Status.Blocked, Fixtures.approval(), terminal = term), canControl = true)).openTerminal)
+        assertEquals(false, post(eval(Status.Running, view(Status.Blocked, Fixtures.approval(), terminal = term), canControl = false)).openTerminal)
+        assertEquals(false, post(eval(Status.Running, view(Status.Blocked, Fixtures.approval()), canControl = true)).openTerminal)
+        assertEquals(false, post(eval(Status.Running, view(Status.Stopped, Fixtures.completed(), terminal = term), canControl = true)).openTerminal)
     }
 }

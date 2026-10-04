@@ -10,7 +10,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.OkHttpClient
 import kotlin.math.min
@@ -30,6 +35,19 @@ sealed interface ConnState {
     companion object {
         const val OFFLINE_AFTER_FAILURES = 3
     }
+}
+
+/** An open terminal stream on one connection. */
+class TerminalStream internal constructor(val id: Long, val frames: ReceiveChannel<TerminalFrame>, internal val conn: Connection)
+
+/** The terminal calls of one hub, on its current connection. */
+interface TerminalHub {
+    val state: StateFlow<ConnState>
+    suspend fun openTerminal(sourceId: String, invocationId: String): TerminalStream
+    suspend fun sendInput(stream: TerminalStream, input: TerminalInput)
+    suspend fun closeTerminal(stream: TerminalStream)
+    /** Retry now instead of waiting for the backoff. */
+    fun kick()
 }
 
 interface HubClientListener {
@@ -53,9 +71,9 @@ class HubClient(
     private val now: () -> Long = System::currentTimeMillis,
     private val initialBackoffMs: Long = 1_000,
     private val maxBackoffMs: Long = MAX_BACKOFF_MS,
-) {
+) : TerminalHub {
     private val _state = MutableStateFlow<ConnState>(ConnState.Connecting)
-    val state: StateFlow<ConnState> = _state
+    override val state: StateFlow<ConnState> = _state
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var job: Job? = null
     @Volatile private var current: Connection? = null
@@ -74,7 +92,7 @@ class HubClient(
     }
 
     /** Network changed: retry now with a fresh backoff. */
-    fun kick() {
+    override fun kick() {
         backoffMs = initialBackoffMs
         wake.trySend(Unit)
     }
@@ -88,6 +106,45 @@ class HubClient(
                 put("invocation_id", JsonPrimitive(invocationId))
             },
         )
+    }
+
+    override suspend fun openTerminal(sourceId: String, invocationId: String): TerminalStream {
+        val conn = current ?: throw RpcException("offline", "hub is not connected")
+        val result = conn.call(
+            "terminal.open",
+            buildJsonObject {
+                put("source_id", JsonPrimitive(sourceId))
+                put("invocation_id", JsonPrimitive(invocationId))
+            },
+        )
+        val id = (result as? JsonObject)?.get("stream")?.jsonPrimitive?.longOrNull
+            ?: throw RpcException("bad_response", "terminal.open answered without a stream")
+        return TerminalStream(id, conn.terminalFrames(id), conn)
+    }
+
+    /** Sends on the stream's own connection; a stream from a dropped connection is offline. */
+    override suspend fun sendInput(stream: TerminalStream, input: TerminalInput) {
+        val conn = stream.conn.takeIf { it === current } ?: throw RpcException("offline", "hub is not connected")
+        val params = buildJsonObject {
+            put("stream", JsonPrimitive(stream.id))
+            when (input) {
+                is TerminalInput.Keys -> put("keys", JsonArray(input.keys.map(::JsonPrimitive)))
+                is TerminalInput.Paste -> put(
+                    "paste",
+                    buildJsonObject {
+                        put("text", JsonPrimitive(input.text))
+                        put("enter", JsonPrimitive(input.enter))
+                    },
+                )
+            }
+        }
+        conn.call("terminal.input", params)
+    }
+
+    override suspend fun closeTerminal(stream: TerminalStream) {
+        stream.conn.releaseTerminal(stream.id)
+        if (stream.conn !== current) return
+        stream.conn.call("terminal.close", buildJsonObject { put("stream", JsonPrimitive(stream.id)) })
     }
 
     private suspend fun run() {

@@ -1,5 +1,6 @@
 package dev.sessiontap.android.ui.sessions
 
+import dev.sessiontap.android.domain.TerminalAccess
 import dev.sessiontap.android.data.AgentItem
 import dev.sessiontap.android.data.AgentKey
 import dev.sessiontap.android.data.HubEntity
@@ -41,6 +42,8 @@ data class RowModel(
     val stale: Boolean,
     val blocked: Boolean,
     val swipeable: Boolean,
+    /** This device can open the agent's live terminal. */
+    val terminal: Boolean = false,
 )
 
 sealed interface FeedItem {
@@ -155,6 +158,7 @@ fun rowModel(item: AgentItem, hub: HubEntity?, hubTag: String?, expanded: Boolea
         stale = stale,
         blocked = item.effective == Status.Blocked && !stale,
         swipeable = v.status == Status.Stopped && hub?.canManage == true,
+        terminal = TerminalAccess.of(hub?.canWatch == true, hub?.canControl == true, v).canOpen,
     )
 }
 

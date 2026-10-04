@@ -75,6 +75,7 @@ import dev.sessiontap.android.ui.pairing.PairViewModel
 import dev.sessiontap.android.ui.pairing.ScanScreen
 import dev.sessiontap.android.ui.pairing.openTailscale
 import dev.sessiontap.android.ui.sessions.isAttention
+import dev.sessiontap.android.ui.terminal.TerminalRoute
 import dev.sessiontap.android.ui.theme.Mono
 import dev.sessiontap.android.ui.theme.St
 import kotlinx.coroutines.delay
@@ -92,8 +93,10 @@ object Routes {
     const val HUBS = "hubs"
     const val ALERTS = "alerts"
     const val DETAIL = "detail/{hub}/{source}/{inv}"
+    const val TERMINAL = "terminal/{hub}/{source}/{inv}"
 
     fun detail(key: AgentKey) = "detail/${enc(key.hubId)}/${enc(key.sourceId)}/${enc(key.invocationId)}"
+    fun terminal(key: AgentKey) = "terminal/${enc(key.hubId)}/${enc(key.sourceId)}/${enc(key.invocationId)}"
     private fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
 }
 
@@ -303,6 +306,23 @@ fun SessionTapRoot(app: SessionTapApp, pairVm: PairViewModel, nav: NavHostContro
                         forget(key)
                         if (!nav.popBackStack()) nav.navigate(Routes.SESSIONS)
                     },
+                    contentPadding = pad,
+                    onTerminal = { nav.navigate(Routes.terminal(key)) },
+                )
+            }
+            composable(
+                Routes.TERMINAL,
+                deepLinks = listOf(navDeepLink { uriPattern = "sessiontap://terminal/{hub}/{source}/{inv}" }),
+            ) { entry ->
+                fun arg(name: String) = URLDecoder.decode(entry.arguments?.getString(name).orEmpty(), "UTF-8")
+                val key = AgentKey(arg("hub"), arg("source"), arg("inv"))
+                TerminalRoute(
+                    app = app,
+                    key = key,
+                    item = agents.firstOrNull { it.key == key },
+                    hub = hubs.firstOrNull { it.hubId == key.hubId },
+                    conn = conn[key.hubId],
+                    onBack = { if (!nav.popBackStack()) nav.navigate(Routes.detail(key)) },
                     contentPadding = pad,
                 )
             }

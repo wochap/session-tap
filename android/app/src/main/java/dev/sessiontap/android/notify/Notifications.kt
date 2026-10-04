@@ -59,6 +59,10 @@ fun notificationsAllowed(context: Context): Boolean {
 fun sessionUri(key: AgentKey) =
     "sessiontap://session/${key.hubId}/${key.sourceId}/${key.invocationId}".toUri()
 
+/** Deep link that opens one agent's terminal screen. */
+fun terminalUri(key: AgentKey) =
+    "sessiontap://terminal/${key.hubId}/${key.sourceId}/${key.invocationId}".toUri()
+
 class NotificationPoster(private val context: Context) : AgentNotifier {
     private val manager = NotificationManagerCompat.from(context)
 
@@ -67,6 +71,12 @@ class NotificationPoster(private val context: Context) : AgentNotifier {
     @SuppressLint("MissingPermission") // checked by allowed()
     override fun post(hub: HubEntity, key: AgentKey, notice: AgentNotice) {
         if (!allowed()) return
+        manager.notify(key.notificationId, build(hub, key, notice))
+        postSummary(hub)
+    }
+
+    /** The agent notification; the lock-screen public version carries no actions. */
+    fun build(hub: HubEntity, key: AgentKey, notice: AgentNotice): Notification {
         val channel = if (notice.channel == NotifyChannel.Attention) Channels.ATTENTION else Channels.COMPLETED
         val open = PendingIntent.getActivity(
             context,
@@ -101,10 +111,17 @@ class NotificationPoster(private val context: Context) : AgentNotifier {
             .setAutoCancel(true)
             .setContentIntent(open)
             .addAction(0, "Open", open)
-            .addAction(0, "Mute ${hub.name} 1h", mute)
-            .build()
-        manager.notify(key.notificationId, notification)
-        postSummary(hub)
+        if (notice.openTerminal) {
+            // Activity launches from the lock screen ask for unlock first.
+            val terminal = PendingIntent.getActivity(
+                context,
+                key.notificationId xor TERMINAL_REQUEST,
+                Intent(Intent.ACTION_VIEW, terminalUri(key), context, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            notification.addAction(0, "Open terminal", terminal)
+        }
+        return notification.addAction(0, "Mute ${hub.name} 1h", mute).build()
     }
 
     @SuppressLint("MissingPermission") // checked by allowed()
@@ -137,5 +154,6 @@ class NotificationPoster(private val context: Context) : AgentNotifier {
     companion object {
         fun summaryId(hubId: String) = "summary|$hubId".hashCode()
         const val SERVICE_ID = 1
+        private const val TERMINAL_REQUEST = 0x7e4d
     }
 }

@@ -3,6 +3,7 @@ package dev.sessiontap.android.net
 import dev.sessiontap.android.crypto.SingleKeyManager
 import dev.sessiontap.android.crypto.sha256
 import dev.sessiontap.android.crypto.hex
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -35,7 +36,12 @@ class TestHub {
     fun keyManager() = SingleKeyManager("device", clientCert.keyPair.private, arrayOf(clientCert.certificate))
 
     /** Queues one connection whose frames go to [handle]; reply with [WebSocket.send]. */
-    fun enqueue(handle: (WebSocket, id: Int, method: String) -> Unit) {
+    fun enqueue(handle: (WebSocket, id: Int, method: String) -> Unit) = enqueueRequests { ws, obj ->
+        handle(ws, obj["id"]!!.jsonPrimitive.int, obj["method"]!!.jsonPrimitive.content)
+    }
+
+    /** Like [enqueue], with the whole request object (method, id, and params). */
+    fun enqueueRequests(handle: (WebSocket, JsonObject) -> Unit) {
         server.enqueue(
             MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {}
@@ -43,8 +49,7 @@ class TestHub {
                     webSocket.close(1000, null)
                 }
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    val obj = ProtocolJson.parseToJsonElement(text).jsonObject
-                    handle(webSocket, obj["id"]!!.jsonPrimitive.int, obj["method"]!!.jsonPrimitive.content)
+                    handle(webSocket, ProtocolJson.parseToJsonElement(text).jsonObject)
                 }
             }),
         )

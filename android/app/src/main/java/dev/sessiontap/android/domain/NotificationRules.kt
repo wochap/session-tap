@@ -21,6 +21,8 @@ data class AgentNotice(
     val body: String,
     val footer: String,
     val publicTitle: String,
+    /** Offer "Open terminal": needs attention, a live terminal, and the `control` scope. */
+    val openTerminal: Boolean = false,
 )
 
 sealed interface NotifyDecision {
@@ -40,6 +42,7 @@ object NotificationRules {
         hubName: String,
         settings: AlertSettings,
         muted: Boolean,
+        canControl: Boolean = false,
     ): NotifyDecision {
         val next = effectiveStatus(view)
         if (prev == next) return NotifyDecision.None
@@ -84,6 +87,7 @@ object NotificationRules {
                 body = summary,
                 footer = usageFooter(view.usage),
                 publicTitle = event,
+                openTerminal = channel == NotifyChannel.Attention && canControl && view.terminal != null,
             ),
         )
     }

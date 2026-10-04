@@ -9,6 +9,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
@@ -220,5 +221,78 @@ class HubClientTest {
         c.stop()
         assertTrue(waits.toString(), waits.last() <= 40)
         assertTrue(waits.toString(), waits[2] > waits[0])
+    }
+
+    @Test
+    fun terminalFramesRouteByStreamAndCloseOnLeave() = runBlocking {
+        val requests = Channel<JsonObject>(Channel.UNLIMITED)
+        hub.enqueueRequests { ws, req ->
+            requests.trySend(req)
+            val id = req["id"]!!.jsonPrimitive.content
+            when (req["method"]!!.jsonPrimitive.content) {
+                "hub.info" -> ws.send(hub.info(id.toInt(), scopes = listOf("read", "watch", "control")))
+                "listen" -> ws.send("""{"id":$id,"result":{}}""")
+                "terminal.open" -> {
+                    val stream = if (req["params"]!!.jsonObject["invocation_id"]!!.jsonPrimitive.content == "a") 1 else 2
+                    ws.send("""{"id":$id,"result":{"stream":$stream}}""")
+                    ws.send("""{"type":"terminal","stream":$stream,"frame":{"type":"output","seq":1,"data":"${java.util.Base64.getEncoder().encodeToString("s$stream".toByteArray())}"}}""")
+                }
+                else -> ws.send("""{"id":$id,"result":{}}""")
+            }
+        }
+        val c = client(Recorder())
+        c.start()
+        withTimeout(10_000) {
+            c.state.first { it is ConnState.Live }
+            val a = c.openTerminal("host", "a")
+            val b = c.openTerminal("host", "b")
+            assertEquals("s1", (a.frames.receive() as TerminalFrame.Output).bytes.decodeToString())
+            assertEquals("s2", (b.frames.receive() as TerminalFrame.Output).bytes.decodeToString())
+            c.sendInput(a, TerminalInput.Keys(listOf("down", "1")))
+            c.sendInput(a, TerminalInput.Paste("see CI run 4821", enter = false))
+            c.closeTerminal(a)
+            val methods = mutableListOf<JsonObject>()
+            while (methods.none { it["method"]!!.jsonPrimitive.content == "terminal.close" }) methods += requests.receive()
+            val inputs = methods.filter { it["method"]!!.jsonPrimitive.content == "terminal.input" }.map { it["params"]!!.jsonObject }
+            assertEquals("""{"stream":1,"keys":["down","1"]}""", inputs[0].toString())
+            assertEquals("""{"stream":1,"paste":{"text":"see CI run 4821","enter":false}}""", inputs[1].toString())
+            val close = methods.last { it["method"]!!.jsonPrimitive.content == "terminal.close" }
+            assertEquals("""{"stream":1}""", close["params"].toString())
+            assertTrue(a.frames.isClosedForReceive)
+        }
+        c.stop()
+    }
+
+    @Test
+    fun terminalCallsFailOfflineWithoutConnection() = runBlocking {
+        val c = HubClient(hub.hubId, { listOf("127.0.0.1:1") }, null, Recorder(), scope, { HubTls.client(hub.hubId, hub.keyManager()) }, initialBackoffMs = 10_000)
+        val error = runCatching { c.openTerminal("host", "a") }.exceptionOrNull() as RpcException
+        assertEquals("offline", error.code)
+    }
+
+    @Test
+    fun terminalFramesCloseWhenConnectionDrops() = runBlocking {
+        hub.enqueueRequests { ws, req ->
+            val id = req["id"]!!.jsonPrimitive.content
+            when (req["method"]!!.jsonPrimitive.content) {
+                "hub.info" -> ws.send(hub.info(id.toInt(), scopes = listOf("read", "watch")))
+                "terminal.open" -> {
+                    ws.send("""{"id":$id,"result":{"stream":5}}""")
+                    ws.close(1001, "going away")
+                }
+                else -> ws.send("""{"id":$id,"result":{}}""")
+            }
+        }
+        val c = client(Recorder(), initialBackoffMs = 30_000)
+        c.start()
+        withTimeout(10_000) {
+            c.state.first { it is ConnState.Live }
+            val s = c.openTerminal("host", "a")
+            for (frame in s.frames) error("unexpected frame $frame")
+            val sendError = runCatching { c.sendInput(s, TerminalInput.Keys(listOf("enter"))) }.exceptionOrNull() as RpcException
+            // the dropped connection either is already gone (offline) or fails the send (closed)
+            assertTrue(sendError.code, sendError.code in setOf("offline", "closed"))
+        }
+        c.stop()
     }
 }
