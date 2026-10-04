@@ -178,3 +178,29 @@ After each successful connection whose server certificate matches the hub's pinn
 #### Scenario: Endpoint presents a different certificate
 - **WHEN** an endpoint presents a certificate whose SPKI hash differs from the stored hub ID
 - **THEN** the app sends it no request and stores no endpoint hints from it
+
+### Requirement: App shows requested and granted scopes
+While waiting for operator approval during pairing, the app SHALL list the scopes requested by the QR payload as chips labelled Read, Manage, Watch terminal, and Control terminal. The Control terminal chip SHALL use the amber warning style, and the screen SHALL show the line "Control terminal can type into agents, which can run commands on <hub name>." when `control` is requested. Each hub card on the Hubs screen SHALL show the hub's granted scopes, as last reported by `hub.info`, as compact chips in the order `read`, `manage`, `watch`, `control`, with `control` in the warning style. A scope name the app does not know SHALL be shown as its raw name. Onboarding copy SHALL describe the app as following sessions and, on hubs that allow it, answering agents in their live terminal.
+
+#### Scenario: Pairing requests control
+- **WHEN** the user scans a QR code whose requested scopes are `read`, `watch`, and `control`
+- **THEN** the waiting screen shows Read, Watch terminal, and an amber Control terminal chip, plus the warning line naming the hub
+
+#### Scenario: Default pairing
+- **WHEN** the user scans a QR code whose requested scopes are `read` and `manage`
+- **THEN** the waiting screen shows Read and Manage chips and no warning line
+
+#### Scenario: Hub card after pairing with terminal scopes
+- **WHEN** a hub reports the scopes `read`, `manage`, `watch`, and `control`
+- **THEN** its Hubs screen card shows four access chips in that order with `control` in the warning style
+
+### Requirement: App follows scope changes from the hub
+The app SHALL store the scopes from every `hub.info` result as the hub's granted scopes, so access shown in the app follows the hub's effective scopes. When the hub closes the connection with code `4403` (scope withdrawn), the app SHALL reconnect at once without backoff and take the new scopes from `hub.info`. When the granted scopes do not include `read`, the app SHALL NOT call `listen` for that hub. It SHALL then show the hub as connected without session access, with a re-pair action, and keep the connection open.
+
+#### Scenario: Scope withdrawn while listening
+- **WHEN** the hub closes a live connection with code `4403` after the device was re-paired with `read` only
+- **THEN** the app reconnects immediately, its Hubs card no longer shows Manage, and the session list keeps updating
+
+#### Scenario: Read scope removed
+- **WHEN** after a `4403` close the hub reports scopes without `read`
+- **THEN** the app does not call `listen`, keeps the connection, and shows the hub as having no session access with a re-pair action

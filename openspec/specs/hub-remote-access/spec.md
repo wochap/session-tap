@@ -51,11 +51,19 @@ The hub SHALL generate a private key and self-signed certificate on first remote
 - **THEN** the hub generates a new identity with a new hub ID, and previously paired devices fail certificate pinning until they pair again
 
 ### Requirement: Pairing opens a short single-use window
-`sessiontap-hub pair` SHALL ask the running service to open a pairing window and SHALL fail with a clear message when the service is not running or remote access is not configured. The window SHALL carry a fresh random 32-byte secret, SHALL expire after 120 seconds, and SHALL allow at most one successful pairing. The command SHALL render a terminal QR code whose payload is a versioned JSON object containing the hub name, the hub ID, endpoint hints, the requested scopes, the secret, and the expiry time. Endpoint hints SHALL be those defined by "Pairing endpoint hints reflect the current bind mode". Scopes SHALL default to `read` and `manage` and MAY be narrowed with `--scope`.
+`sessiontap-hub pair` SHALL ask the running service to open a pairing window and SHALL fail with a clear message when the service is not running or remote access is not configured. The window SHALL carry a fresh random 32-byte secret, SHALL expire after 120 seconds, and SHALL allow at most one successful pairing. The command SHALL render a terminal QR code whose payload is a versioned JSON object containing the hub name, the hub ID, endpoint hints, the requested scopes, the secret, and the expiry time. Endpoint hints SHALL be those defined by "Pairing endpoint hints reflect the current bind mode". Without `--scope` the requested scopes SHALL be `read` and `manage`. One or more `--scope` options SHALL replace that default with exactly the named scopes, expanded by the implications in "Devices hold scopes from a fixed set". An unknown scope name SHALL fail before any window opens, and the error SHALL list the valid scope names.
 
 #### Scenario: Operator starts pairing
 - **WHEN** the user runs `sessiontap-hub pair` while the service runs with remote access configured
-- **THEN** the terminal shows a QR code and a countdown, and the payload names the hub ID and all endpoint hints
+- **THEN** the terminal shows a QR code and a countdown, and the payload names the hub ID, all endpoint hints, and the scopes `read` and `manage`
+
+#### Scenario: Operator narrows scopes
+- **WHEN** the user runs `sessiontap-hub pair --scope read`
+- **THEN** the payload's requested scopes are exactly `read`
+
+#### Scenario: Unknown scope
+- **WHEN** the user runs `sessiontap-hub pair --scope write`
+- **THEN** the command fails naming `write` and listing `read`, `manage`, `watch`, and `control`, and no pairing window opens
 
 #### Scenario: Window expires
 - **WHEN** no device completes pairing within 120 seconds
@@ -284,3 +292,52 @@ The `hub.info` result SHALL include an `endpoints` array of `host:port` strings.
 #### Scenario: Read-only device asks for hub info
 - **WHEN** a paired device with only the `read` scope sends `hub.info`
 - **THEN** the result includes the `endpoints` list
+
+### Requirement: Devices hold scopes from a fixed set
+A paired device SHALL hold a subset of four scopes:
+
+- `read`: observe merged hub state (`listen`).
+- `manage`: change hub state, such as `forget`.
+- `watch`: view an agent's live terminal, read-only.
+- `control`: send input to an agent's live terminal.
+
+Scope requests SHALL be expanded before they are stored or shown: `control` SHALL add `watch`, and `watch` SHALL add `read`. Scopes SHALL be stored and reported in the fixed order `read`, `manage`, `watch`, `control`. `watch` and `control` SHALL never be part of a default scope set.
+
+#### Scenario: Control implies watch and read
+- **WHEN** the user runs `sessiontap-hub pair --scope control` on a hub with `remote.control: true`
+- **THEN** the payload's requested scopes are `read`, `watch`, and `control`, and the device is stored with those scopes after pairing
+
+#### Scenario: Default pairing grants no terminal access
+- **WHEN** the user runs `sessiontap-hub pair` on a hub with `remote.control: true`
+- **THEN** the device is stored with `read` and `manage` only
+
+### Requirement: Terminal scopes require remote control to be enabled
+The hub configuration SHALL accept a boolean `remote.control`, defaulting to `false`. While it is `false`:
+
+- `sessiontap-hub pair` SHALL refuse a request that includes `watch` or `control`, open no window, and name `remote.control` in its error.
+- The hub SHALL treat stored `watch` and `control` scopes as not granted when it authorizes a request.
+
+The device's effective scopes SHALL be its stored scopes, minus `watch` and `control` while `remote.control` is `false`. `hub.info` SHALL report the effective scopes. `sessiontap-hub devices` SHALL list stored scopes and SHALL mark `watch` and `control` as disabled while `remote.control` is `false`.
+
+#### Scenario: Terminal scope requested while disabled
+- **WHEN** the hub has no `remote.control` setting and the user runs `sessiontap-hub pair --scope watch`
+- **THEN** the command fails with a message naming `remote.control` and exits non-zero without opening a window
+
+#### Scenario: Remote control turned off after pairing
+- **WHEN** a device was paired with `read`, `watch`, and `control`, and the hub restarts with `remote.control: false`
+- **THEN** `hub.info` reports only `read` for that device, and `sessiontap-hub devices` lists `watch` and `control` as disabled
+
+#### Scenario: Remote control turned back on
+- **WHEN** the same hub restarts with `remote.control: true`
+- **THEN** `hub.info` reports `read`, `watch`, and `control` for that device without re-pairing
+
+### Requirement: Streams end when their scope is withdrawn
+Each long-lived remote stream SHALL depend on one scope: `listen` depends on `read`, and terminal streams (added by `hub-terminal-relay`) depend on `watch`. When a device's effective scopes change and no longer include the scope that one of its open streams depends on, the hub SHALL close each connection carrying such a stream with WebSocket close code `4403` and reason `scope withdrawn`. After the close, that connection SHALL send no further stream data. A connection whose open streams still have their scopes SHALL stay open. Revocation SHALL keep closing connections with code `4401`.
+
+#### Scenario: Re-pairing removes the read scope
+- **WHEN** a device with a live `listen` stream is re-paired with only the `manage` scope
+- **THEN** the hub closes that connection with code `4403`, and the device's next `listen` on a new connection is answered `forbidden`
+
+#### Scenario: Re-pairing keeps the needed scope
+- **WHEN** a device with a live `listen` stream is re-paired with `read` only, dropping `manage`
+- **THEN** the `listen` stream stays open and a later `forget` on that connection is answered `forbidden`
