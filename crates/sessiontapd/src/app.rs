@@ -11,7 +11,7 @@ use sessiontap_core::{
     config::{DaemonConfig, SinkConfig},
     domain::{
         ArtifactCollectionContext, InvocationId, InvocationSnapshot, MultiplexerMetadata,
-        NormalizedEvent, PublicAgentView, PublicStatus, StatusReasonContext, changed_public_fields,
+        NormalizedEvent, PublicAgentView, StatusReasonContext, changed_public_fields,
         project_public,
     },
     terminal::{EndReason, TerminalInput, error_code},
@@ -272,13 +272,10 @@ impl App {
                 TerminalError::new(error_code::TERMINAL_ENDED, "terminal stream ended").into(),
             );
         }
-        let status = project_public(&snapshot, None).status;
-        let (Some(metadata), Some(child_pid), true, false) = (
-            snapshot.multiplexer,
-            snapshot.process.child_pid,
-            snapshot.capabilities.terminal,
-            status == PublicStatus::Stopped,
-        ) else {
+        let live = snapshot.terminal_live();
+        let (Some(metadata), Some(child_pid), true) =
+            (snapshot.multiplexer, snapshot.process.child_pid, live)
+        else {
             return Err(TerminalError::new(
                 error_code::TERMINAL_UNAVAILABLE,
                 "no live terminal for this invocation",
@@ -386,10 +383,11 @@ impl App {
             .core
             .storage
             .reconcile(is_alive, retention_days, Some(&publish))?;
-        self.core.terminals.end_stopped(|id| {
-            self.core.storage.invocation(id).is_ok_and(|snapshot| {
-                project_public(&snapshot, None).status == PublicStatus::Stopped
-            })
+        self.core.terminals.end_not_live(|id| {
+            self.core
+                .storage
+                .invocation(id)
+                .is_ok_and(|snapshot| !snapshot.terminal_live())
         });
         Ok(changed)
     }

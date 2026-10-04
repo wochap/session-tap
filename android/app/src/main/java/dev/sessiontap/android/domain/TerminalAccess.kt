@@ -9,7 +9,8 @@ enum class TerminalLevel { None, View, Control }
 /**
  * The hub's effective scopes combined with the agent's `terminal` descriptor.
  * [available] is false when the agent has no live terminal (headless, not in a
- * multiplexer, or stopped); [digits] says whether digit quick-pick chips apply.
+ * multiplexer, or its process has exited); a finished turn keeps it available.
+ * [digits] says whether digit quick-pick chips apply.
  */
 data class TerminalAccess(val available: Boolean, val level: TerminalLevel, val digits: Boolean) {
     /** The device can open the terminal at all. */

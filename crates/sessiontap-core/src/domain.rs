@@ -365,11 +365,9 @@ pub fn project_public(
         usage: snapshot.usage.clone(),
         repository: snapshot.repository.clone(),
         children: project_children(&snapshot.children),
-        terminal: (snapshot.capabilities.terminal && status != PublicStatus::Stopped).then_some(
-            TerminalDescriptor {
-                quick_pick: snapshot.capabilities.terminal_policy.quick_pick,
-            },
-        ),
+        terminal: snapshot.terminal_live().then_some(TerminalDescriptor {
+            quick_pick: snapshot.capabilities.terminal_policy.quick_pick,
+        }),
     }
 }
 
@@ -634,6 +632,17 @@ pub struct InvocationSnapshot {
     pub turn_generation: u64,
     #[serde(skip)]
     pub completed_generation: Option<u64>,
+}
+
+impl InvocationSnapshot {
+    /// Whether the agent process still runs in a multiplexer pane that can be
+    /// streamed. A finished turn does not end the terminal; only process exit does.
+    pub fn terminal_live(&self) -> bool {
+        self.capabilities.terminal
+            && self.multiplexer.is_some()
+            && self.process.child_pid.is_some()
+            && matches!(self.lifecycle, Lifecycle::Alive | Lifecycle::Starting)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1019,7 +1028,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_descriptor_projects_from_capability_and_status() {
+    fn terminal_descriptor_projects_from_capability_and_liveness() {
         let mut snapshot: InvocationSnapshot =
             serde_json::from_str(include_str!("../tests/golden/pre-enum-tmux-snapshot.json"))
                 .unwrap();
@@ -1043,10 +1052,16 @@ mod tests {
             changed_public_fields(Some(&without), &with),
             BTreeSet::from([PublicField::Terminal])
         );
+        snapshot.activity = Activity::Stopped;
+        let finished_turn = project_public(&snapshot, None);
+        assert_eq!(finished_turn.status, PublicStatus::Stopped);
+        assert_eq!(finished_turn.terminal, with.terminal);
         snapshot.lifecycle = Lifecycle::Exited;
         let stopped = project_public(&snapshot, None);
         assert!(stopped.terminal.is_none());
         assert!(changed_public_fields(Some(&with), &stopped).contains(&PublicField::Terminal));
+        snapshot.lifecycle = Lifecycle::Lost;
+        assert!(project_public(&snapshot, None).terminal.is_none());
     }
 
     #[test]

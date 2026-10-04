@@ -3,7 +3,7 @@
 use crate::{
     app::{
         App, Collection, PublishConfig,
-        tests::{app as headless_app, snapshot},
+        tests::{app as headless_app, event, snapshot},
     },
     terminal::{TerminalError, Watcher},
 };
@@ -11,7 +11,10 @@ use anyhow::Result;
 use sessiontap_adapters::AdapterRegistry;
 use sessiontap_core::{
     config::{Config, DaemonConfig},
-    domain::{InvocationSnapshot, Lifecycle, MultiplexerBackend, MultiplexerMetadata, PublicField},
+    domain::{
+        EventKind, InvocationSnapshot, Lifecycle, MultiplexerBackend, MultiplexerMetadata,
+        PublicField, PublicStatus,
+    },
     terminal::{
         Cursor, EndReason, InputUnavailable, Key, QuickPick, TerminalDescriptor, TerminalFrame,
         TerminalInput, error_code,
@@ -461,6 +464,45 @@ async fn public_view_carries_terminal_descriptor() {
     let headless = headless_app(Storage::memory().unwrap());
     headless.register(snapshot(), "credential").unwrap();
     assert!(headless.status().unwrap().1[0].terminal.is_none());
+}
+
+#[tokio::test]
+async fn finished_turn_keeps_terminal_open() {
+    let fake = Fake::new();
+    let (app, initial) = registered(&fake);
+    let id = &initial.invocation_id;
+    let mut watcher = app.terminal_watch(id).unwrap();
+    assert!(matches!(
+        next(&mut watcher).await,
+        Some(TerminalFrame::Snapshot { .. })
+    ));
+    for (event_id, kind) in [("turn", EventKind::NewTurn), ("stop", EventKind::Completed)] {
+        app.ingest_hook(
+            initial.provider.clone(),
+            id.clone(),
+            "credential".into(),
+            event(&initial, event_id, kind),
+            None,
+            None,
+        )
+        .unwrap();
+    }
+    let view = app.status().unwrap().1.remove(0);
+    assert_eq!(view.status, PublicStatus::Stopped);
+    assert!(view.terminal.is_some());
+
+    app.reconcile(|_, _| true, 30).unwrap();
+    fake.push(PaneEvent::Output(b"still here".to_vec()));
+    assert!(matches!(
+        next(&mut watcher).await,
+        Some(TerminalFrame::Output { .. })
+    ));
+    let mut second = app.terminal_watch(id).unwrap();
+    assert!(matches!(
+        next(&mut second).await,
+        Some(TerminalFrame::Snapshot { .. })
+    ));
+    app.terminal_input(id, &keys("1")).unwrap();
 }
 
 mod relay {

@@ -325,14 +325,15 @@ impl Terminals {
         }
     }
 
-    /// Ends sessions whose invocation `is_stopped` reports as stopped.
-    pub fn end_stopped(&self, is_stopped: impl Fn(&InvocationId) -> bool) {
+    /// Ends sessions whose agent process `is_not_live` reports as no longer
+    /// running in its pane. A finished turn keeps the session open.
+    pub fn end_not_live(&self, is_not_live: impl Fn(&InvocationId) -> bool) {
         let ids: Vec<_> = self
             .sessions
             .lock()
             .expect("terminal sessions")
             .keys()
-            .filter(|id| is_stopped(id))
+            .filter(|id| is_not_live(id))
             .cloned()
             .collect();
         for id in ids {
