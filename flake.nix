@@ -8,6 +8,36 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
       version = (nixpkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
+
+      androidPkgs = import nixpkgs {
+        inherit system;
+        config = { allowUnfree = true; android_sdk.accept_license = true; };
+      };
+      androidBuildTools = "36.0.0";
+      androidComposition = emulator: androidPkgs.androidenv.composeAndroidPackages ({
+        platformVersions = [ "36" ];
+        buildToolsVersions = [ androidBuildTools ];
+        includeEmulator = emulator;
+        includeSystemImages = emulator;
+        includeSources = false;
+        includeNDK = false;
+      } // nixpkgs.lib.optionalAttrs emulator {
+        systemImageTypes = [ "google_apis" ];
+        abiVersions = [ "x86_64" ];
+      });
+      androidShell = emulator:
+        let
+          sdk = (androidComposition emulator).androidsdk;
+          sdkRoot = "${sdk}/libexec/android-sdk";
+        in androidPkgs.mkShell {
+          packages = [ sdk androidPkgs.jdk21 androidPkgs.android-tools ]
+            # test-hub.sh drives an isolated hub through its socket and ingestion port.
+            ++ nixpkgs.lib.optionals emulator (with androidPkgs; [ curl jq socat cargo rustc pkg-config openssl sqlite ]);
+          ANDROID_HOME = sdkRoot;
+          ANDROID_SDK_ROOT = sdkRoot;
+          JAVA_HOME = androidPkgs.jdk21.home;
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/${androidBuildTools}/aapt2";
+        };
     in {
       packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
         pname = "sessiontap";
@@ -40,8 +70,12 @@
         program = "${self.packages.${system}.default}/bin/sessiontap";
       };
 
-      devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ cargo clippy rustc rustfmt pkg-config sqlite tmux cargo-deny cargo-audit ];
+      devShells.${system} = {
+        default = pkgs.mkShell {
+          packages = with pkgs; [ cargo clippy rustc rustfmt pkg-config sqlite tmux cargo-deny cargo-audit ];
+        };
+        android = androidShell false;
+        android-emulator = androidShell true;
       };
     };
 }

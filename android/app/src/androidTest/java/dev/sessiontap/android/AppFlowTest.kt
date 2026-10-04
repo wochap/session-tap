@@ -1,0 +1,367 @@
+package dev.sessiontap.android
+
+import android.app.NotificationManager
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.core.app.NotificationCompat
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
+import org.junit.After
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.FixMethodOrder
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
+import java.util.regex.Pattern
+
+/**
+ * End-to-end flow against the live test hubs (android/scripts/test-hub.sh, TEST_HUB=1 and 2)
+ * through android/scripts/test-control.py. Methods run in name order and share app state:
+ * onboarding on a fresh install, pairing, then the paired screens.
+ */
+@OptIn(ExperimentalTestApi::class)
+@RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
+class AppFlowTest {
+    @get:Rule
+    val compose = createEmptyComposeRule()
+
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val context = instrumentation.targetContext
+    private val device = UiDevice.getInstance(instrumentation)
+    private var scenario: ActivityScenario<MainActivity>? = null
+
+    @Before
+    fun setUp() {
+        assumeTrue("test-control.py is not reachable on 10.0.2.2:8930", Control.available())
+    }
+
+    @After
+    fun tearDown() {
+        // A notification content intent can move the activity to another task; closing then times out.
+        runCatching { scenario?.close() }
+    }
+
+    private fun launch(uri: Uri? = null) {
+        val intent = Intent(context, MainActivity::class.java)
+        if (uri != null) intent.setAction(Intent.ACTION_VIEW).setData(uri)
+        scenario = ActivityScenario.launch(intent)
+        waitFor(what = "compose hierarchy") {
+            runCatching { compose.onAllNodes(androidx.compose.ui.test.isRoot()).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
+        }
+    }
+
+    private fun ComposeTestRule.waitTag(tag: String, timeout: Long = 15_000) =
+        waitUntilAtLeastOneExists(hasTestTag(tag), timeout)
+
+    private fun ComposeTestRule.waitText(text: String, timeout: Long = 15_000) =
+        waitUntilAtLeastOneExists(hasText(text, substring = true), timeout)
+
+    private fun ComposeTestRule.waitGone(tag: String, timeout: Long = 15_000) =
+        waitUntilDoesNotExist(hasTestTag(tag), timeout)
+
+    private fun pair(hub: Int, answer: String): String {
+        val link = Control.link(hub)
+        Control.bg(hub, "answer", answer)
+        launch(link)
+        val state = if (answer == "y") "pair:Paired" else "pair:Rejected"
+        compose.waitTag(state, 60_000)
+        return state
+    }
+
+    private fun activeTitles(): List<String> =
+        context.getSystemService(NotificationManager::class.java).activeNotifications
+            .mapNotNull { it.notification.extras.getCharSequence(NotificationCompat.EXTRA_TITLE)?.toString() }
+
+    private fun dumpsysHasTitle(title: String): Boolean =
+        shell("dumpsys notification --noredact").lines()
+            .any { "android.title=" in it && title in it }
+
+    private fun waitFor(timeoutMs: Long = 15_000, what: String, cond: () -> Boolean) {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            if (cond()) return
+            Thread.sleep(250)
+        }
+        throw AssertionError("timed out waiting for $what")
+    }
+
+    // 5.1 onboarding and permission checklist on a fresh install.
+    @Test
+    fun a01_onboardingAndPermissions() {
+        launch()
+        compose.waitText("Watch your coding agents from your pocket.")
+        compose.onNodeWithText("sessiontap-hub pair").assertExists()
+        screenshot("1a-welcome")
+        compose.onNodeWithTag("scan-qr").performClick()
+        compose.waitText("Before you scan")
+        listOf("perm:camera", "perm:notifications", "perm:battery").forEach { compose.onNodeWithTag(it).assertExists() }
+        compose.onNodeWithText("Tailscale", substring = true).assertExists()
+        screenshot("1b-permissions")
+
+        // Deny the camera: the row explains how to grant it later and does not block.
+        compose.onNodeWithText("To scan the pairing code").assertExists()
+        allow("perm:camera").performClick()
+        device.wait(Until.findObject(By.text(Pattern.compile("Don.t allow", Pattern.CASE_INSENSITIVE))), 10_000)!!.click()
+        compose.waitText("Denied · grant it later in Android settings")
+
+        // Grant notifications through the system dialog.
+        allow("perm:notifications").performClick()
+        device.wait(Until.findObject(By.text(Pattern.compile("^Allow$", Pattern.CASE_INSENSITIVE))), 10_000)!!.click()
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasText("So you hear when an agent is blocked")).fetchSemanticsNodes().isNotEmpty() &&
+                dev.sessiontap.android.notify.notificationsAllowed(context)
+        }
+
+        compose.onNodeWithTag("continue").performClick()
+        // The scan screen asks for the camera again; deny it to see the fallback.
+        // The dialog can appear late or after the first resume, so keep dismissing it while waiting.
+        waitFor(30_000, what = "app resumed") {
+            device.findObject(By.text(Pattern.compile("Don.t allow", Pattern.CASE_INSENSITIVE)))?.click()
+            runCatching { compose.onAllNodes(androidx.compose.ui.test.isRoot()).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
+        }
+        compose.waitText("Scan pairing code")
+        compose.onNodeWithText("Camera access is needed to scan the code.").assertExists()
+    }
+
+    private fun allow(tag: String) =
+        compose.onNode(hasText("Allow").and(androidx.compose.ui.test.hasAnyAncestor(hasTestTag(tag))))
+
+    // 5.2 pairing via the debug deep link: expired, rejected, accepted.
+    @Test
+    fun a02_pairExpired() {
+        launch(Control.link(1, expired = true))
+        compose.waitTag("pair:Expired")
+        compose.onNodeWithText("Pairing code expired").assertExists()
+        screenshot("3b-expired")
+    }
+
+    @Test
+    fun a03_pairRejected() {
+        pair(1, "n")
+        screenshot("3c-rejected")
+    }
+
+    @Test
+    fun a04_pairAccepted() {
+        pair(1, "y")
+        screenshot("3a-paired")
+        compose.onNodeWithTag("view-sessions").performClick()
+        compose.waitTag("row:Fix flaky auth tests")
+        assertTrue(Control.run(1, "hub", "devices").contains("read,manage"))
+    }
+
+    // 6.2 one hub: no hub chips, sections, children, filters.
+    @Test
+    fun a05_sessionsOneHub() {
+        Control.run(1, "snapshot")
+        launch()
+        compose.waitTag("row:Fix flaky auth tests")
+        compose.onNodeWithTag("hubchip:all").assertDoesNotExist()
+        compose.onNodeWithTag("section:attn").assertExists()
+        compose.onNodeWithTag("row:Provision dev box").assertExists()
+        compose.onNodeWithTag("row:Refactor billing webhooks").assertExists()
+        compose.onNodeWithText("Explore", substring = true).assertExists() // reason line names the child
+        compose.onNodeWithText("test-runner").assertDoesNotExist()
+        compose.onNodeWithTag("kids:Refactor billing webhooks").performClick()
+        compose.waitText("test-runner")
+        screenshot("1e-sessions")
+        compose.onNodeWithTag("kids:Refactor billing webhooks").performClick()
+        compose.waitUntilDoesNotExist(hasText("test-runner"), 5_000)
+
+        compose.onNodeWithTag("filter:Running").performClick()
+        compose.waitGone("row:Migrate to Vite 6")
+        compose.onNodeWithTag("row:Fix flaky auth tests").assertExists()
+        compose.onNodeWithTag("filter:Attention").performClick()
+        compose.waitGone("row:Fix flaky auth tests")
+        compose.onNodeWithTag("row:Provision dev box").assertExists()
+        compose.onNodeWithTag("filter:Stale").performClick()
+        compose.waitTag("empty:stale")
+        compose.onNodeWithTag("filter:All").performClick()
+        compose.waitTag("row:Triage open issues")
+
+        // Collapsing a section hides its rows.
+        compose.onNodeWithTag("section:attn").performClick()
+        compose.waitGone("row:Provision dev box")
+        compose.onNodeWithTag("section:attn").performClick()
+        compose.waitTag("row:Provision dev box")
+    }
+
+    // 6.3 detail for blocked-by-child and stopped.
+    @Test
+    fun a06_detail() {
+        launch()
+        compose.waitTag("row:Refactor billing webhooks")
+        compose.onNodeWithTag("row:Refactor billing webhooks").performClick()
+        compose.waitTag("detail")
+        compose.onNodeWithTag("status").assertTextContainsAny("Blocked", "Explore")
+        compose.onNodeWithText("feat/stripe-v2", substring = true).assertExists()
+        compose.onNodeWithText("Context window").performScrollTo().assertExists()
+        compose.onNodeWithText("42%").assertExists()
+        compose.onNodeWithText("test-runner", substring = true).performScrollTo().assertExists()
+        compose.onNodeWithTag("forget").assertDoesNotExist()
+        compose.onNodeWithText("Forget becomes available once this session stops.").performScrollTo().assertExists()
+        screenshot("1g-detail-child")
+        device.pressBack()
+
+        compose.waitTag("row:Migrate to Vite 6")
+        compose.onNodeWithTag("row:Migrate to Vite 6").performClick()
+        compose.waitTag("detail")
+        compose.onNodeWithTag("status").assertTextContainsAny("Completed")
+        compose.onNodeWithText("Done · 14 files changed").assertExists()
+        compose.onNodeWithTag("forget").performScrollTo().assertExists()
+        screenshot("1h-detail-stopped")
+    }
+
+    private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertTextContainsAny(vararg parts: String) {
+        val text = fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text }
+        parts.forEach { assertTrue("'$text' lacks '$it'", it in text) }
+    }
+
+    // 6.4 swipe to forget: undo sends nothing, expiry forgets on the hub.
+    @Test
+    fun a07_forgetUndoAndExpiry() {
+        val triage = "00000000-0000-4000-8004-000000000001"
+        Control.run(1, "snapshot")
+        launch()
+        compose.waitTag("row:Triage open issues")
+        compose.onNodeWithTag("row:Triage open issues").performTouchInput { swipeLeft() }
+        compose.waitText("Forgotten on TestHub")
+        compose.onNodeWithTag("row:Triage open issues").assertDoesNotExist()
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitTag("row:Triage open issues")
+        Thread.sleep(6_000)
+        assertTrue("undo must not forget", Control.listen(1).contains(triage))
+
+        compose.onNodeWithTag("row:Triage open issues").performTouchInput { swipeLeft() }
+        compose.waitText("Forgotten on TestHub")
+        compose.waitUntilDoesNotExist(hasText("Forgotten on TestHub"), 10_000)
+        waitFor(10_000, "hub to drop triage") { !Control.listen(1).contains(triage) }
+        compose.onNodeWithTag("row:Triage open issues").assertDoesNotExist()
+        // Running agents cannot be swiped away.
+        compose.onNodeWithTag("row:Fix flaky auth tests").performTouchInput { swipeLeft() }
+        Thread.sleep(500)
+        compose.onNodeWithText("Forgotten on TestHub").assertDoesNotExist()
+        Control.run(1, "snapshot")
+    }
+
+    // 6.6 alert toggles and per-hub mute suppress notifications.
+    @Test
+    fun a08_alertToggles() {
+        launch()
+        compose.waitTag("tab:Alerts")
+        compose.onNodeWithTag("tab:Alerts").performClick()
+        compose.waitTag("toggle:Needs permission")
+        screenshot("1j-alerts")
+
+        fun reblock(hub: Int = 1) {
+            Control.run(hub, "post", "devbox", "running")
+            waitFor(what = "devbox notification cancelled") { !dumpsysHasTitle("Provision dev box") }
+            Control.run(hub, "post", "devbox", "approval")
+            Thread.sleep(2_000)
+        }
+
+        reblock()
+        assertTrue("approval notifies", dumpsysHasTitle("Provision dev box"))
+
+        compose.onNodeWithTag("toggle:Needs permission").performClick()
+        Thread.sleep(500)
+        reblock()
+        assertFalse("permission toggle off suppresses", dumpsysHasTitle("Provision dev box"))
+        compose.onNodeWithTag("toggle:Needs permission").performClick()
+        Thread.sleep(500)
+
+        compose.onNodeWithTag("mute:TestHub").performClick()
+        compose.onNodeWithText("Mute for 1 hour").performClick()
+        compose.waitText("Muted until")
+        reblock()
+        assertFalse("muted hub is silent", dumpsysHasTitle("Provision dev box"))
+        compose.onNodeWithTag("mute:TestHub").performClick()
+        compose.waitText("Alerts on")
+        reblock()
+        assertTrue("unmuted hub notifies again", dumpsysHasTitle("Provision dev box"))
+    }
+
+    // 6.7 the notification content intent opens the session detail.
+    @Test
+    fun a09_notificationOpensDetail() {
+        launch()
+        compose.waitTag("tab:Hubs")
+        compose.onNodeWithTag("tab:Hubs").performClick()
+        compose.waitTag("hub:TestHub")
+        waitFor(what = "devbox notification") { "Provision dev box" in activeTitles() }
+        val sbn = context.getSystemService(NotificationManager::class.java).activeNotifications
+            .first { it.notification.extras.getCharSequence(NotificationCompat.EXTRA_TITLE)?.toString() == "Provision dev box" }
+        sbn.notification.contentIntent.send()
+        compose.waitTag("detail")
+        compose.onNodeWithText("Provision dev box").assertExists()
+        compose.onNodeWithTag("status").assertTextContainsAny("Blocked", "permission")
+        // Bottom nav attention badge on the Sessions tab.
+        device.pressBack()
+        compose.waitUntilAtLeastOneExists(
+            hasTestTag("tab:Sessions").and(
+                androidx.compose.ui.test.SemanticsMatcher.expectValue(
+                    androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "2 need attention",
+                ),
+            ),
+            15_000,
+        )
+    }
+
+    // 6.2 two hubs: chips and per-hub sections.
+    @Test
+    fun a10_sessionsTwoHubs() {
+        pair(2, "y")
+        compose.onNodeWithTag("view-sessions").performClick()
+        compose.waitTag("hubchip:TestHub2", 30_000)
+        compose.onNodeWithTag("hubchip:all").assertExists()
+        compose.onNodeWithTag("hubchip:TestHub").assertExists()
+        compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("row:Fix flaky auth tests")).fetchSemanticsNodes().size == 2 }
+        assertTrue(compose.onAllNodes(hasTestTag("section:attn")).fetchSemanticsNodes().size == 1)
+        assertTrue(compose.onAllNodes(hasText("· live", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        screenshot("3e-two-hubs")
+        compose.onNodeWithTag("hubchip:TestHub2").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("row:Fix flaky auth tests")).fetchSemanticsNodes().size == 1 }
+        compose.onNodeWithTag("hubchip:all").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("row:Fix flaky auth tests")).fetchSemanticsNodes().size == 2 }
+    }
+
+    // 6.5 hubs screen: revoked state after `sessiontap-hub revoke`, then unpair.
+    @Test
+    fun a11_hubsRevokedAndUnpair() {
+        launch()
+        compose.waitTag("tab:Hubs")
+        compose.onNodeWithTag("tab:Hubs").performClick()
+        compose.waitTag("hub:TestHub2")
+        compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("conn:TestHub2").and(hasText("live"))).fetchSemanticsNodes().isNotEmpty() }
+        screenshot("1i-hubs")
+        val deviceId = Control.run(2, "hub", "devices").lines().drop(1).first { it.isNotBlank() }.substringBefore(' ')
+        Control.run(2, "hub", "revoke", deviceId)
+        compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("conn:TestHub2").and(hasText("revoked"))).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Pair again").assertExists()
+        screenshot("3h-revoked")
+        compose.onNodeWithTag("unpair:TestHub2").performScrollTo().performClick()
+        compose.onNodeWithTag("confirm-unpair").performClick()
+        compose.waitGone("hub:TestHub2")
+        compose.onNodeWithTag("hub:TestHub").assertExists()
+    }
+}

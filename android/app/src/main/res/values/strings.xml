@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">SessionTap</string>
+    <string name="fgs_subtype">Live connection to the user\'s own SessionTap hubs</string>
+</resources>

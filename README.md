@@ -209,7 +209,8 @@ description/command, final assistant response, or an allowlisted failure
 category. Sinks are disabled by default and are trusted, operator-controlled
 observers; HTTP sinks require HTTPS except loopback development receivers. See
 `docs/cli.md` for sink and custom-adapter configuration, and
-`docs/smoke-tests.md` for live provider testing.
+`docs/smoke-tests.md` for live provider testing. The Android companion app is
+documented in `android/README.md`.
 
 Snapshot envelopes are non-notifying baselines. Updates contain the complete
 resulting view and a deterministic non-empty set of changed public field paths.

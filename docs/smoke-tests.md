@@ -46,3 +46,19 @@ For each of `claude`, `codex`, and `qwen`:
 
 Record provider version, Linux distribution, Wayland compositor, date, and
 pass/fail; never commit account data or raw event payloads.
+
+## Android companion (phone only)
+
+The emulator checks in `android/README.md` cover the app flows. These checks
+need a real phone and a hub with a `remote` section:
+
+1. Camera QR scan: run `sessiontap-hub pair`, scan the code from the app,
+   compare fingerprints, answer `y`, and verify the hub appears as connected.
+2. Tailnet endpoint over mobile data: turn Wi-Fi off, keep Tailscale on, and
+   verify the Hubs screen shows the tailnet endpoint in use and sessions update.
+3. Wi-Fi off/on reconnect: toggle Wi-Fi and verify the hub reconnects within a
+   few seconds without restarting the app, and a block that happened meanwhile
+   notifies.
+4. OEM background kill recovery: swipe the app away, wait at least 30 minutes
+   with the screen off, then trigger an approval prompt and verify the
+   notification arrives. Record the phone model and Android version.

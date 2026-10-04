@@ -589,6 +589,18 @@ mod tests {
         ));
     }
 
+    /// Shared with the Android app's `PinningTest`; both sides must agree.
+    #[test]
+    fn pairing_vector_matches_android() {
+        let secret: Vec<u8> = (0..32).collect();
+        let mac = pair_mac(&secret, b"hub-spki", b"device-spki", &[0xaa; 32]);
+        assert_eq!(
+            hex::encode(mac),
+            "e7bfbc2f5bb0ccb26433c010b012b0d2cb34cf81b76b2f80c7328371011ff41f"
+        );
+        assert_eq!(fingerprint(b"device-spki"), "781b1751 7a877c9a 5199a93c 45e3a9b7");
+    }
+
     #[test]
     fn fingerprint_has_four_groups() {
         let fp = fingerprint(b"spki");
