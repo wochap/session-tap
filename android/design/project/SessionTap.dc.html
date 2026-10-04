@@ -31,7 +31,7 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 <section class="dv-turn" id="t0" style="padding-bottom:8px">
 <div style="max-width:880px;display:flex;flex-direction:column;gap:10px">
 <div style="font-size:30px;font-weight:500;letter-spacing:-0.02em">SessionTap</div>
-<div style="font-size:14px;color:var(--color-neutral-400);text-wrap:pretty">Read-only Android monitor for coding agents across paired hubs. Material 3 structure (top app bar, chips, nav bar, switches, dialogs, notification templates) skinned with Nocturne tokens; status color is the only saturated color. Every phone is live — tap rows, chips, section headers, the agent badge, swipe stopped rows left, and use the nav bar.</div>
+<div style="font-size:14px;color:var(--color-neutral-400);text-wrap:pretty">Android monitor for coding agents across paired hubs, plus a live view of each agent's terminal on hubs that grant Watch, and replies on hubs that grant Control. Material 3 structure (top app bar, chips, nav bar, switches, dialogs, notification templates) skinned with Nocturne tokens; status color is the only saturated color. Every phone is live — tap rows, chips, section headers, the agent badge, swipe stopped rows left, and use the nav bar.</div>
 <div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--color-neutral-500)">
 <span>Assumptions: amber/red/green status hues added in OKLCH (not in Nocturne)</span><span>Provider marks are letter placeholders until real icons</span><span>Light theme derived from Nocturne neutral ramps</span>
 </div>
@@ -39,15 +39,20 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 </section>
 
 <section class="dv-turn" id="t6">
-<div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Live terminal · entry &amp; core states</span><span class="dv-tsub">The terminal is only ever the agent — no shell tab, no "+". Terminal phones are live: ↑↓ Enter, quick-picks, Ctrl+C ×2, Shift+Tab, send / long-press send, double-tap to zoom.</span></div>
+<div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Live terminal · entry &amp; core states</span><span class="dv-tsub">The terminal is only ever the agent — no shell tab, no "+". Terminal phones are live: ↑↓ Enter, quick-picks, Ctrl+C ×2, Shift+Tab, Space/⌫, Paste → field, send / long-press send, double-tap 9sp ⇄ fit, scroll up for Jump to live.</span></div>
 <div class="dv-opts">
 <div class="dv-opt" id="6a"><div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Detail · control → Open terminal</div><dc-import name="STPhone" screen="detail" detail="s1" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6b"><div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>Detail · watch only → View terminal</div><dc-import name="STPhone" screen="detail" detail="s6" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6c"><div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Detail · no terminal scope</div><dc-import name="STPhone" screen="detail" detail="s10" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6d"><div class="dv-olabel"><a class="dv-oid" href="#6d">6d</a>Detail · headless, no entry</div><dc-import name="STPhone" screen="detail" detail="s5" theme="dark" hint-size="432px,935px"></dc-import></div>
-<div class="dv-opt" id="6e"><div class="dv-olabel"><a class="dv-oid" href="#6e">6e</a>Terminal · waiting for you</div><dc-import name="STTerminal" state="waiting" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6e"><div class="dv-olabel"><a class="dv-oid" href="#6e">6e</a>Terminal · waiting for approval (opens at 9sp, pans to cursor)</div><dc-import name="STTerminal" state="waiting" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6f"><div class="dv-olabel"><a class="dv-oid" href="#6f">6f</a>Terminal · running</div><dc-import name="STTerminal" state="live" theme="dark" hint-size="432px,935px"></dc-import></div>
-<div class="dv-opt" id="6g"><div class="dv-olabel"><a class="dv-oid" href="#6g">6g</a>Terminal · 100% zoom, pan sideways</div><dc-import name="STTerminal" state="waiting" zoom="100" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6g"><div class="dv-olabel"><a class="dv-oid" href="#6g">6g</a>Terminal · fit-to-width (other chip state)</div><dc-import name="STTerminal" state="waiting" zoom="fit" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6l"><div class="dv-olabel"><a class="dv-oid" href="#6l">6l</a>Waiting for input · open question</div><dc-import name="STTerminal" state="input" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6m"><div class="dv-olabel"><a class="dv-oid" href="#6m">6m</a>Waiting · multi-select menu</div><dc-import name="STTerminal" state="multi" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6n"><div class="dv-olabel"><a class="dv-oid" href="#6n">6n</a>Keyboard open · waiting for input</div><dc-import name="STTerminal" state="input" kb="{{ yes }}" draft="match the gateway, 5s" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6o"><div class="dv-olabel"><a class="dv-oid" href="#6o">6o</a>Keyboard open · running</div><dc-import name="STTerminal" state="live" kb="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6p"><div class="dv-olabel"><a class="dv-oid" href="#6p">6p</a>Scrolled up · Jump to live</div><dc-import name="STTerminal" state="live" scrolled="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6h"><div class="dv-olabel"><a class="dv-oid" href="#6h">6h</a>Watch only</div><dc-import name="STTerminal" state="watch" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6i"><div class="dv-olabel"><a class="dv-oid" href="#6i">6i</a>Temporarily view only · agent suspended, pane still live</div><dc-import name="STTerminal" state="paused" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="6k"><div class="dv-olabel"><a class="dv-oid" href="#6k">6k</a>Temporarily view only · desktop scrolling</div><dc-import name="STTerminal" state="scrolling" theme="dark" hint-size="432px,935px"></dc-import></div>
@@ -60,11 +65,11 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 <div class="dv-opts">
 <div class="dv-opt" id="7a"><div class="dv-olabel"><a class="dv-oid" href="#7a">7a</a>Opening</div><dc-import name="STTerminal" state="opening" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="7b"><div class="dv-olabel"><a class="dv-oid" href="#7b">7b</a>Reconnecting · reply kept</div><dc-import name="STTerminal" state="reconnecting" theme="dark" hint-size="432px,935px"></dc-import></div>
-<div class="dv-opt" id="7c"><div class="dv-olabel"><a class="dv-oid" href="#7c">7c</a>Catching up</div><dc-import name="STTerminal" state="catching" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7c"><div class="dv-olabel"><a class="dv-oid" href="#7c">7c</a>Catching up · desktop resized, chip shows 132×38</div><dc-import name="STTerminal" state="catching" cols="{{ c132 }}" rows="{{ r38 }}" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="7d"><div class="dv-olabel"><a class="dv-oid" href="#7d">7d</a>Error · access revoked</div><dc-import name="STTerminal" state="revoked" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="7e"><div class="dv-olabel"><a class="dv-oid" href="#7e">7e</a>Error · hub unreachable</div><dc-import name="STTerminal" state="unreachable" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="7f"><div class="dv-olabel"><a class="dv-oid" href="#7f">7f</a>Source doesn't allow control</div><dc-import name="STTerminal" state="nocontrol" theme="dark" hint-size="432px,935px"></dc-import></div>
-<div class="dv-opt" id="7g"><div class="dv-olabel"><a class="dv-oid" href="#7g">7g</a>Safety refusal · pane no longer the agent</div><dc-import name="STTerminal" state="mismatch" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7g"><div class="dv-olabel"><a class="dv-oid" href="#7g">7g</a>Safety · pane identity changed</div><dc-import name="STTerminal" state="mismatch" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="7h"><div class="dv-olabel"><a class="dv-oid" href="#7h">7h</a>Ended · pane closed on desktop</div><dc-import name="STTerminal" state="ended" end="closed" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="7i"><div class="dv-olabel"><a class="dv-oid" href="#7i">7i</a>Landscape · waiting for you (fit = 120 cols at ~12.5sp)</div><dc-import name="STTerminal" state="waiting" orient="landscape" theme="dark" hint-size="935px,432px"></dc-import></div>
 <div class="dv-opt" id="7j"><div class="dv-olabel"><a class="dv-oid" href="#7j">7j</a>Landscape · running</div><dc-import name="STTerminal" state="live" orient="landscape" theme="dark" hint-size="935px,432px"></dc-import></div>
@@ -85,7 +90,7 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 <section class="dv-turn" id="t9">
 <div class="dv-thd"><a class="dv-tid" href="#t9">9</a><span class="dv-tname">Terminal · light key frames</span></div>
 <div class="dv-opts">
-<div class="dv-opt" id="9a"><div class="dv-olabel"><a class="dv-oid" href="#9a">9a</a>Waiting for you</div><dc-import name="STTerminal" state="waiting" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="9a"><div class="dv-olabel"><a class="dv-oid" href="#9a">9a</a>Waiting for approval · terminal stays dark</div><dc-import name="STTerminal" state="waiting" theme="light" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="9b"><div class="dv-olabel"><a class="dv-oid" href="#9b">9b</a>Ended · tmux stopped</div><dc-import name="STTerminal" state="ended" end="tmux" theme="light" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="9c"><div class="dv-olabel"><a class="dv-oid" href="#9c">9c</a>Pair confirm · scopes</div><dc-import name="STPhone" screen="pair" pair="waiting" theme="light" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="9d"><div class="dv-olabel"><a class="dv-oid" href="#9d">9d</a>Landscape · light</div><dc-import name="STTerminal" state="waiting" orient="landscape" theme="light" hint-size="935px,432px"></dc-import></div>
@@ -144,11 +149,11 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 </section>
 
 <section class="dv-turn" id="t4">
-<div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Android notifications</span><span class="dv-tsub">read-only: actions open or mute, never approve</span></div>
+<div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Android notifications</span><span class="dv-tsub">Open terminal (Control scope) appears on heads-up and shade only, never on the redacted lock screen</span></div>
 <div class="dv-opts">
 <div class="dv-opt" id="4a"><div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Heads-up · needs permission</div><dc-import name="STPhone" screen="sessions" headsup="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="4b"><div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Shade · expanded, grouped per hub, finished, service</div><dc-import name="STPhone" screen="shade" theme="dark" hint-size="432px,935px"></dc-import></div>
-<div class="dv-opt" id="4c"><div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Lock screen · redacted</div><dc-import name="STPhone" screen="lock" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="4c"><div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Lock screen · redacted, no terminal action</div><dc-import name="STPhone" screen="lock" theme="dark" hint-size="432px,935px"></dc-import></div>
 <div class="dv-opt" id="4d"><div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Shade · light</div><dc-import name="STPhone" screen="shade" theme="light" hint-size="432px,935px"></dc-import></div>
 </div>
 </section>
@@ -164,7 +169,7 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  renderVals() { return { one: 1, three: 3, yes: true }; }
+  renderVals() { return { one: 1, three: 3, yes: true, c132: 132, r38: 38 }; }
 }
 </script>
 </body>

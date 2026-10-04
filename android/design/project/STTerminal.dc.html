@@ -13,10 +13,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
 <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
 <style>
-[data-stroot]{--st-bg:color-mix(in oklab,var(--color-bg) 72%,#000);--st-surf:color-mix(in oklab,var(--color-bg) 92%,var(--color-surface));--st-surf2:var(--color-surface);--st-line:color-mix(in srgb,var(--color-text) 9%,transparent);--st-text:var(--color-text);--st-mute:var(--color-neutral-500);--st-dim:var(--color-neutral-700);--st-acc:var(--color-accent);--st-acc-ink:var(--color-accent-300);--st-acc-tint:color-mix(in oklab,var(--color-accent) 14%,transparent);--st-ind:var(--color-accent-900);--st-run:oklch(0.80 0.14 75);--st-block:oklch(0.69 0.19 25);--st-ok:oklch(0.76 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.69 0.19 25) 10%,transparent);--st-inv:var(--color-neutral-200);--st-inv-text:var(--color-neutral-900);--st-inv-acc:var(--color-accent-700);--st-mono:"JetBrains Mono",ui-monospace,monospace;
---a-bg:color-mix(in oklab,var(--color-bg) 55%,#000);--a-fg:oklch(0.93 0.006 275);--a-k:oklch(0.34 0.02 275);--a-r:oklch(0.68 0.16 22);--a-g:oklch(0.76 0.13 150);--a-y:oklch(0.83 0.12 85);--a-b:oklch(0.72 0.11 255);--a-m:oklch(0.72 0.12 288);--a-c:oklch(0.78 0.09 205);--a-w:oklch(0.84 0.01 275);--a-K:oklch(0.52 0.02 275);--a-R:oklch(0.76 0.15 22);--a-G:oklch(0.84 0.12 150);--a-Y:oklch(0.90 0.11 90);--a-B:oklch(0.80 0.10 255);--a-M:oklch(0.80 0.11 288);--a-C:oklch(0.86 0.08 205);--a-W:oklch(0.97 0.005 275);--a-rbg:color-mix(in oklab,oklch(0.68 0.16 22) 16%,transparent);--a-gbg:color-mix(in oklab,oklch(0.76 0.13 150) 14%,transparent)}
-[data-st="light"]{--st-bg:var(--color-neutral-100);--st-surf:color-mix(in oklab,var(--color-neutral-100) 45%,var(--color-neutral-200));--st-surf2:var(--color-neutral-200);--st-line:color-mix(in srgb,var(--color-neutral-900) 11%,transparent);--st-text:var(--color-neutral-900);--st-mute:var(--color-neutral-600);--st-dim:var(--color-neutral-400);--st-acc:var(--color-accent-600);--st-acc-ink:var(--color-accent-700);--st-acc-tint:color-mix(in oklab,var(--color-accent-500) 14%,transparent);--st-ind:var(--color-accent-200);--st-run:oklch(0.64 0.15 65);--st-block:oklch(0.56 0.2 25);--st-ok:oklch(0.56 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.56 0.2 25) 8%,transparent);
---a-bg:oklch(0.985 0.003 275);--a-fg:oklch(0.27 0.02 275);--a-k:oklch(0.30 0.02 275);--a-r:oklch(0.52 0.18 25);--a-g:oklch(0.50 0.13 150);--a-y:oklch(0.56 0.12 70);--a-b:oklch(0.50 0.13 255);--a-m:oklch(0.50 0.15 288);--a-c:oklch(0.52 0.09 210);--a-w:oklch(0.72 0.01 275);--a-K:oklch(0.56 0.02 275);--a-R:oklch(0.60 0.17 25);--a-G:oklch(0.62 0.13 150);--a-Y:oklch(0.68 0.12 80);--a-B:oklch(0.58 0.12 255);--a-M:oklch(0.58 0.13 288);--a-C:oklch(0.62 0.09 210);--a-W:oklch(0.20 0.02 275);--a-rbg:color-mix(in oklab,oklch(0.52 0.18 25) 10%,transparent);--a-gbg:color-mix(in oklab,oklch(0.50 0.13 150) 10%,transparent)}
+[data-stroot]{--st-bg:color-mix(in oklab,var(--color-bg) 72%,#000);--st-surf:color-mix(in oklab,var(--color-bg) 92%,var(--color-surface));--st-surf2:var(--color-surface);--st-line:color-mix(in srgb,var(--color-text) 9%,transparent);--st-text:var(--color-text);--st-mute:var(--color-neutral-500);--st-dim:var(--color-neutral-700);--st-acc:var(--color-accent);--st-acc-ink:var(--color-accent-300);--st-acc-tint:color-mix(in oklab,var(--color-accent) 14%,transparent);--st-ind:var(--color-accent-900);--st-run:oklch(0.80 0.14 75);--st-block:oklch(0.69 0.19 25);--st-ok:oklch(0.76 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.69 0.19 25) 10%,transparent);--st-mono:"JetBrains Mono",ui-monospace,monospace;
+--a-bg:color-mix(in oklab,var(--color-bg) 55%,#000);--a-fg:oklch(0.93 0.006 275);--a-k:oklch(0.34 0.02 275);--a-r:oklch(0.68 0.16 22);--a-g:oklch(0.76 0.13 150);--a-y:oklch(0.83 0.12 85);--a-b:oklch(0.72 0.11 255);--a-m:oklch(0.72 0.12 288);--a-c:oklch(0.78 0.09 205);--a-w:oklch(0.84 0.01 275);--a-K:oklch(0.52 0.02 275);--a-R:oklch(0.76 0.15 22);--a-G:oklch(0.84 0.12 150);--a-Y:oklch(0.90 0.11 90);--a-B:oklch(0.80 0.10 255);--a-M:oklch(0.80 0.11 288);--a-C:oklch(0.86 0.08 205);--a-W:oklch(0.97 0.005 275);--a-rbg:color-mix(in oklab,oklch(0.68 0.16 22) 16%,transparent);--a-gbg:color-mix(in oklab,oklch(0.76 0.13 150) 14%,transparent);--a-chip:color-mix(in oklab,oklch(0.93 0.006 275) 11%,color-mix(in oklab,var(--color-bg) 55%,#000));--a-ring:color-mix(in srgb,oklch(0.93 0.006 275) 14%,transparent)}
+[data-st="light"]{--st-bg:var(--color-neutral-100);--st-surf:color-mix(in oklab,var(--color-neutral-100) 45%,var(--color-neutral-200));--st-surf2:var(--color-neutral-200);--st-line:color-mix(in srgb,var(--color-neutral-900) 11%,transparent);--st-text:var(--color-neutral-900);--st-mute:var(--color-neutral-600);--st-dim:var(--color-neutral-400);--st-acc:var(--color-accent-600);--st-acc-ink:var(--color-accent-700);--st-acc-tint:color-mix(in oklab,var(--color-accent-500) 14%,transparent);--st-ind:var(--color-accent-200);--st-run:oklch(0.64 0.15 65);--st-block:oklch(0.56 0.2 25);--st-ok:oklch(0.56 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.56 0.2 25) 8%,transparent)}
 @keyframes st-spin{to{transform:rotate(360deg)}}
 @keyframes st-pulse{50%{opacity:.3}}
 </style>
@@ -54,7 +53,7 @@
 
 <div style="flex:1;min-height:0;position:relative;background:var(--a-bg)">
 <sc-if value="{{ showTerm }}" hint-placeholder-val="{{ true }}">
-<div ref="{{ termRef }}" onDoubleClick="{{ toggleZoom }}" style="position:absolute;inset:0;overflow:auto;scrollbar-width:none;padding:8px 6px;box-sizing:border-box;font-family:var(--st-mono);font-size:{{ fs }};line-height:1.3;color:var(--a-fg);opacity:{{ termOp }};filter:{{ termFilter }};transition:opacity .3s">
+<div ref="{{ termRef }}" onScroll="{{ onTermScroll }}" onDoubleClick="{{ toggleZoom }}" style="position:absolute;inset:0;overflow:auto;scrollbar-width:none;padding:8px 6px;box-sizing:border-box;font-family:var(--st-mono);font-size:{{ fs }};line-height:1.3;color:var(--a-fg);opacity:{{ termOp }};filter:{{ termFilter }};transition:opacity .3s">
 <div style="width:max-content;min-width:100%;min-height:100%;display:flex;flex-direction:column;justify-content:flex-end">
 <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="12">
 <div style="white-space:pre;height:1.3em"><sc-for list="{{ ln.segs }}" as="g"><span style="color:{{ g.c }};background:{{ g.bg }};font-weight:{{ g.w }}">{{ g.t }}</span></sc-for></div>
@@ -63,12 +62,12 @@
 </div>
 </sc-if>
 <sc-if value="{{ opening }}" hint-placeholder-val="{{ false }}">
-<div style="position:absolute;inset:0;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end;gap:7px;opacity:.9">
-<sc-for list="{{ skel }}" as="w"><span style="height:6px;border-radius:3px;background:var(--st-line);width:{{ w }}"></span></sc-for>
+<div style="position:absolute;inset:0;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end;gap:7px">
+<sc-for list="{{ skel }}" as="w"><span style="height:6px;border-radius:3px;background:var(--a-chip);width:{{ w }}"></span></sc-for>
 </div>
 <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
 <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:20px;background:var(--st-surf2);box-shadow:var(--shadow-md);font-size:13.5px">{{ arc }}Connecting to {{ hub }}…</div>
-<div style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">encrypted · LAN 192.168.1.24</div>
+<div style="font-family:var(--st-mono);font-size:11px;color:var(--a-K)">encrypted · LAN 192.168.1.24</div>
 </div>
 </sc-if>
 <sc-if value="{{ err }}" hint-placeholder-val="{{ false }}">
@@ -84,17 +83,20 @@
 </sc-if>
 <div style="position:absolute;top:6px;right:6px;display:flex;gap:4px;align-items:center">
 <sc-for list="{{ overlay }}" as="c">
-<div onClick="{{ c.onClick }}" style="display:flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:12px;background:color-mix(in oklab,var(--st-surf2) 88%,transparent);box-shadow:inset 0 0 0 1px var(--st-line);font:500 11px var(--st-mono);color:var(--st-mute);cursor:pointer;user-select:none">
+<div onClick="{{ c.onClick }}" style="display:flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:12px;background:var(--a-chip);box-shadow:inset 0 0 0 1px var(--a-ring);font:500 11px var(--st-mono);color:var(--a-w);cursor:pointer;user-select:none">
 <sc-if value="{{ c.spin }}">{{ arc }}</sc-if><sc-if value="{{ c.icon }}"><i class="{{ c.icon }}" style="font-size:12px"></i></sc-if>{{ c.label }}</div>
 </sc-for>
 </div>
+<sc-if value="{{ jump }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ jump.onClick }}" style="position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:17px;background:var(--color-accent-900);box-shadow:inset 0 0 0 1px var(--color-accent),var(--shadow-md);color:var(--color-accent-100);font:500 13px var(--font-body);cursor:pointer;white-space:nowrap;user-select:none"><i class="ph-bold ph-arrow-down" style="font-size:14px"></i>Jump to live<sc-if value="{{ jump.n }}"><span style="font:500 11.5px var(--st-mono);color:var(--color-accent-200)">{{ jump.n }}</span></sc-if></div>
+</sc-if>
 </div>
 </sc-if>
 
 <sc-if value="{{ isSheet }}" hint-placeholder-val="{{ false }}">
 <div style="padding:24px 28px 0;display:flex;flex-direction:column;gap:4px">
 <div style="font-size:18px;font-weight:500">{{ sheetTitle }}</div>
-<div style="font-size:12.5px;color:var(--st-mute)">Key bar, banners, strips, end cards, ANSI palette, gestures</div>
+<div style="font-size:12.5px;color:var(--st-mute)">Key bar, banners, strips, end cards, terminal palette, gestures</div>
 </div>
 </sc-if>
 
@@ -107,9 +109,9 @@
 <div style="padding:{{ b.pad }};flex-basis:{{ b.basis }};box-sizing:border-box">
 <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:8px 8px 8px 12px;min-height:44px;box-sizing:border-box;border-radius:12px;background:{{ b.bg }};box-shadow:inset 0 0 0 1px {{ b.ring }}">
 <i class="{{ b.icon }}" style="font-size:18px;color:{{ b.ic }};flex:none"></i>
-<div style="flex:1 1 180px;min-width:0"><div style="font-size:13px;font-weight:500">{{ b.title }}</div><sc-if value="{{ b.sub }}"><div style="font-size:12px;color:var(--st-mute)">{{ b.sub }}</div></sc-if></div>
-<sc-if value="{{ b.chips }}"><div style="display:flex;gap:6px;flex-wrap:wrap">
-<sc-for list="{{ b.chips }}" as="c"><button onClick="{{ c.onClick }}" style="height:40px;padding:0 12px;border-radius:10px;border:none;box-shadow:inset 0 0 0 1px var(--st-line);background:var(--st-bg);color:var(--st-text);display:flex;align-items:center;gap:8px;font:13px var(--font-body);cursor:pointer"><span style="font:600 13px var(--st-mono);color:var(--st-acc-ink)">{{ c.n }}</span>{{ c.label }}</button></sc-for>
+<div style="flex:1 1 150px;min-width:0"><div style="font-size:13px;font-weight:500">{{ b.title }}</div><sc-if value="{{ b.sub }}"><div style="font-size:12px;color:var(--st-mute)">{{ b.sub }}</div></sc-if></div>
+<sc-if value="{{ b.chips }}"><div style="display:flex;gap:6px">
+<sc-for list="{{ b.chips }}" as="c"><button onClick="{{ c.onClick }}" style="width:44px;height:44px;border-radius:10px;border:none;box-shadow:inset 0 0 0 1px var(--st-line);background:var(--st-bg);color:var(--st-acc-ink);font:600 16px var(--st-mono);display:flex;align-items:center;justify-content:center;cursor:pointer">{{ c.n }}</button></sc-for>
 </div></sc-if>
 </div>
 </div>
@@ -125,8 +127,8 @@
 <div style="display:flex;flex-direction:column;gap:4px;padding:{{ b.pad }};flex:{{ b.flex }};min-width:0;box-sizing:border-box">
 <sc-if value="{{ b.note }}"><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--st-mute);padding:0 6px">{{ pulse }}{{ b.note }}</div></sc-if>
 <div style="display:flex;align-items:flex-end;gap:6px">
-<div style="flex:1;min-width:0;display:flex;border-radius:22px;background:var(--st-surf2);box-shadow:inset 0 0 0 1px var(--st-line);opacity:{{ b.op }}">
-<textarea value="{{ b.text }}" onChange="{{ b.onText }}" disabled="{{ b.disabled }}" placeholder="Reply to agent…" rows="{{ b.rows }}" style="flex:1;min-width:0;resize:none;border:none;outline:none;background:transparent;color:var(--st-text);font:14px/20px var(--font-body);padding:12px 16px;box-sizing:border-box"></textarea>
+<div style="flex:1;min-width:0;display:flex;border-radius:22px;background:var(--st-surf2);box-shadow:inset 0 0 0 {{ b.ringW }} {{ b.ring }};opacity:{{ b.op }}">
+<textarea value="{{ b.text }}" onChange="{{ b.onText }}" disabled="{{ b.disabled }}" placeholder="Reply to agent…" rows="{{ b.rows }}" style="flex:1;min-width:0;resize:none;border:none;outline:none;background:transparent;color:var(--st-text);font:14px/20px var(--font-body);padding:12px 16px;box-sizing:border-box;caret-color:var(--st-acc)"></textarea>
 </div>
 <button disabled="{{ b.disabled }}" class="btn btn-ghost btn-icon" style="width:44px;height:44px;border-radius:22px;font-size:20px;color:var(--st-mute);flex:none;opacity:{{ b.op }}"><i class="ph ph-microphone"></i></button>
 <button onClick="{{ b.onSend }}" onPointerDown="{{ b.onSendDown }}" onPointerUp="{{ b.onSendUp }}" onPointerLeave="{{ b.onSendUp }}" disabled="{{ b.disabled }}" style="width:44px;height:44px;border-radius:22px;flex:none;border:none;box-shadow:inset 0 0 0 1.5px var(--st-acc);background:{{ b.sendBg }};color:var(--st-acc);font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:{{ b.op }}"><i class="ph-bold ph-arrow-up"></i></button>
@@ -152,9 +154,9 @@
 </div>
 </sc-if>
 <sc-if value="{{ b.isChips }}">
-<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:{{ b.pad }};border-radius:12px;background:{{ b.bg }}">
 <sc-for list="{{ b.chips }}" as="c">
-<div style="display:flex;align-items:center;gap:6px;height:{{ c.h }};padding:0 10px;border-radius:14px;background:{{ c.bg }};box-shadow:inset 0 0 0 1px var(--st-line);font:500 11.5px {{ c.font }};color:{{ c.color }}">
+<div style="display:flex;align-items:center;gap:6px;height:{{ c.h }};padding:0 10px;border-radius:{{ c.r }};background:{{ c.bg }};box-shadow:inset 0 0 0 1px {{ c.ring }};font:500 11.5px {{ c.font }};color:{{ c.color }}">
 <sc-if value="{{ c.spin }}">{{ arc }}</sc-if><sc-if value="{{ c.pulse }}">{{ pulse }}</sc-if>
 <sc-if value="{{ c.live }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok)"></span></sc-if>
 <sc-if value="{{ c.off }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
@@ -163,12 +165,12 @@
 </div>
 </sc-if>
 <sc-if value="{{ b.isPalette }}">
-<div style="display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px">
+<div style="display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;padding:10px;border-radius:12px;background:var(--a-bg)">
 <sc-for list="{{ b.sw }}" as="s">
 <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
-<div style="height:36px;border-radius:8px;background:{{ s.v }};box-shadow:inset 0 0 0 1px var(--st-line)"></div>
-<div style="font:500 10.5px var(--st-mono)">{{ s.n }} {{ s.name }}</div>
-<div style="font:9.5px var(--st-mono);color:var(--st-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.code }}</div>
+<div style="height:36px;border-radius:8px;background:{{ s.v }};box-shadow:inset 0 0 0 1px var(--a-ring)"></div>
+<div style="font:500 10.5px var(--st-mono);color:var(--a-fg)">{{ s.n }} {{ s.name }}</div>
+<div style="font:9.5px var(--st-mono);color:var(--a-K);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.code }}</div>
 </div>
 </sc-for>
 </div>
@@ -186,32 +188,42 @@
 </sc-for>
 </div>
 
+<sc-if value="{{ kbOpen }}" hint-placeholder-val="{{ false }}">
+<div style="flex:none;background:var(--st-surf2);padding:4px 4px 6px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;justify-content:space-around;align-items:center;height:32px;font-size:14px;color:var(--st-mute)"><sc-for list="{{ kbSugg }}" as="w"><span>{{ w }}</span></sc-for></div>
+<sc-for list="{{ kbRows }}" as="r">
+<div style="display:flex;gap:5px;padding:0 {{ r.inset }}">
+<sc-for list="{{ r.keys }}" as="k"><button onClick="{{ k.onClick }}" style="flex:{{ k.flex }};min-width:0;height:46px;border:none;border-radius:8px;background:{{ k.bg }};color:{{ k.color }};font:{{ k.font }};display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">{{ k.label }}<sc-if value="{{ k.icon }}"><i class="{{ k.icon }}" style="font-size:19px"></i></sc-if></button></sc-for>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
 <sc-if value="{{ framed }}" hint-placeholder-val="{{ true }}">
-<div style="height:{{ navH }};flex:none;display:flex;align-items:center;justify-content:center;background:{{ ctlBg }}"><span style="width:108px;height:4px;border-radius:2px;background:var(--st-text);opacity:.45"></span></div>
+<div style="height:{{ navH }};flex:none;display:flex;align-items:center;justify-content:center;background:{{ navBg }}"><span style="width:108px;height:4px;border-radius:2px;background:var(--st-text);opacity:.45"></span></div>
 </sc-if>
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;fit&quot;,&quot;100&quot;],&quot;default&quot;:&quot;fit&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;input&quot;,&quot;multi&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;read&quot;,&quot;fit&quot;],&quot;default&quot;:&quot;read&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;kb&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;scrolled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;cols&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:120,&quot;min&quot;:60,&quot;max&quot;:220,&quot;tsType&quot;:&quot;number&quot;},&quot;rows&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:40,&quot;min&quot;:10,&quot;max&quot;:80,&quot;tsType&quot;:&quot;number&quot;},&quot;draft&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
 class Component extends DCLogic {
-  state = { phase: null, extra: null, sel: 0, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false };
+  state = { phase: null, extra: null, sel: 0, msel: 0, checked: null, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false, away: null, awayN: null };
   OPTS = ['Yes', "Yes, and don't ask again for sudo apt install commands in ~/code/api", 'No, and tell Claude what to do differently (esc)'];
-  QUICK = ['Yes', 'Always', 'No'];
+  MOPTS = ['Unit · src/auth', 'Integration · needs Postgres', 'E2E · slow, about 6 min', 'Lint + typecheck'];
   MODES = ['accept edits on', 'plan mode on', 'default mode'];
-  PAL = {
-    dark: [['k','black','0.34 0.02 275'],['r','red','0.68 0.16 22'],['g','green','0.76 0.13 150'],['y','yellow','0.83 0.12 85'],['b','blue','0.72 0.11 255'],['m','magenta','0.72 0.12 288'],['c','cyan','0.78 0.09 205'],['w','white','0.84 0.01 275'],['K','br black','0.52 0.02 275'],['R','br red','0.76 0.15 22'],['G','br green','0.84 0.12 150'],['Y','br yellow','0.90 0.11 90'],['B','br blue','0.80 0.10 255'],['M','br magenta','0.80 0.11 288'],['C','br cyan','0.86 0.08 205'],['W','br white','0.97 0.005 275']],
-    light: [['k','black','0.30 0.02 275'],['r','red','0.52 0.18 25'],['g','green','0.50 0.13 150'],['y','yellow','0.56 0.12 70'],['b','blue','0.50 0.13 255'],['m','magenta','0.50 0.15 288'],['c','cyan','0.52 0.09 210'],['w','white','0.72 0.01 275'],['K','br black','0.56 0.02 275'],['R','br red','0.60 0.17 25'],['G','br green','0.62 0.13 150'],['Y','br yellow','0.68 0.12 80'],['B','br blue','0.58 0.12 255'],['M','br magenta','0.58 0.13 288'],['C','br cyan','0.62 0.09 210'],['W','br white','0.20 0.02 275']]
-  };
+  CLIP = 'see CI run 4821: session.spec.ts flaked 3/20 before the fix';
+  PAL = [['k','black','0.34 0.02 275'],['r','red','0.68 0.16 22'],['g','green','0.76 0.13 150'],['y','yellow','0.83 0.12 85'],['b','blue','0.72 0.11 255'],['m','magenta','0.72 0.12 288'],['c','cyan','0.78 0.09 205'],['w','white','0.84 0.01 275'],['K','br black','0.52 0.02 275'],['R','br red','0.76 0.15 22'],['G','br green','0.84 0.12 150'],['Y','br yellow','0.90 0.11 90'],['B','br blue','0.80 0.10 255'],['M','br magenta','0.80 0.11 288'],['C','br cyan','0.86 0.08 205'],['W','br white','0.97 0.005 275']];
 
-  componentDidMount() { setTimeout(() => this.toBottom(), 60); }
-  componentDidUpdate() { if (this.curN !== this.lastN || this.curZ !== this.lastZ) this.toBottom(); }
+  componentDidMount() { setTimeout(() => { const el = this.termEl; if (!el) return; if (this.isAway()) { el.scrollTop = el.scrollHeight * 0.3; this.lastKey = this.key; } else this.toBottom(); }, 80); }
+  componentDidUpdate() { if (this.key !== this.lastKey && !this.isAway()) this.toBottom(); }
   componentWillUnmount() { clearTimeout(this.tf); clearTimeout(this.tc); clearTimeout(this.lpT); }
-  toBottom() { const el = this.termEl; if (!el) return; el.scrollTop = el.scrollHeight; el.scrollLeft = 0; this.lastN = this.curN; this.lastZ = this.curZ; }
+  isAway() { return this.state.away ?? !!this.props.scrolled; }
+  toBottom() { const el = this.termEl; if (!el) return; el.scrollTop = el.scrollHeight; el.scrollLeft = Math.max(0, this.curCol * this.fsPx * 0.6 + 8 - el.clientWidth * 0.75); this.lastKey = this.key; }
 
   S(t, c, o = {}) { return { t, c: c ? `var(--a-${c})` : 'inherit', bg: o.bg ? `var(--a-${o.bg})` : 'transparent', w: o.b ? 600 : 400 }; }
   L(...segs) { return { segs }; }
   box(rows, bc) {
-    const S = this.S.bind(this), w = 118;
+    const S = this.S.bind(this), w = this.cols - 2;
     const out = [this.L(S('╭' + '─'.repeat(w - 2) + '╮', bc))];
     rows.forEach(r => { const n = r.reduce((a, s) => a + s.t.length, 0); out.push(this.L(S('│ ', bc), ...r, S(' '.repeat(Math.max(0, w - 4 - n))), S(' │', bc))); });
     out.push(this.L(S('╰' + '─'.repeat(w - 2) + '╯', bc)));
@@ -219,7 +231,11 @@ class Component extends DCLogic {
   }
   hist() {
     const S = this.S.bind(this), L = this.L.bind(this), B = { b: 1 };
+    const pre = [];
+    const files = ['package.json', 'tsconfig.json', 'src/index.ts', 'src/auth/index.ts', 'src/auth/token.ts', 'src/auth/refresh.ts', 'src/http/client.ts', 'src/http/errors.ts', 'test/setup.ts', 'test/mock-server.ts', 'jest.config.ts', '.github/workflows/ci.yml'];
+    for (let i = 0; i < 9; i++) files.forEach((f, j) => pre.push(L(S(`  ${String(i * 12 + j + 1).padStart(3)}  `, 'K'), S(j % 4 === 0 ? 'M ' : '  ', 'y'), S(f), S(`  ${(j * 37 + i * 11) % 400 + 12} lines`, 'K'))));
     return [
+      L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('git ls-files | nl')), ...pre, L(),
       L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('claude')), L(),
       L(S(' * ', 'm'), S('Claude Code', 'W', B), S('   cwd: ~/code/api', 'K')), L(),
       L(S('> ', 'K'), S('the auth tests flake on CI about 1 in 5 runs. find out why and fix it, keep the retry semantics', 'w')), L(),
@@ -256,25 +272,44 @@ class Component extends DCLogic {
       L(S('● ', 'W'), S('Fixed: jittered backoff in retry.ts, 3 fixtures updated. Ready for review on feat/auth-retry.')), L(),
       L(S('Total: 2m 41s · 3 files changed', 'K'))];
   }
-  frame(phase, extra, sel, mode, paste) {
+  prompt(out, paste, mode) {
     const S = this.S.bind(this), L = this.L.bind(this);
-    const out = [...this.hist(), ...extra];
-    if (phase === 'ended') return out;
-    if (phase === 'suspended') return [...out, L(), L(S('* ', 'y'), S('Running integration suite…', 'y'), S(' (12s · esc to interrupt)', 'K')), L(S('^Z')), L(S('[1]+  Stopped                 claude')), L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('git diff --stat')), L(S(' src/auth/retry.ts         | 15 ++++++++++++---')), L(S(' test/fixtures/session.ts  |  6 +++---')), L(S(' 2 files changed, 15 insertions(+), 6 deletions(-)')), L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S(' ', null, { bg: 'fg' }))];
-    if (phase === 'asking') {
-      return [...out, L(), ...this.box([[S('Bash command', 'W', { b: 1 })], [], [S('  sudo apt install -y postgresql-16')], [S('  Install Postgres for the auth integration suite', 'K')], [], [S('Do you want to proceed?')],
-        ...this.OPTS.map((o, i) => i === sel ? [S('> ', 'm', { b: 1 }), S(`${i + 1}. ${o}`, 'm', { b: 1 })] : [S('  '), S(`${i + 1}. ${o}`)])], 'm')];
-    }
-    if (phase === 'running') out.push(L(), L(S('* ', 'y'), S('Running integration suite…', 'y'), S(' (38s · ↓ 1.2k tokens · esc to interrupt)', 'K')));
     out.push(L(), ...this.box([[S('> ', 'K'), S(paste || ''), S(' ', null, { bg: 'fg' })]], 'K'), L(S('  >> ', 'm'), S(this.MODES[mode], 'm'), S(' (shift+tab to cycle)', 'K')));
+    this.curCol = 4 + (paste || '').length;
     return out;
   }
-  initPhase(s) { return ({ live: 'running', catching: 'running', paused: 'suspended', scrolling: 'running', ended: 'ended' })[s] || 'asking'; }
-  initExtra(s) { return s === 'ended' ? this.endLines() : ['live', 'catching', 'paused', 'scrolling'].includes(s) ? this.answerLines(0) : []; }
+  frame(phase, extra, s) {
+    const S = this.S.bind(this), L = this.L.bind(this);
+    const out = [...this.hist(), ...extra];
+    this.curCol = 0;
+    if (phase === 'ended') return out;
+    if (phase === 'suspended') { this.curCol = 43; return [...out, L(), L(S('* ', 'y'), S('Running integration suite…', 'y'), S(' (12s · esc to interrupt)', 'K')), L(S('^Z')), L(S('[1]+  Stopped                 claude')), L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('git diff --stat')), L(S(' src/auth/retry.ts         | 15 ++++++++++++---')), L(S(' test/fixtures/session.ts  |  6 +++---')), L(S(' 2 files changed, 15 insertions(+), 6 deletions(-)')), L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S(' ', null, { bg: 'fg' }))]; }
+    if (phase === 'asking') {
+      this.curCol = 4;
+      return [...out, L(), ...this.box([[S('Bash command', 'W', { b: 1 })], [], [S('  sudo apt install -y postgresql-16')], [S('  Install Postgres for the auth integration suite', 'K')], [], [S('Do you want to proceed?')],
+        ...this.OPTS.map((o, i) => i === s.sel ? [S('> ', 'm', { b: 1 }), S(`${i + 1}. ${o}`, 'm', { b: 1 })] : [S('  '), S(`${i + 1}. ${o}`)])], 'm')];
+    }
+    if (phase === 'multi') {
+      this.curCol = 4;
+      const ck = s.checked ?? [true, true, false, false];
+      return [...out, L(), ...this.box([[S('Which suites should I run before committing?', 'W', { b: 1 })], [S('Select all that apply', 'K')], [],
+        ...this.MOPTS.map((o, i) => { const on = i === s.msel; const box = ck[i] ? '[x]' : '[ ]'; return on ? [S('> ', 'm', { b: 1 }), S(`${box} ${o}`, 'm', { b: 1 })] : [S('  '), S(box, ck[i] ? 'g' : 'K'), S(` ${o}`)]; }),
+        [], [S('space to toggle · enter to confirm · esc to cancel', 'K')]], 'm')];
+    }
+    if (phase === 'question') {
+      out.push(L(), L(S('● ', 'W'), S("Postgres is up. Should the retry cap stay at 2s, or match the gateway's 5s timeout? CI runners are slower than local.")));
+      return this.prompt(out, s.paste, s.mode);
+    }
+    if (phase === 'running') out.push(L(), L(S('* ', 'y'), S('Running integration suite…', 'y'), S(' (38s · ↓ 1.2k tokens · esc to interrupt)', 'K')));
+    return this.prompt(out, s.paste, s.mode);
+  }
+  initPhase(st) { return ({ live: 'running', catching: 'running', paused: 'suspended', scrolling: 'running', ended: 'ended', input: 'question', multi: 'multi' })[st] || 'asking'; }
+  initExtra(st) { return st === 'ended' ? this.endLines() : ['live', 'catching', 'paused', 'scrolling', 'input', 'multi'].includes(st) ? this.answerLines(0) : []; }
   push(lines, phase) { this.setState(st => ({ extra: [...(st.extra ?? this.initExtra(this.props.state ?? 'waiting')), ...lines], phase })); }
   answer(i) { this.push(this.answerLines(i), i === 2 ? 'idle' : 'running'); this.setState({ sel: 0 }); }
+  phaseNow() { return this.state.phase ?? this.initPhase(this.props.state ?? 'waiting'); }
 
-  keyDefs() { return [['esc', 'Esc', '', '44px'], ['tab', 'Tab', '', '44px'], ['stab', '⇧Tab', '', '54px'], ['up', '', 'ph-bold ph-arrow-up', '50px', 1], ['down', '', 'ph-bold ph-arrow-down', '50px', 1], ['left', '', 'ph-bold ph-arrow-left', '50px', 1], ['right', '', 'ph-bold ph-arrow-right', '50px', 1], ['enter', 'Enter', 'ph ph-arrow-elbow-down-left', '76px'], ['space', 'Space', '', '64px'], ['ctrlc', 'Ctrl+C', '', '68px'], ['paste', 'Paste', 'ph ph-clipboard-text', '76px']]; }
+  keyDefs() { return [['esc', 'Esc', '', '44px'], ['tab', 'Tab', '', '44px'], ['stab', '⇧Tab', '', '54px'], ['up', '', 'ph-bold ph-arrow-up', '50px', 1], ['down', '', 'ph-bold ph-arrow-down', '50px', 1], ['left', '', 'ph-bold ph-arrow-left', '50px', 1], ['right', '', 'ph-bold ph-arrow-right', '50px', 1], ['enter', 'Enter', 'ph ph-arrow-elbow-down-left', '76px'], ['space', 'Space', '', '64px'], ['bksp', '', 'ph ph-backspace', '50px'], ['ctrlc', 'Ctrl+C', '', '68px'], ['paste', 'Paste', 'ph ph-clipboard-text', '76px']]; }
   keys(o) {
     return this.keyDefs().map(([id, label, icon, w, arrow]) => {
       const pr = o.pressed === id, arm = id === 'ctrlc' && o.ctrlArm;
@@ -287,7 +322,8 @@ class Component extends DCLogic {
   onKey(id) {
     clearTimeout(this.tf);
     this.setState({ pressed: id }); this.tf = setTimeout(() => this.setState({ pressed: null }), 160);
-    const ph = this.state.phase ?? this.initPhase(this.props.state ?? 'waiting');
+    const ph = this.phaseNow();
+    if (id === 'paste') { this.setState(s => ({ text: (s.text ?? '') + this.CLIP })); return; }
     if (id === 'ctrlc') {
       clearTimeout(this.tc);
       if (!this.state.ctrlArm) { this.setState({ ctrlArm: true }); this.tc = setTimeout(() => this.setState({ ctrlArm: false }), 2500); }
@@ -301,61 +337,83 @@ class Component extends DCLogic {
       if (id === 'esc') this.answer(2);
       return;
     }
+    if (ph === 'multi') {
+      if (id === 'up') this.setState(s => ({ msel: (s.msel + 3) % 4 }));
+      if (id === 'down') this.setState(s => ({ msel: (s.msel + 1) % 4 }));
+      if (id === 'space') this.setState(s => { const c = [...(s.checked ?? [true, true, false, false])]; c[s.msel] = !c[s.msel]; return { checked: c }; });
+      if (id === 'enter') { const c = this.state.checked ?? [true, true, false, false]; const picked = this.MOPTS.filter((_, i) => c[i]).map(o => o.split(' · ')[0].toLowerCase()); this.push([this.L(), this.L(this.S('● ', 'W'), this.S(`Running ${picked.join(', ') || 'nothing'}.`))], 'running'); }
+      if (id === 'esc') this.push([this.L(), this.L(this.S('  └  ', 'K'), this.S('Cancelled', 'r'))], 'idle');
+      return;
+    }
     if (id === 'stab') this.setState(s => ({ mode: (s.mode + 1) % 3 }));
-    if (id === 'paste') this.setState({ paste: 'see CI run 4821: session.spec.ts flaked 3/20 before the fix' });
+    if (id === 'space') this.setState(s => ({ paste: s.paste + ' ' }));
+    if (id === 'bksp') this.setState(s => ({ paste: s.paste.slice(0, -1) }));
+    if (id === 'enter' && this.state.paste) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(this.state.paste, 'w'))], 'running'); this.setState({ paste: '' }); }
   }
   send(enter) {
     const t = (this.state.text ?? '').trim();
+    this.setState({ away: false });
     if (!t) { if (enter && this.state.paste) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(this.state.paste, 'w'))], 'running'); this.setState({ paste: '' }); } return; }
-    if (enter) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(t, 'w'))], 'running'); this.setState({ text: '', paste: '' }); }
-    else this.setState({ paste: t, text: '' });
+    if (enter) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(this.state.paste + t, 'w'))], 'running'); this.setState({ text: '', paste: '' }); }
+    else this.setState(s => ({ paste: s.paste + t, text: '' }));
   }
 
   renderVals() {
     const p = this.props, s = this.state;
     const theme = p.theme ?? 'dark', sheet = p.screen === 'sheet', land = (p.orient ?? 'portrait') === 'landscape';
-    const S0 = p.state ?? 'waiting', hub = p.hub ?? 'MacBook';
+    const S0 = p.state ?? 'waiting', hub = p.hub ?? 'MacBook', kb = !!p.kb && !land && !sheet;
+    this.cols = p.cols ?? 120; const rows = p.rows ?? 40;
     const arc = React.createElement('span', { style: { display: 'block', width: 12, height: 12, boxSizing: 'border-box', borderRadius: '50%', border: '1.75px solid color-mix(in oklab, var(--st-run) 22%, transparent)', borderTopColor: 'var(--st-run)', animation: 'st-spin .9s linear infinite' } });
     const pulse = React.createElement('span', { style: { display: 'block', flex: 'none', width: 6, height: 6, borderRadius: '50%', background: 'var(--st-run)', animation: 'st-pulse 1.2s ease-in-out infinite' } });
     const phase = s.phase ?? this.initPhase(S0), extra = s.extra ?? this.initExtra(S0);
-    const zoom = s.zoom ?? p.zoom ?? 'fit';
-    const innerW = land ? 915 : 412;
-    const fs = zoom === 'fit' ? ((innerW - 12) / 72).toFixed(2) + 'px' : (land ? '14px' : '11px');
-    const lines = this.frame(phase, extra, s.sel, s.mode, s.paste);
-    this.curN = lines.length; this.curZ = zoom;
+    const zoom = s.zoom ?? p.zoom ?? (land ? 'fit' : 'read');
+    const innerW = land ? 915 : 412, readPx = land ? 14 : 9;
+    const fitPx = (innerW - 12) / (this.cols * 0.6);
+    this.fsPx = zoom === 'fit' ? fitPx : readPx;
+    const lines = this.frame(phase, extra, s);
+    if (this.initN == null) this.initN = lines.length;
+    this.key = lines.length + '|' + zoom + '|' + this.curCol;
     const isErr = ['revoked', 'unreachable', 'mismatch'].includes(S0);
-    const ctl = ['live', 'waiting', 'paused', 'scrolling', 'reconnecting', 'catching', 'opening'].includes(S0);
+    const ctl = ['live', 'waiting', 'input', 'multi', 'paused', 'scrolling', 'reconnecting', 'catching', 'opening'].includes(S0);
     const dis = ['paused', 'scrolling', 'reconnecting', 'opening'].includes(S0);
+    const away = s.away ?? !!p.scrolled, awayN = s.awayN ?? (this.initN - 12);
+    const newN = away ? Math.max(0, lines.length - awayN) : 0;
 
-    const stMap = { asking: ['waiting for you', 'sBlock', 'var(--st-block)'], running: ['running', 'sRun', 'var(--st-text)'], idle: ['idle', 'sIdle', 'var(--st-text)'], ended: ['exited', 'sEnd', 'var(--st-mute)'] };
-    let sk = S0 === 'ended' ? 'ended' : S0 === 'paused' ? 'idle' : phase;
-    if (S0 === 'paused') stMap.idle = ['suspended', 'sIdle', 'var(--st-mute)'];
-    const sm = stMap[sk] || stMap.idle;
+    const W = ['waiting for you', 'sBlock', 'var(--st-block)'];
+    const stMap = { asking: W, question: W, multi: W, running: ['running', 'sRun', 'var(--st-text)'], idle: ['idle', 'sIdle', 'var(--st-text)'], suspended: ['suspended', 'sIdle', 'var(--st-mute)'], ended: ['exited', 'sEnd', 'var(--st-mute)'] };
+    const sm = stMap[phase] || stMap.idle;
     const st = { word: sm[0], color: sm[2], [sm[1]]: true };
-    const connDef = { live: ['cLive', 'live'], waiting: ['cLive', 'live'], watch: ['cLive', 'live'], nocontrol: ['cLive', 'live'], catching: ['cLive', 'live'], reconnecting: ['cReco', 'Reconnecting…'], opening: ['cReco', 'connecting'], paused: ['cOff', 'input paused'], scrolling: ['cOff', 'input paused'], ended: ['cOff', 'ended'], unreachable: ['cOff', 'offline'], revoked: ['cOff', 'closed'], mismatch: ['cOff', 'closed'] }[S0];
+    const connDef = { reconnecting: ['cReco', 'Reconnecting…'], opening: ['cReco', 'connecting'], paused: ['cOff', 'input paused'], scrolling: ['cOff', 'input paused'], ended: ['cOff', 'ended'], unreachable: ['cOff', 'offline'], revoked: ['cOff', 'closed'], mismatch: ['cOff', 'closed'] }[S0] || ['cLive', 'live'];
     const conn = { [connDef[0]]: true, text: connDef[1], color: connDef[0] === 'cReco' ? 'var(--st-run)' : 'var(--st-mute)' };
 
+    const sizeLabel = `${this.cols}×${rows} · ${zoom === 'fit' ? 'fit' : readPx + 'sp'}`;
     const overlay = [];
     if (S0 === 'catching') overlay.push({ spin: true, label: 'Catching up…' });
-    if (['live', 'waiting', 'paused', 'scrolling'].includes(S0)) overlay.push({ icon: 'ph ph-desktop', label: 'Also open on desktop' });
-    if (!isErr && S0 !== 'opening') overlay.push({ label: `120×40 · ${zoom === 'fit' ? 'fit' : '100%'}`, onClick: () => this.setState({ zoom: zoom === 'fit' ? '100' : 'fit' }) });
+    if (['live', 'waiting', 'input', 'multi', 'paused', 'scrolling'].includes(S0) && !kb) overlay.push({ icon: 'ph ph-desktop', label: 'Also open on desktop' });
+    if (!isErr && S0 !== 'opening') overlay.push({ label: sizeLabel, onClick: () => this.setState({ zoom: zoom === 'fit' ? 'read' : 'fit' }) });
 
     const errs = {
       revoked: { icon: 'ph ph-lock-key', ic: 'var(--st-block)', title: 'Terminal access was revoked', body: `${hub} removed Watch and Control for this phone. Session status keeps updating.`, actions: [{ label: 'Back to session', cls: 'btn btn-primary', color: '' }] },
       unreachable: { icon: 'ph ph-plugs', ic: 'var(--st-mute)', title: `Can't reach ${hub}`, body: 'The stream stopped and neither address answers. Nothing you typed was sent.', detail: 'LAN 192.168.1.24 · timeout   tailnet · no route', actions: [{ label: 'Retry', cls: 'btn btn-primary', color: '' }, { label: 'Back to session', cls: 'btn btn-secondary', color: 'var(--st-text)' }] },
-      mismatch: { icon: 'ph ph-shield-warning', ic: 'var(--st-block)', title: 'Terminal hidden for safety', body: 'This tmux pane no longer runs Claude Code — it now runs zsh. SessionTap only ever shows the agent, so it closed the view.', detail: 'pane %14 · expected claude · found zsh', actions: [{ label: 'Back to session', cls: 'btn btn-primary', color: '' }] }
+      mismatch: { icon: 'ph ph-shield-warning', ic: 'var(--st-block)', title: 'Terminal closed for safety', body: 'This pane no longer belongs to the agent, so SessionTap stopped showing it.', detail: 'pane %14 · identity changed', actions: [{ label: 'Back to session', cls: 'btn btn-primary', color: '' }] }
     };
 
     const row = !sheet && land;
     const basis = row ? '100%' : 'auto';
-    const banner = (k, onPick) => k === 'waiting'
-      ? { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-chat-circle-dots', ic: 'var(--st-block)', bg: 'var(--st-block-tint)', ring: 'color-mix(in oklab,var(--st-block) 30%,transparent)', title: 'Agent is asking', sub: 'Tap an answer, or use ↑ ↓ then Enter', chips: this.QUICK.map((l, i) => ({ n: String(i + 1), label: l, onClick: onPick ? () => onPick(i) : () => {} })) }
-      : k === 'scrolling'
-      ? { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-mouse-scroll', ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title: 'Desktop is scrolling this pane — input paused', sub: 'Resumes when they leave scroll mode.', chips: null }
-      : { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-pause-circle', ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title: "Agent isn't in the foreground — input paused", sub: 'Input comes back when the agent is in front again.', chips: null };
+    const bpad = sheet ? '0' : '8px 8px 0';
+    const ask = (title, sub, chips) => ({ isBanner: true, pad: bpad, basis, icon: 'ph ph-chat-circle-dots', ic: 'var(--st-block)', bg: 'var(--st-block-tint)', ring: 'color-mix(in oklab,var(--st-block) 30%,transparent)', title, sub, chips });
+    const calm = (icon, title, sub) => ({ isBanner: true, pad: bpad, basis, icon, ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title, sub, chips: null });
+    const banner = (k, onPick) => ({
+      approval: () => ask('Agent wants approval', 'Tap a number, or ↑ ↓ then Enter', ['1', '2', '3', '4'].map((n, i) => ({ n, onClick: onPick ? () => onPick(i) : () => {} }))),
+      question: () => ask('Agent is asking — reply below', '', null),
+      multi: () => ask('Agent is asking', 'Space toggles · Enter confirms', null),
+      scrolling: () => calm('ph ph-mouse-scroll', 'Desktop is scrolling this pane — input paused', 'Resumes when they leave scroll mode.'),
+      paused: () => calm('ph ph-pause-circle', "Agent isn't in the foreground — input paused", 'Input comes back when the agent is in front again.')
+    })[k]();
     const input = (o) => {
       const t = o.text ?? '';
-      return { isInput: true, pad: sheet ? '0' : row ? '6px 8px 6px 0' : '2px 8px 8px', flex: row ? '0 0 360px' : 'none', text: t, rows: String(Math.min(4, Math.max(1, Math.ceil(t.length / 34)))), disabled: !!o.disabled, op: o.disabled ? '.45' : '1', note: o.note || '', sendBg: o.disabled ? 'transparent' : 'var(--st-acc-tint)',
+      return { isInput: true, pad: sheet ? '0' : row ? '6px 8px 6px 0' : kb ? '8px 8px 2px' : '2px 8px 8px', flex: row ? '0 0 360px' : 'none', text: t, rows: String(Math.min(4, Math.max(1, Math.ceil(t.length / 34)))), disabled: !!o.disabled, op: o.disabled ? '.45' : '1', note: o.note || '', sendBg: o.disabled ? 'transparent' : 'var(--st-acc-tint)',
+        ring: o.focus ? 'var(--st-acc)' : 'var(--st-line)', ringW: o.focus ? '1.5px' : '1px',
         onText: o.live ? e => this.setState({ text: e.target.value }) : () => {},
         onSend: o.live ? () => { if (this.lp) { this.lp = false; return; } this.send(true); } : () => {},
         onSendDown: o.live ? () => { this.lp = false; clearTimeout(this.lpT); this.lpT = setTimeout(() => { this.lp = true; this.send(false); }, 500); } : () => {},
@@ -366,72 +424,96 @@ class Component extends DCLogic {
       : { isStrip: true, basis, pad: '0', radius: sheet ? '14px' : '0', ring: sheet ? 'var(--st-line)' : 'transparent', icon: 'ph ph-lock-simple', title: "This source doesn't accept input", sub: `${hub} · sandbox streams agent terminals view-only.`, link: 'Details' };
     const ENDS = { exited: ['ph ph-check-circle', 'var(--st-ok)', 'Agent exited', 'claude exited normally (code 0). This is its last frame.'], closed: ['ph ph-x-square', 'var(--st-mute)', 'Pane closed on desktop', `The tmux pane was closed on ${hub}, and the agent ended with it.`], tmux: ['ph ph-power', 'var(--st-mute)', 'tmux server stopped', `The tmux server on ${hub} shut down, ending every agent it hosted.`] };
     const end = k => { const e = ENDS[k]; return { isEnd: true, basis, pad: sheet ? '0' : '8px 8px 4px', icon: e[0], ic: e[1], title: e[2], sub: e[3], time: '14:41 · after 17m' }; };
+    const reconNote = `Reconnecting — your reply stays here and sends only when you tap Send`;
 
     let blocks = [];
     if (!sheet) {
-      if (ctl && phase === 'asking' && !dis) blocks.push(banner('waiting', i => this.answer(i)));
+      if (ctl && !dis) { const bk = { asking: 'approval', question: 'question', multi: 'multi' }[phase]; if (bk) blocks.push(banner(bk, i => { if (i < 3) this.answer(i); })); }
       if (S0 === 'paused') blocks.push(banner('paused'));
       if (S0 === 'scrolling') blocks.push(banner('scrolling'));
       if (ctl) {
-        blocks.push({ isKeys: true, wrap: 'nowrap', pad: row ? '6px 8px' : '8px 8px 6px', flex: row ? '1 1 0' : 'none', bg: 'transparent', radius: '0', keys: this.keys({ disabled: dis, pressed: s.pressed, ctrlArm: s.ctrlArm, onKey: id => this.onKey(id) }) });
-        const initText = S0 === 'reconnecting' ? 'use the backoff helper, not a fixed sleep' : '';
-        blocks.push(input({ live: !dis, disabled: dis, text: s.text ?? initText, note: S0 === 'reconnecting' ? `Reconnecting — your reply stays here until ${hub} is back` : '' }));
+        const keyBlk = { isKeys: true, wrap: 'nowrap', pad: row ? '6px 8px' : kb ? '4px 8px 8px' : '8px 8px 6px', flex: row ? '1 1 0' : 'none', bg: 'transparent', radius: '0', keys: this.keys({ disabled: dis, pressed: s.pressed, ctrlArm: s.ctrlArm, onKey: id => this.onKey(id) }) };
+        const initText = S0 === 'reconnecting' ? 'use the backoff helper, not a fixed sleep' : (p.draft ?? '');
+        const inBlk = input({ live: !dis, disabled: dis, focus: kb, text: s.text ?? initText, note: S0 === 'reconnecting' ? reconNote : '' });
+        if (kb) blocks.push(inBlk, keyBlk); else blocks.push(keyBlk, inBlk);
       }
       if (S0 === 'watch') blocks.push(strip('watch'));
       if (S0 === 'nocontrol') blocks.push(strip('nocontrol'));
       if (S0 === 'ended') blocks.push(end(p.end ?? 'exited'));
     } else {
       const Lb = t => ({ isLabel: true, text: t }), Sb = t => ({ isSub: true, text: t }), Tb = t => ({ isText: true, text: t });
-      const kb = o => ({ isKeys: true, wrap: 'wrap', pad: '10px', flex: 'none', bg: 'var(--st-surf)', radius: '14px', keys: this.keys(o) });
+      const kbk = o => ({ isKeys: true, wrap: 'wrap', pad: '10px', flex: 'none', bg: 'var(--st-surf)', radius: '14px', keys: this.keys(o) });
       const S = this.S.bind(this), L = this.L.bind(this);
+      const tchip = (label, x = {}) => ({ h: '24px', r: '12px', font: 'var(--st-mono)', bg: 'var(--a-chip)', ring: 'var(--a-ring)', color: 'var(--a-w)', label, ...x });
+      const cchip = (label, x = {}) => ({ h: '28px', r: '14px', font: 'var(--font-body)', bg: 'transparent', ring: 'var(--st-line)', color: 'var(--st-mute)', label, ...x });
       blocks = [
         Lb('Key bar'),
-        Tb('44dp keys, 6dp gaps, sticky above the keyboard and scrolls sideways. Arrows sit on a raised fill — menus are the main job. Ctrl+C is red and needs a second tap within 2.5s; the first tap sends nothing.'),
-        Sb('Default'), kb({}), Sb('Pressed · ↓ (160ms accent flash)'), kb({ pressed: 'down' }), Sb('Disabled · paused, reconnecting, connecting — greyed, never hidden'), kb({ disabled: true }), Sb('Ctrl+C · confirm pending'), kb({ ctrlArm: true }),
+        Tb('44dp keys, 6dp gaps, sticky directly above the keyboard, scrolls sideways. Arrows sit on a raised fill — menus are the main job. Ctrl+C is red and needs a second tap within 2.5s; the first tap sends nothing. Paste fills the reply field from the clipboard, never the agent.'),
+        Sb('Default'), kbk({}), Sb('Pressed · ↓ (160ms accent flash)'), kbk({ pressed: 'down' }), Sb('Disabled · paused, reconnecting, connecting — greyed, never hidden'), kbk({ disabled: true }), Sb('Ctrl+C · confirm pending'), kbk({ ctrlArm: true }),
         Lb('Input row'),
-        Tb('Send pastes the text, then presses Enter. Long-press Send pastes without Enter, so it lands in the agent\'s prompt for review.'),
-        Sb('Empty'), input({}), Sb('Queued while reconnecting — text is kept, controls disabled'), input({ disabled: true, text: 'use the backoff helper, not a fixed sleep', note: 'Reconnecting — your reply stays here until MacBook is back' }),
-        Lb('Banners'), Sb('Waiting for you · quick-pick sends the digit'), banner('waiting'), Sb('Temporarily view only · agent not in foreground (pane keeps streaming)'), banner('paused'), Sb('Temporarily view only · desktop in tmux scroll mode'), banner('scrolling'),
-        Lb('Chips · terminal overlay and top bar'),
-        { isChips: true, chips: [
-          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', label: '120×40 · fit' },
-          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', label: '120×40 · 100%' },
-          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', icon: 'ph ph-desktop', label: 'Also open on desktop' },
-          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', spin: true, label: 'Catching up…' },
-          { h: '28px', font: 'var(--font-body)', bg: 'transparent', color: 'var(--st-mute)', live: true, label: 'live' },
-          { h: '28px', font: 'var(--font-body)', bg: 'transparent', color: 'var(--st-run)', pulse: true, label: 'Reconnecting…' },
-          { h: '28px', font: 'var(--font-body)', bg: 'transparent', color: 'var(--st-mute)', off: true, label: 'paused' }] },
+        Tb("Send pastes the text, then presses Enter. Long-press Send pastes without Enter, so it lands in the agent's prompt for review."),
+        Sb('Empty'), input({}), Sb('Focused · keyboard open'), input({ focus: true, text: 'match the gateway, 5s' }),
+        Sb('Kept while reconnecting — nothing auto-sends when the link returns'), input({ disabled: true, text: 'use the backoff helper, not a fixed sleep', note: reconNote }),
+        Lb('Banners'),
+        Sb('Waiting for approval · digits only, each sends that key'), banner('approval'),
+        Sb('Waiting for input · open question, no chips'), banner('question'),
+        Sb('Multi-select menu'), banner('multi'),
+        Sb('Temporarily view only · agent not in foreground (pane keeps streaming)'), banner('paused'),
+        Sb('Temporarily view only · desktop in tmux scroll mode'), banner('scrolling'),
+        Lb('Terminal overlay · sits on the dark terminal in both themes'),
+        { isChips: true, pad: '10px', bg: 'var(--a-bg)', chips: [tchip('120×40 · 9sp'), tchip('120×40 · fit'), tchip('132×38 · 9sp'), tchip('Also open on desktop', { icon: 'ph ph-desktop' }), tchip('Catching up…', { spin: true }),
+          { h: '34px', r: '17px', font: 'var(--font-body)', bg: 'var(--color-accent-900)', ring: 'var(--color-accent)', color: 'var(--color-accent-100)', icon: 'ph-bold ph-arrow-down', label: 'Jump to live · 12 new' }] },
+        Tb('Size chip shows the real pane size and updates live when the desktop resizes (120×40 → 132×38).'),
+        Lb('Top bar connection'),
+        { isChips: true, pad: '0', bg: 'transparent', chips: [cchip('live', { live: true }), cchip('Reconnecting…', { pulse: true, color: 'var(--st-run)' }), cchip('input paused', { off: true }), cchip('ended', { off: true })] },
         Lb('Strips · replace key bar and input'), Sb('Watch scope only'), strip('watch'), Sb('Source does not allow control'), strip('nocontrol'),
         Lb('End cards · replace key bar and input'), end('exited'), Sb(''), end('closed'), Sb(''), end('tmux'),
         Lb('Terminal palette · ANSI 16'),
-        Tb(theme === 'light' ? 'Light: background oklch(0.985 0.003 275), foreground oklch(0.27 0.02 275). Hue 275 matches the Nocturne neutrals; magenta sits on the accent hue.' : 'Dark: background is the app ground mixed 45% toward black, foreground oklch(0.93 0.006 275). Hue 275 matches the Nocturne neutrals; magenta sits on the accent hue.'),
-        { isPalette: true, sw: this.PAL[theme].map(([k, name, v], i) => ({ n: String(i), name, v: `var(--a-${k})`, code: v })) },
+        Tb('One palette for both themes: the terminal surface stays dark because agents emit 24-bit colour tuned for dark grounds. Only the app chrome goes light. Background is the Nocturne ground mixed 45% toward black; foreground oklch(0.93 0.006 275). Hue 275 matches the neutrals; magenta sits on the accent hue.'),
+        { isPalette: true, sw: this.PAL.map(([k, name, v], i) => ({ n: String(i), name, v: `var(--a-${k})`, code: v })) },
         Sb(''),
         { isSample: true, lines: [L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('claude')), L(S('● ', 'g'), S('Update', 'W', { b: 1 }), S('(src/auth/retry.ts)')), L(S('-   await sleep(100);', 'r', { bg: 'rbg' })), L(S('+   await sleep(backoff(attempt));', 'g', { bg: 'gbg' })), L(S(' PASS ', 'k', { bg: 'G', b: 1 }), S(' retry.spec.ts '), S('(31 tests)', 'K')), L(S('* ', 'y'), S('Running…', 'y'), S(' esc to interrupt', 'K')), L(S('> 1. Yes', 'm', { b: 1 }), S('   2. Always', 'c'), S('   3. No', 'r'))] },
         Lb('Gestures'),
         { isNotes: true, notes: [
-          ['Pinch', 'Zoom 100–200% around your fingers. Fit-to-width is the minimum; never smaller than the pane.'],
-          ['Pan', 'Vertical drag scrolls scrollback. Sideways only when zoomed past fit.'],
-          ['Double-tap', 'Toggles fit ⇄ 100%, keeping the tapped column under your finger.'],
-          ['Size chip', 'Same toggle, one-handed. Shows the desktop pane size.'],
+          ['Portrait default', 'Opens at 9sp, the readable minimum, never fit. When the pane is wider than the screen, the view pans automatically to keep the cursor/prompt in sight as output arrives.'],
+          ['Pinch', 'From fit-to-width up to 200%, anchored between your fingers.'],
+          ['Pan', 'Vertical drag scrolls about 500 lines of scrollback. Sideways pan works whenever the pane is wider than the screen.'],
+          ['Scrolled up', 'Auto-scroll stops. A "Jump to live ↓" pill counts new lines; tapping it, or sending, returns to the bottom.'],
+          ['Double-tap', 'Toggles 9sp ⇄ fit, keeping the tapped column under your finger.'],
+          ['Size chip', 'Same toggle, one-handed. Shows the real pane size, updated live.'],
+          ['Keyboard open', 'The terminal shrinks, the key bar rides directly on the keyboard, and the cursor line stays pinned in view.'],
           ['Long-press Send', 'Paste without Enter (500ms, haptic tick).'],
+          ['Paste key', 'Clipboard → reply field. Nothing goes to the agent until Send.'],
+          ['Reconnect', 'Nothing auto-sends. Kept text waits for Send.'],
           ['Ctrl+C', 'Tap, then tap again within 2.5s. The first tap sends nothing.'],
-          ['Landscape', 'Fit-to-width reaches ~12.5sp, so 120 columns read without zooming. The key bar and input share one row.']
+          ['Landscape', 'Opens at fit (~12.5sp at 120 columns). The key bar and input share one row.']
         ].map(([g, t], i) => ({ g, t, border: i ? '1px solid var(--st-line)' : 'none' })) }
       ];
     }
+
+    const kbKey = (label, o = {}) => ({ label, icon: o.icon || '', flex: o.flex || '1', bg: o.fn ? 'var(--st-surf)' : o.acc ? 'var(--st-acc-tint)' : 'color-mix(in oklab,var(--st-text) 9%,var(--st-surf2))', color: o.acc ? 'var(--st-acc)' : 'var(--st-text)', font: o.fn ? '500 13px var(--font-body)' : '400 19px var(--font-body)',
+      onClick: () => { if (o.ch != null) this.setState(st => ({ text: (st.text ?? (p.draft ?? '')) + o.ch })); if (o.del) this.setState(st => ({ text: (st.text ?? (p.draft ?? '')).slice(0, -1) })); if (o.enter) this.send(true); } });
+    const kbRows = kb ? [
+      { inset: '0', keys: 'qwertyuiop'.split('').map(c => kbKey(c, { ch: c })) },
+      { inset: '18px', keys: 'asdfghjkl'.split('').map(c => kbKey(c, { ch: c })) },
+      { inset: '0', keys: [kbKey('', { icon: 'ph ph-arrow-fat-up', fn: 1, flex: '1.5' }), ...'zxcvbnm'.split('').map(c => kbKey(c, { ch: c })), kbKey('', { icon: 'ph ph-backspace', fn: 1, flex: '1.5', del: 1 })] },
+      { inset: '0', keys: [kbKey('?123', { fn: 1, flex: '1.5' }), kbKey(',', { ch: ',' }), kbKey('', { flex: '5', ch: ' ' }), kbKey('.', { ch: '.' }), kbKey('', { icon: 'ph ph-arrow-elbow-down-left', acc: 1, flex: '1.5', enter: 1 })] }
+    ] : [];
 
     return {
       theme, arc, pulse, framed: !sheet, isSheet: sheet, sheetTitle: `Terminal components · ${theme}`,
       rootW: sheet ? '560px' : land ? '935px' : '432px', rootH: sheet ? 'auto' : land ? '432px' : '935px', rootPad: sheet ? '0' : '10px', rootR: sheet ? '20px' : land ? '48px' : '52px',
       rootBg: sheet ? 'transparent' : 'color-mix(in oklab,var(--color-neutral-900) 55%,#000)', innerH: sheet ? 'auto' : '100%', innerR: sheet ? '20px' : land ? '38px' : '42px',
-      statusH: land ? '24px' : '36px', navH: land ? '14px' : '22px',
+      statusH: land ? '24px' : '36px', navH: land ? '14px' : '22px', navBg: kb ? 'var(--st-surf2)' : sheet ? 'transparent' : 'var(--st-surf)',
       title: p.title ?? 'Fix flaky auth tests', where: `api · feat/auth-retry · ${hub}${S0 === 'nocontrol' ? ' · sandbox' : ''}`, hub, st, conn,
       showTerm: !isErr && S0 !== 'opening', opening: S0 === 'opening', err: isErr ? errs[S0] : null,
       skel: ['62%', '38%', '0', '80%', '30%', '56%', '0', '72%', '44%', '66%', '0', '50%', '84%', '28%'],
-      termRef: el => { this.termEl = el; }, toggleZoom: () => this.setState({ zoom: zoom === 'fit' ? '100' : 'fit' }),
-      fs, lines, termOp: S0 === 'ended' ? '.5' : '1', termFilter: S0 === 'ended' ? 'saturate(.4)' : 'none', overlay,
-      blocks, ctlDir: row ? 'row' : 'column', ctlWrap: row ? 'wrap' : 'nowrap', ctlAlign: row ? 'flex-end' : 'stretch', ctlBg: sheet ? 'transparent' : 'var(--st-surf)', ctlPad: sheet ? '0 28px 32px' : '0', ctlShadow: sheet ? 'none' : '0 -1px 0 var(--st-line)'
+      termRef: el => { this.termEl = el; }, toggleZoom: () => this.setState({ zoom: zoom === 'fit' ? 'read' : 'fit' }),
+      onTermScroll: e => { const el = e.currentTarget; const atB = el.scrollHeight - el.scrollTop - el.clientHeight < 12; const a = this.isAway(); if (!atB && !a) this.setState({ away: true, awayN: lines.length }); else if (atB && a) this.setState({ away: false, awayN: null }); },
+      jump: away && !isErr && S0 !== 'opening' ? { n: newN ? `· ${newN} new` : '', onClick: () => this.setState({ away: false, awayN: null }, () => this.toBottom()) } : null,
+      fs: this.fsPx.toFixed(2) + 'px', lines, termOp: S0 === 'ended' ? '.5' : '1', termFilter: S0 === 'ended' ? 'saturate(.4)' : 'none', overlay,
+      blocks, ctlDir: row ? 'row' : 'column', ctlWrap: row ? 'wrap' : 'nowrap', ctlAlign: row ? 'flex-end' : 'stretch', ctlBg: sheet ? 'transparent' : 'var(--st-surf)', ctlPad: sheet ? '0 28px 32px' : '0', ctlShadow: sheet ? 'none' : '0 -1px 0 var(--st-line)',
+      kbOpen: kb, kbRows, kbSugg: ['5s', 'match', 'gateway']
     };
   }
 }
