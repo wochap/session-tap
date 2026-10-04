@@ -192,7 +192,7 @@
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;fit&quot;,&quot;100&quot;],&quot;default&quot;:&quot;fit&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;fit&quot;,&quot;100&quot;],&quot;default&quot;:&quot;fit&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
 class Component extends DCLogic {
   state = { phase: null, extra: null, sel: 0, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false };
   OPTS = ['Yes', "Yes, and don't ask again for sudo apt install commands in ~/code/api", 'No, and tell Claude what to do differently (esc)'];
@@ -260,6 +260,7 @@ class Component extends DCLogic {
     const S = this.S.bind(this), L = this.L.bind(this);
     const out = [...this.hist(), ...extra];
     if (phase === 'ended') return out;
+    if (phase === 'suspended') return [...out, L(), L(S('* ', 'y'), S('Running integration suite…', 'y'), S(' (12s · esc to interrupt)', 'K')), L(S('^Z')), L(S('[1]+  Stopped                 claude')), L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('git diff --stat')), L(S(' src/auth/retry.ts         | 15 ++++++++++++---')), L(S(' test/fixtures/session.ts  |  6 +++---')), L(S(' 2 files changed, 15 insertions(+), 6 deletions(-)')), L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S(' ', null, { bg: 'fg' }))];
     if (phase === 'asking') {
       return [...out, L(), ...this.box([[S('Bash command', 'W', { b: 1 })], [], [S('  sudo apt install -y postgresql-16')], [S('  Install Postgres for the auth integration suite', 'K')], [], [S('Do you want to proceed?')],
         ...this.OPTS.map((o, i) => i === sel ? [S('> ', 'm', { b: 1 }), S(`${i + 1}. ${o}`, 'm', { b: 1 })] : [S('  '), S(`${i + 1}. ${o}`)])], 'm')];
@@ -268,8 +269,8 @@ class Component extends DCLogic {
     out.push(L(), ...this.box([[S('> ', 'K'), S(paste || ''), S(' ', null, { bg: 'fg' })]], 'K'), L(S('  >> ', 'm'), S(this.MODES[mode], 'm'), S(' (shift+tab to cycle)', 'K')));
     return out;
   }
-  initPhase(s) { return ({ live: 'running', catching: 'running', paused: 'running', ended: 'ended' })[s] || 'asking'; }
-  initExtra(s) { return s === 'ended' ? this.endLines() : ['live', 'catching', 'paused'].includes(s) ? this.answerLines(0) : []; }
+  initPhase(s) { return ({ live: 'running', catching: 'running', paused: 'suspended', scrolling: 'running', ended: 'ended' })[s] || 'asking'; }
+  initExtra(s) { return s === 'ended' ? this.endLines() : ['live', 'catching', 'paused', 'scrolling'].includes(s) ? this.answerLines(0) : []; }
   push(lines, phase) { this.setState(st => ({ extra: [...(st.extra ?? this.initExtra(this.props.state ?? 'waiting')), ...lines], phase })); }
   answer(i) { this.push(this.answerLines(i), i === 2 ? 'idle' : 'running'); this.setState({ sel: 0 }); }
 
@@ -323,20 +324,20 @@ class Component extends DCLogic {
     const lines = this.frame(phase, extra, s.sel, s.mode, s.paste);
     this.curN = lines.length; this.curZ = zoom;
     const isErr = ['revoked', 'unreachable', 'mismatch'].includes(S0);
-    const ctl = ['live', 'waiting', 'paused', 'reconnecting', 'catching', 'opening'].includes(S0);
-    const dis = ['paused', 'reconnecting', 'opening'].includes(S0);
+    const ctl = ['live', 'waiting', 'paused', 'scrolling', 'reconnecting', 'catching', 'opening'].includes(S0);
+    const dis = ['paused', 'scrolling', 'reconnecting', 'opening'].includes(S0);
 
     const stMap = { asking: ['waiting for you', 'sBlock', 'var(--st-block)'], running: ['running', 'sRun', 'var(--st-text)'], idle: ['idle', 'sIdle', 'var(--st-text)'], ended: ['exited', 'sEnd', 'var(--st-mute)'] };
     let sk = S0 === 'ended' ? 'ended' : S0 === 'paused' ? 'idle' : phase;
     if (S0 === 'paused') stMap.idle = ['suspended', 'sIdle', 'var(--st-mute)'];
     const sm = stMap[sk] || stMap.idle;
     const st = { word: sm[0], color: sm[2], [sm[1]]: true };
-    const connDef = { live: ['cLive', 'live'], waiting: ['cLive', 'live'], watch: ['cLive', 'live'], nocontrol: ['cLive', 'live'], catching: ['cLive', 'live'], reconnecting: ['cReco', 'Reconnecting…'], opening: ['cReco', 'connecting'], paused: ['cOff', 'paused'], ended: ['cOff', 'ended'], unreachable: ['cOff', 'offline'], revoked: ['cOff', 'closed'], mismatch: ['cOff', 'closed'] }[S0];
+    const connDef = { live: ['cLive', 'live'], waiting: ['cLive', 'live'], watch: ['cLive', 'live'], nocontrol: ['cLive', 'live'], catching: ['cLive', 'live'], reconnecting: ['cReco', 'Reconnecting…'], opening: ['cReco', 'connecting'], paused: ['cOff', 'input paused'], scrolling: ['cOff', 'input paused'], ended: ['cOff', 'ended'], unreachable: ['cOff', 'offline'], revoked: ['cOff', 'closed'], mismatch: ['cOff', 'closed'] }[S0];
     const conn = { [connDef[0]]: true, text: connDef[1], color: connDef[0] === 'cReco' ? 'var(--st-run)' : 'var(--st-mute)' };
 
     const overlay = [];
     if (S0 === 'catching') overlay.push({ spin: true, label: 'Catching up…' });
-    if (['live', 'waiting'].includes(S0)) overlay.push({ icon: 'ph ph-desktop', label: 'Also open on desktop' });
+    if (['live', 'waiting', 'paused', 'scrolling'].includes(S0)) overlay.push({ icon: 'ph ph-desktop', label: 'Also open on desktop' });
     if (!isErr && S0 !== 'opening') overlay.push({ label: `120×40 · ${zoom === 'fit' ? 'fit' : '100%'}`, onClick: () => this.setState({ zoom: zoom === 'fit' ? '100' : 'fit' }) });
 
     const errs = {
@@ -349,7 +350,9 @@ class Component extends DCLogic {
     const basis = row ? '100%' : 'auto';
     const banner = (k, onPick) => k === 'waiting'
       ? { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-chat-circle-dots', ic: 'var(--st-block)', bg: 'var(--st-block-tint)', ring: 'color-mix(in oklab,var(--st-block) 30%,transparent)', title: 'Agent is asking', sub: 'Tap an answer, or use ↑ ↓ then Enter', chips: this.QUICK.map((l, i) => ({ n: String(i + 1), label: l, onClick: onPick ? () => onPick(i) : () => {} })) }
-      : { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-pause-circle', ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title: "Agent isn't in the foreground — input paused", sub: 'Showing its last frame. Input comes back on its own.', chips: null };
+      : k === 'scrolling'
+      ? { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-mouse-scroll', ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title: 'Desktop is scrolling this pane — input paused', sub: 'Resumes when they leave scroll mode.', chips: null }
+      : { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-pause-circle', ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title: "Agent isn't in the foreground — input paused", sub: 'Input comes back when the agent is in front again.', chips: null };
     const input = (o) => {
       const t = o.text ?? '';
       return { isInput: true, pad: sheet ? '0' : row ? '6px 8px 6px 0' : '2px 8px 8px', flex: row ? '0 0 360px' : 'none', text: t, rows: String(Math.min(4, Math.max(1, Math.ceil(t.length / 34)))), disabled: !!o.disabled, op: o.disabled ? '.45' : '1', note: o.note || '', sendBg: o.disabled ? 'transparent' : 'var(--st-acc-tint)',
@@ -368,6 +371,7 @@ class Component extends DCLogic {
     if (!sheet) {
       if (ctl && phase === 'asking' && !dis) blocks.push(banner('waiting', i => this.answer(i)));
       if (S0 === 'paused') blocks.push(banner('paused'));
+      if (S0 === 'scrolling') blocks.push(banner('scrolling'));
       if (ctl) {
         blocks.push({ isKeys: true, wrap: 'nowrap', pad: row ? '6px 8px' : '8px 8px 6px', flex: row ? '1 1 0' : 'none', bg: 'transparent', radius: '0', keys: this.keys({ disabled: dis, pressed: s.pressed, ctrlArm: s.ctrlArm, onKey: id => this.onKey(id) }) });
         const initText = S0 === 'reconnecting' ? 'use the backoff helper, not a fixed sleep' : '';
@@ -387,7 +391,7 @@ class Component extends DCLogic {
         Lb('Input row'),
         Tb('Send pastes the text, then presses Enter. Long-press Send pastes without Enter, so it lands in the agent\'s prompt for review.'),
         Sb('Empty'), input({}), Sb('Queued while reconnecting — text is kept, controls disabled'), input({ disabled: true, text: 'use the backoff helper, not a fixed sleep', note: 'Reconnecting — your reply stays here until MacBook is back' }),
-        Lb('Banners'), Sb('Waiting for you · quick-pick sends the digit'), banner('waiting'), Sb('Temporarily view only'), banner('paused'),
+        Lb('Banners'), Sb('Waiting for you · quick-pick sends the digit'), banner('waiting'), Sb('Temporarily view only · agent not in foreground (pane keeps streaming)'), banner('paused'), Sb('Temporarily view only · desktop in tmux scroll mode'), banner('scrolling'),
         Lb('Chips · terminal overlay and top bar'),
         { isChips: true, chips: [
           { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', label: '120×40 · fit' },
