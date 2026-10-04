@@ -108,6 +108,13 @@
 <sc-for list="{{ fpGroups }}" as="g" hint-placeholder-count="4"><div style="font-family:var(--st-mono);font-size:19px;font-weight:500;letter-spacing:.04em;text-align:center;padding:10px 0;border-radius:10px;background:var(--st-bg);box-shadow:0 0 0 1px var(--st-line)">{{ g }}</div></sc-for>
 </div>
 </div>
+<div style="margin-top:10px;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+<div style="font-size:12px;color:var(--st-mute)">Access requested</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px">
+<sc-for list="{{ scopeChips }}" as="c" hint-placeholder-count="4"><span style="display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;font-size:12.5px;font-weight:500;background:{{ c.bg }};box-shadow:inset 0 0 0 1px {{ c.ring }};color:var(--st-text)"><i class="{{ c.icon }}" style="font-size:14px;color:{{ c.ic }}"></i>{{ c.label }}</span></sc-for>
+</div>
+<div style="display:flex;gap:8px;font-size:12.5px;text-wrap:pretty"><i class="ph-fill ph-warning" style="font-size:15px;color:var(--st-run);flex:none;margin-top:1px"></i><span>Control terminal can type into agents, which can run commands on MacBook.</span></div>
+</div>
 <div style="flex:1"></div>
 <button onClick="{{ goScan }}" class="btn btn-secondary" style="height:48px;border-radius:24px;width:100%;color:var(--st-text)">Cancel</button>
 </div>
@@ -288,7 +295,7 @@
 <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
 <div style="display:flex;align-items:center;gap:6px;min-width:0">
 <span style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ it.name }}</span>
-<span style="flex:none;font:500 9.5px var(--st-mono);padding:1px 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-mute)">{{ it.provShort }}</span>
+<span style="flex:none;font:500 9.5px var(--st-mono);padding:1px 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-mute)">{{ it.provShort }}</span><sc-if value="{{ it.term }}"><i class="ph ph-terminal-window" style="flex:none;font-size:13px;color:var(--st-mute)"></i></sc-if>
 <sc-if value="{{ it.hubTag }}"><span style="flex:none;font-size:11px;color:var(--st-mute);padding:0 6px;border-radius:4px;background:var(--st-line)">{{ it.hubTag }}</span></sc-if>
 <span style="flex:1"></span>
 <span style="flex:none;font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ it.time }}</span>
@@ -352,7 +359,7 @@
 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-acc-tint);display:flex;align-items:center;justify-content:center;color:var(--st-acc);font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · now<span style="flex:1"></span><i class="ph ph-caret-down"></i></div>
 <div style="font-size:14.5px;font-weight:500;margin-top:4px">Fix flaky auth tests</div>
 <div style="font-size:13px;color:var(--st-mute);text-wrap:pretty">MacBook · Claude Code needs your permission · <span style="font-family:var(--st-mono);font-size:12px">~/code/api · feat/auth-retry</span></div>
-<div style="display:flex;gap:4px;margin-top:6px"><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Open</span><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Mute MacBook 1h</span></div>
+<div style="display:flex;gap:4px;margin-top:6px"><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Open terminal</span><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Session</span><span style="padding:6px 10px;border-radius:16px;color:var(--st-acc);font-size:13px;font-weight:500">Mute 1h</span></div>
 </div>
 </sc-if>
 </div>
@@ -387,6 +394,17 @@
 <div style="font-size:12px;color:var(--st-mute)">{{ d.statusMeta }}</div>
 </div>
 </div>
+<sc-if value="{{ d.termOpen }}">
+<div style="display:flex;flex-direction:column;gap:6px">
+<button class="btn btn-primary" style="height:48px;border-radius:24px;gap:8px;font-size:15px"><i class="{{ d.termIcon }}" style="font-size:18px"></i>{{ d.termLabel }}</button>
+<div style="font-size:12px;color:var(--st-mute);text-align:center">{{ d.termHint }}</div>
+</div>
+</sc-if>
+<sc-if value="{{ d.termNote }}">
+<div style="display:flex;gap:10px;padding:0 4px;font-size:12.5px;color:var(--st-mute);text-wrap:pretty"><i class="ph ph-terminal-window" style="font-size:16px;flex:none;margin-top:1px"></i>
+<div style="display:flex;flex-direction:column;gap:8px;min-width:0"><span>{{ d.termNote }}</span><sc-if value="{{ d.termCmd }}"><span style="font-family:var(--st-mono);font-size:12px;color:var(--st-text);padding:8px 12px;border-radius:10px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);align-self:flex-start">{{ d.termCmd }}</span></sc-if></div>
+</div>
+</sc-if>
 <div>
 <div style="font-size:12px;color:var(--st-mute);padding:0 4px 6px">Location</div>
 <div style="display:flex;flex-direction:column;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line);font-size:13px">
@@ -462,6 +480,7 @@
 <span style="color:var(--st-mute)">Endpoint</span><span style="font-family:var(--st-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.endpoint }}</span>
 <span style="color:var(--st-mute)">Fingerprint</span><span style="font-family:var(--st-mono);font-size:12px">{{ h.fp }}</span>
 <span style="color:var(--st-mute)">Last seen</span><span style="font-family:var(--st-mono);font-size:12px">{{ h.seen }}</span>
+<span style="color:var(--st-mute);align-self:center">Access</span><div style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ h.scopes }}" as="c"><span style="display:flex;align-items:center;gap:4px;height:22px;padding:0 7px;border-radius:6px;font-size:11.5px;box-shadow:inset 0 0 0 1px {{ c.ring }};background:{{ c.bg }}"><i class="{{ c.icon }}" style="font-size:12px;color:{{ c.ic }}"></i>{{ c.label }}</span></sc-for></div>
 </div>
 <div style="display:flex;justify-content:flex-end"><button onClick="{{ h.onUnpair }}" class="btn btn-ghost" style="color:var(--st-block);font-size:13px;padding:6px 10px;border-radius:16px">Unpair</button></div>
 </div>
@@ -519,7 +538,7 @@
 <div style="font-size:13px;color:var(--st-mute);text-wrap:pretty">MacBook · Claude Code needs your permission · <span style="font-family:var(--st-mono);font-size:12px">~/code/api · feat/auth-retry</span></div>
 <div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--st-bg);font-family:var(--st-mono);font-size:12px;line-height:1.5;text-wrap:pretty">Explore subagent wants to run<br>Bash · find ~/code -name "*.pem" -newer .env</div>
 <div style="margin-top:8px;font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">Context 42% · In 15.3k · Out 2.1k</div>
-<div style="display:flex;gap:4px;margin-top:4px;margin-left:-10px"><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Open session</span><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Mute MacBook 1h</span></div>
+<div style="display:flex;gap:4px;margin-top:4px;margin-left:-10px"><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Open terminal</span><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Session</span><span style="padding:8px 10px;color:var(--st-acc);font-size:13px;font-weight:500">Mute 1h</span></div>
 </div>
 <div style="padding:12px 16px;border-radius:6px 6px 24px 24px;background:var(--st-surf2);display:flex;flex-direction:column;gap:3px">
 <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--st-mute)"><span style="width:18px;height:18px;border-radius:50%;background:var(--st-line);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="ph-bold ph-broadcast"></i></span>SessionTap · MacBook · 2m</div>
@@ -596,16 +615,16 @@
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;welcome&quot;,&quot;perms&quot;,&quot;scan&quot;,&quot;pair&quot;,&quot;sessions&quot;,&quot;detail&quot;,&quot;hubs&quot;,&quot;alerts&quot;,&quot;shade&quot;,&quot;lock&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;sessions&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hubs&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:3,&quot;tsType&quot;:&quot;number&quot;},&quot;scenario&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;hub-unreachable&quot;,&quot;all-offline&quot;,&quot;no-sessions&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;pair&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;success&quot;,&quot;expired&quot;,&quot;rejected&quot;,&quot;unreachable&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;expand&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;detail&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;s1&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;filter&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;all&quot;,&quot;attention&quot;,&quot;running&quot;,&quot;stale&quot;],&quot;default&quot;:&quot;all&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;headsup&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;welcome&quot;,&quot;perms&quot;,&quot;scan&quot;,&quot;pair&quot;,&quot;sessions&quot;,&quot;detail&quot;,&quot;hubs&quot;,&quot;alerts&quot;,&quot;shade&quot;,&quot;lock&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;sessions&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hubs&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:1,&quot;max&quot;:3,&quot;tsType&quot;:&quot;number&quot;},&quot;scenario&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;hub-unreachable&quot;,&quot;all-offline&quot;,&quot;no-sessions&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;pair&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;success&quot;,&quot;expired&quot;,&quot;rejected&quot;,&quot;unreachable&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;expand&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;detail&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;s1&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;termAccess&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;auto&quot;,&quot;control&quot;,&quot;watch&quot;,&quot;noscope&quot;,&quot;headless&quot;,&quot;stopped&quot;],&quot;default&quot;:&quot;auto&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;filter&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;all&quot;,&quot;attention&quot;,&quot;running&quot;,&quot;stale&quot;],&quot;default&quot;:&quot;all&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;headsup&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
 class Component extends DCLogic {
   state = { nav: null, hubSel: null, filter: null, expanded: {}, collapsed: {}, forgotten: {}, unpaired: {}, snack: null, menu: false, dialog: null, drag: null, pairState: null, detailId: null, toggles: {}, perms: {} };
 
   PROV = { claude: ['Claude Code', 'CC'], codex: ['Codex', 'CX'], pi: ['Pi', 'PI'], qwen: ['Qwen Code', 'QW'] };
   REPO = { api: 'oklch(0.72 0.11 250)', infra: 'oklch(0.72 0.11 165)', billing: 'oklch(0.72 0.11 320)', web: 'oklch(0.74 0.11 85)', tok: 'oklch(0.72 0.11 205)', docs: 'oklch(0.66 0.02 280)', plug: 'oklch(0.72 0.11 20)' };
   HUBS = [
-    { id: 'mbp', name: 'MacBook', conn: 'live', connText: 'live', endpoint: 'LAN · 192.168.1.24:7420', fp: '7F3A 9C21 E04B 5D88', seen: 'now' },
-    { id: 'desk', name: 'Desktop', conn: 'reco', connText: 'reconnecting 12s', endpoint: 'tailnet · desktop.tail3f2a.ts.net', fp: 'C10D 44E7 9A02 B3F6', seen: '12s ago' },
-    { id: 'vm', name: 'Sandbox-VM', conn: 'off', connText: 'offline · 2h', endpoint: 'tailnet · sandbox-vm.tail3f2a.ts.net', fp: '5B9E 0F71 2DC8 A644', seen: '2h ago' }
+    { id: 'mbp', name: 'MacBook', conn: 'live', connText: 'live', endpoint: 'LAN · 192.168.1.24:7420', fp: '7F3A 9C21 E04B 5D88', seen: 'now', scopes: ['read', 'manage', 'watch', 'control'] },
+    { id: 'desk', name: 'Desktop', conn: 'reco', connText: 'reconnecting 12s', endpoint: 'tailnet · desktop.tail3f2a.ts.net', fp: 'C10D 44E7 9A02 B3F6', seen: '12s ago', scopes: ['read', 'manage', 'watch'] },
+    { id: 'vm', name: 'Sandbox-VM', conn: 'off', connText: 'offline · 2h', endpoint: 'tailnet · sandbox-vm.tail3f2a.ts.net', fp: '5B9E 0F71 2DC8 A644', seen: '2h ago', scopes: ['read'] }
   ];
   SESS = [
     { id: 's1', hub: 'mbp', src: 'host', name: 'Fix flaky auth tests', prov: 'claude', repo: 'api', branch: 'feat/auth-retry', status: 'running', act: 'pnpm test --filter auth', mono: true, t: '8m', model: 'opus-4.1', effort: 'high', cwd: '~/code/api', dirty: true, sha: 'a41f9c2', ctx: 42, ctxUsed: '84k / 200k', tin: '15.3k', tout: '2.1k', tcache: '2.4M', created: 'Oct 3 · 14:24', updated: '8s ago', kids: [
@@ -628,6 +647,8 @@ class Component extends DCLogic {
     { id: 's12', hub: 'desk', src: 'host', name: 'Try bun runtime', prov: 'pi', repo: 'web', branch: 'exp/bun', status: 'running', act: 'bun install', mono: true, t: '6d', stale: true, model: 'kimi-k2', effort: '—', cwd: '~/work/web', dirty: true, sha: 'f03b9a8', ctx: 15, ctxUsed: '19k / 128k', tin: '3.3k', tout: '0.8k', tcache: '0', created: 'Sep 27 · 16:40', updated: '6d ago', kids: [] }
   ];
 
+  scope(k, short) { const m = { read: ['Read', 'ph ph-list-bullets'], manage: ['Manage', 'ph ph-eraser'], watch: ['Watch terminal', 'ph ph-eye'], control: ['Control terminal', 'ph ph-keyboard'] }[k]; const hi = k === 'control'; return { label: short ? k : m[0], icon: m[1], bg: hi ? 'color-mix(in oklab,var(--st-run) 14%,transparent)' : 'transparent', ring: hi ? 'color-mix(in oklab,var(--st-run) 55%,transparent)' : 'var(--st-line)', ic: hi ? 'var(--st-run)' : 'var(--st-mute)' }; }
+  termOk(x) { return !['completed', 'failed', 'other'].includes(x.status) && x.id !== 's5' && (this.HUBS.find(h => h.id === x.hub).scopes || []).includes('watch'); }
   componentWillUnmount() { clearTimeout(this.ts); clearTimeout(this.tp); }
   flags(st) { return { sRun: st === 'running', sBlock: st === 'blocked', sIdle: st === 'idle', sDone: st === 'completed', sFail: st === 'failed', sOther: st === 'other' }; }
   conn(c) { return { cLive: c === 'live', cReco: c === 'reco', cOff: c === 'off' }; }
@@ -675,7 +696,7 @@ class Component extends DCLogic {
       const out = [{
         isRow: true, ...this.flags(e.st), name: x.name || this.PROV[x.prov][0], provShort: this.PROV[x.prov][1],
         branch: x.branch, repoColor: this.REPO[x.repo], activity: x.act, actFont: x.mono ? 'var(--st-mono)' : 'inherit',
-        reason: blocked ? e.reason : '', time: x.t, hubTag: o.hubTag || '', swipeable: stopped,
+        reason: blocked ? e.reason : '', time: x.t, hubTag: o.hubTag || '', swipeable: stopped, term: this.termOk(x),
         kidCount: x.kids.length ? String(x.kids.length) : '', kidChev: exp ? 'rotate(180deg)' : 'none', kidBg: exp ? 'var(--st-line)' : 'transparent',
         bg, tx: `translateX(${dx}px)`, trans: drag ? 'none' : 'transform .28s cubic-bezier(.2,.8,.2,1)', filter: x.stale ? 'grayscale(1) opacity(.5)' : 'none',
         stop: e2 => e2.stopPropagation(),
@@ -786,6 +807,13 @@ class Component extends DCLogic {
     const dx = this.SESS.find(x => x.id === dId) || this.SESS[0];
     const de = this.eff(dx), dh = this.HUBS.find(h => h.id === dx.hub);
     const dStopped = ['completed', 'failed', 'other'].includes(de.st);
+    const dsc = dh.scopes || [], pv = this.PROV[dx.prov][0];
+    const ta = p.termAccess && p.termAccess !== 'auto' ? p.termAccess : dStopped ? 'stopped' : dx.id === 's5' ? 'headless' : dsc.includes('control') ? 'control' : dsc.includes('watch') ? 'watch' : 'noscope';
+    const term = { termOpen: false, termNote: '', termCmd: '' };
+    if (ta === 'control') Object.assign(term, { termOpen: true, termIcon: 'ph ph-terminal-window', termLabel: 'Open terminal', termHint: `Live tmux pane · you can reply to ${pv} on ${dh.name}` });
+    if (ta === 'watch') Object.assign(term, { termOpen: true, termIcon: 'ph ph-eye', termLabel: 'View terminal', termHint: `View only · ${dh.name} didn't grant control` });
+    if (ta === 'noscope') Object.assign(term, { termNote: `${dh.name} didn't give this phone terminal access. To add it, run this on ${dh.name}, then scan the new code:`, termCmd: 'sessiontap-hub pair --allow watch,control' });
+    if (ta === 'headless') Object.assign(term, { termNote: `No live terminal — ${pv} was started headless, outside tmux. Start it inside tmux on ${dh.name} to watch it here.` });
     const titles = { running: 'Running', blocked: 'Blocked', idle: 'Idle', completed: 'Completed', failed: 'Failed', other: 'Stopped' };
     const d = {
       ...this.flags(de.st), name: dx.name || this.PROV[dx.prov][0], hubName: dh.name, hubSource: `${dh.name} · ${dx.src}`,
@@ -800,7 +828,7 @@ class Component extends DCLogic {
       hasKids: dx.kids.length > 0, kidsTitle: `Agents · ${dx.kids.length}`,
       kids: dx.kids.map((k, i) => ({ ...this.flags(k.status), name: k.name, summary: k.summary, el: k.el, times: k.times, border: i ? '1px solid var(--st-line)' : 'none', bg: k.status === 'blocked' ? 'var(--st-block-tint)' : 'transparent', sumColor: k.status === 'blocked' ? 'var(--st-block)' : 'var(--st-mute)' })),
       created: dx.created, updated: dx.updated, sid: dx.id + '-' + dx.sha.slice(0, 4) + '-' + dx.prov,
-      stopped: dStopped, notStopped: !dStopped, onForget: () => { this.forget(dx.id); this.go('sessions'); }
+      ...term, stopped: dStopped, notStopped: !dStopped, onForget: () => { this.forget(dx.id); this.go('sessions'); }
     };
 
     const menuItems = screen === 'detail'
@@ -830,7 +858,7 @@ class Component extends DCLogic {
     const perms = permDefs.map(([k, title, sub, def], i) => { const done = s.perms[k] ?? def; return { title, sub, done, todo: !done, border: i ? '1px solid var(--st-line)' : 'none', onAllow: () => this.setState(st => ({ perms: { ...st.perms, [k]: true } })) }; });
 
     const pair = s.pairState ?? p.pair ?? 'waiting';
-    const hubCards = hubs.map(h => ({ ...this.conn(h.conn), name: h.name, connText: h.connText, endpoint: h.endpoint, fp: h.fp, seen: h.seen, onUnpair: () => this.setState({ dialog: { id: h.id, name: h.name } }) }));
+    const hubCards = hubs.map(h => ({ ...this.conn(h.conn), name: h.name, connText: h.connText, endpoint: h.endpoint, fp: h.fp, seen: h.seen, scopes: (h.scopes || []).map(k => this.scope(k, true)), onUnpair: () => this.setState({ dialog: { id: h.id, name: h.name } }) }));
     const legend = [['running', 'running'], ['blocked', 'blocked'], ['idle', 'idle'], ['completed', 'completed'], ['failed', 'failed'], ['other', 'stopped'], ['running', 'stale', true]].map(([st, label, stl]) => ({ ...this.flags(st), label, filter: stl ? 'grayscale(1) opacity(.5)' : 'none' }));
 
     const navBar = ['sessions', 'hubs', 'alerts'].includes(screen);
@@ -846,7 +874,7 @@ class Component extends DCLogic {
       sheetTitle: theme === 'light' ? 'Components · light' : 'Components · dark',
       provList: ['CC', 'CX', 'PI', 'QW'],
       pWait: pair === 'waiting', pOk: pair === 'success', pExp: pair === 'expired', pRej: pair === 'rejected', pUnr: pair === 'unreachable',
-      fpGroups: ['4E1B', 'A7C0', '93DF', '0B62'],
+      fpGroups: ['4E1B', 'A7C0', '93DF', '0B62'], scopeChips: ['read', 'manage', 'watch', 'control'].map(k => this.scope(k, false)),
       topTitle: multi ? 'SessionTap' : hubs[0].name, summary,
       showHubChips: (screen === 'sessions' && multi) || screen === 'sheet', showFilters: (screen === 'sessions' && scenario !== 'no-sessions') || screen === 'sheet',
       hubChips, filterChips, feed, feedOverflow: framed ? 'auto' : 'visible', feedPad: framed ? '84px' : '16px',

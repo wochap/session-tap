@@ -38,6 +38,67 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 </div>
 </section>
 
+<section class="dv-turn" id="t6">
+<div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Live terminal · entry &amp; core states</span><span class="dv-tsub">The terminal is only ever the agent — no shell tab, no "+". Terminal phones are live: ↑↓ Enter, quick-picks, Ctrl+C ×2, Shift+Tab, send / long-press send, double-tap to zoom.</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="6a"><div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Detail · control → Open terminal</div><dc-import name="STPhone" screen="detail" detail="s1" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6b"><div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>Detail · watch only → View terminal</div><dc-import name="STPhone" screen="detail" detail="s6" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6c"><div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Detail · no terminal scope</div><dc-import name="STPhone" screen="detail" detail="s10" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6d"><div class="dv-olabel"><a class="dv-oid" href="#6d">6d</a>Detail · headless, no entry</div><dc-import name="STPhone" screen="detail" detail="s5" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6e"><div class="dv-olabel"><a class="dv-oid" href="#6e">6e</a>Terminal · waiting for you</div><dc-import name="STTerminal" state="waiting" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6f"><div class="dv-olabel"><a class="dv-oid" href="#6f">6f</a>Terminal · running</div><dc-import name="STTerminal" state="live" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6g"><div class="dv-olabel"><a class="dv-oid" href="#6g">6g</a>Terminal · 100% zoom, pan sideways</div><dc-import name="STTerminal" state="waiting" zoom="100" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6h"><div class="dv-olabel"><a class="dv-oid" href="#6h">6h</a>Watch only</div><dc-import name="STTerminal" state="watch" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6i"><div class="dv-olabel"><a class="dv-oid" href="#6i">6i</a>Temporarily view only</div><dc-import name="STTerminal" state="paused" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="6j"><div class="dv-olabel"><a class="dv-oid" href="#6j">6j</a>Ended · agent exited</div><dc-import name="STTerminal" state="ended" end="exited" theme="dark" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t7">
+<div class="dv-thd"><a class="dv-tid" href="#t7">7</a><span class="dv-tname">Terminal · connection, errors, landscape</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="7a"><div class="dv-olabel"><a class="dv-oid" href="#7a">7a</a>Opening</div><dc-import name="STTerminal" state="opening" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7b"><div class="dv-olabel"><a class="dv-oid" href="#7b">7b</a>Reconnecting · reply kept</div><dc-import name="STTerminal" state="reconnecting" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7c"><div class="dv-olabel"><a class="dv-oid" href="#7c">7c</a>Catching up</div><dc-import name="STTerminal" state="catching" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7d"><div class="dv-olabel"><a class="dv-oid" href="#7d">7d</a>Error · access revoked</div><dc-import name="STTerminal" state="revoked" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7e"><div class="dv-olabel"><a class="dv-oid" href="#7e">7e</a>Error · hub unreachable</div><dc-import name="STTerminal" state="unreachable" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7f"><div class="dv-olabel"><a class="dv-oid" href="#7f">7f</a>Source doesn't allow control</div><dc-import name="STTerminal" state="nocontrol" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7g"><div class="dv-olabel"><a class="dv-oid" href="#7g">7g</a>Safety refusal · pane no longer the agent</div><dc-import name="STTerminal" state="mismatch" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7h"><div class="dv-olabel"><a class="dv-oid" href="#7h">7h</a>Ended · pane closed on desktop</div><dc-import name="STTerminal" state="ended" end="closed" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="7i"><div class="dv-olabel"><a class="dv-oid" href="#7i">7i</a>Landscape · waiting for you (fit = 120 cols at ~12.5sp)</div><dc-import name="STTerminal" state="waiting" orient="landscape" theme="dark" hint-size="935px,432px"></dc-import></div>
+<div class="dv-opt" id="7j"><div class="dv-olabel"><a class="dv-oid" href="#7j">7j</a>Landscape · running</div><dc-import name="STTerminal" state="live" orient="landscape" theme="dark" hint-size="935px,432px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t8">
+<div class="dv-thd"><a class="dv-tid" href="#t8">8</a><span class="dv-tname">Scopes · pairing, hubs, list, notifications</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="8a"><div class="dv-olabel"><a class="dv-oid" href="#8a">8a</a>Pair confirm · scopes, Control flagged</div><dc-import name="STPhone" screen="pair" pair="waiting" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="8b"><div class="dv-olabel"><a class="dv-oid" href="#8b">8b</a>Hubs · scopes per hub</div><dc-import name="STPhone" screen="hubs" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="8c"><div class="dv-olabel"><a class="dv-oid" href="#8c">8c</a>Sessions · terminal icon when available</div><dc-import name="STPhone" screen="sessions" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="8d"><div class="dv-olabel"><a class="dv-oid" href="#8d">8d</a>Heads-up · Open terminal deep-link</div><dc-import name="STPhone" screen="sessions" headsup="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="8e"><div class="dv-olabel"><a class="dv-oid" href="#8e">8e</a>Shade · Open terminal action</div><dc-import name="STPhone" screen="shade" theme="dark" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t9">
+<div class="dv-thd"><a class="dv-tid" href="#t9">9</a><span class="dv-tname">Terminal · light key frames</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="9a"><div class="dv-olabel"><a class="dv-oid" href="#9a">9a</a>Waiting for you</div><dc-import name="STTerminal" state="waiting" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="9b"><div class="dv-olabel"><a class="dv-oid" href="#9b">9b</a>Ended · tmux stopped</div><dc-import name="STTerminal" state="ended" end="tmux" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="9c"><div class="dv-olabel"><a class="dv-oid" href="#9c">9c</a>Pair confirm · scopes</div><dc-import name="STPhone" screen="pair" pair="waiting" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="9d"><div class="dv-olabel"><a class="dv-oid" href="#9d">9d</a>Landscape · light</div><dc-import name="STTerminal" state="waiting" orient="landscape" theme="light" hint-size="935px,432px"></dc-import></div>
+</div>
+</section>
+
+<section class="dv-turn" id="t10">
+<div class="dv-thd"><a class="dv-tid" href="#t10">10</a><span class="dv-tname">Terminal component sheet</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="10a"><div class="dv-olabel"><a class="dv-oid" href="#10a">10a</a>Dark</div><dc-import name="STTerminal" screen="sheet" theme="dark" hint-size="560px,2400px"></dc-import></div>
+<div class="dv-opt" id="10b"><div class="dv-olabel"><a class="dv-oid" href="#10b">10b</a>Light</div><dc-import name="STTerminal" screen="sheet" theme="light" hint-size="560px,2400px"></dc-import></div>
+</div>
+</section>
+
 <section class="dv-turn" id="t1">
 <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Dark · core flow</span><span class="dv-tsub">3 hubs: MacBook live, Desktop reconnecting, Sandbox-VM offline</span></div>
 <div class="dv-opts">

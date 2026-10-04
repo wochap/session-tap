@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/styles.css">
+<script src="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/_ds_bundle.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+[data-stroot]{--st-bg:color-mix(in oklab,var(--color-bg) 72%,#000);--st-surf:color-mix(in oklab,var(--color-bg) 92%,var(--color-surface));--st-surf2:var(--color-surface);--st-line:color-mix(in srgb,var(--color-text) 9%,transparent);--st-text:var(--color-text);--st-mute:var(--color-neutral-500);--st-dim:var(--color-neutral-700);--st-acc:var(--color-accent);--st-acc-ink:var(--color-accent-300);--st-acc-tint:color-mix(in oklab,var(--color-accent) 14%,transparent);--st-ind:var(--color-accent-900);--st-run:oklch(0.80 0.14 75);--st-block:oklch(0.69 0.19 25);--st-ok:oklch(0.76 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.69 0.19 25) 10%,transparent);--st-inv:var(--color-neutral-200);--st-inv-text:var(--color-neutral-900);--st-inv-acc:var(--color-accent-700);--st-mono:"JetBrains Mono",ui-monospace,monospace;
+--a-bg:color-mix(in oklab,var(--color-bg) 55%,#000);--a-fg:oklch(0.93 0.006 275);--a-k:oklch(0.34 0.02 275);--a-r:oklch(0.68 0.16 22);--a-g:oklch(0.76 0.13 150);--a-y:oklch(0.83 0.12 85);--a-b:oklch(0.72 0.11 255);--a-m:oklch(0.72 0.12 288);--a-c:oklch(0.78 0.09 205);--a-w:oklch(0.84 0.01 275);--a-K:oklch(0.52 0.02 275);--a-R:oklch(0.76 0.15 22);--a-G:oklch(0.84 0.12 150);--a-Y:oklch(0.90 0.11 90);--a-B:oklch(0.80 0.10 255);--a-M:oklch(0.80 0.11 288);--a-C:oklch(0.86 0.08 205);--a-W:oklch(0.97 0.005 275);--a-rbg:color-mix(in oklab,oklch(0.68 0.16 22) 16%,transparent);--a-gbg:color-mix(in oklab,oklch(0.76 0.13 150) 14%,transparent)}
+[data-st="light"]{--st-bg:var(--color-neutral-100);--st-surf:color-mix(in oklab,var(--color-neutral-100) 45%,var(--color-neutral-200));--st-surf2:var(--color-neutral-200);--st-line:color-mix(in srgb,var(--color-neutral-900) 11%,transparent);--st-text:var(--color-neutral-900);--st-mute:var(--color-neutral-600);--st-dim:var(--color-neutral-400);--st-acc:var(--color-accent-600);--st-acc-ink:var(--color-accent-700);--st-acc-tint:color-mix(in oklab,var(--color-accent-500) 14%,transparent);--st-ind:var(--color-accent-200);--st-run:oklch(0.64 0.15 65);--st-block:oklch(0.56 0.2 25);--st-ok:oklch(0.56 0.14 155);--st-block-tint:color-mix(in oklab,oklch(0.56 0.2 25) 8%,transparent);
+--a-bg:oklch(0.985 0.003 275);--a-fg:oklch(0.27 0.02 275);--a-k:oklch(0.30 0.02 275);--a-r:oklch(0.52 0.18 25);--a-g:oklch(0.50 0.13 150);--a-y:oklch(0.56 0.12 70);--a-b:oklch(0.50 0.13 255);--a-m:oklch(0.50 0.15 288);--a-c:oklch(0.52 0.09 210);--a-w:oklch(0.72 0.01 275);--a-K:oklch(0.56 0.02 275);--a-R:oklch(0.60 0.17 25);--a-G:oklch(0.62 0.13 150);--a-Y:oklch(0.68 0.12 80);--a-B:oklch(0.58 0.12 255);--a-M:oklch(0.58 0.13 288);--a-C:oklch(0.62 0.09 210);--a-W:oklch(0.20 0.02 275);--a-rbg:color-mix(in oklab,oklch(0.52 0.18 25) 10%,transparent);--a-gbg:color-mix(in oklab,oklch(0.50 0.13 150) 10%,transparent)}
+@keyframes st-spin{to{transform:rotate(360deg)}}
+@keyframes st-pulse{50%{opacity:.3}}
+</style>
+</helmet>
+<div data-stroot="" data-st="{{ theme }}" style="position:relative;width:{{ rootW }};height:{{ rootH }};padding:{{ rootPad }};border-radius:{{ rootR }};background:{{ rootBg }};box-sizing:border-box;font-family:var(--font-body);flex:none">
+<div style="position:relative;width:100%;height:{{ innerH }};border-radius:{{ innerR }};overflow:hidden;background:var(--st-bg);color:var(--st-text);display:flex;flex-direction:column;font-size:14px;line-height:1.4">
+
+<sc-if value="{{ framed }}" hint-placeholder-val="{{ true }}">
+<div style="height:{{ statusH }};flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:12px;font-weight:500;position:relative">
+<span>14:32</span>
+<span style="display:flex;gap:6px;align-items:center;font-size:14px"><i class="ph-fill ph-wifi-high"></i><i class="ph-fill ph-cell-signal-full"></i><i class="ph-fill ph-battery-high"></i></span>
+</div>
+<div style="display:flex;align-items:center;gap:4px;padding:2px 10px 6px 4px;flex:none;border-bottom:1px solid var(--st-line)">
+<button class="btn btn-ghost btn-icon" style="color:var(--st-text);font-size:22px;width:44px;height:44px;border-radius:22px;flex:none"><i class="ph ph-arrow-left"></i></button>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+<div style="font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ title }}</div>
+<div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--st-mute);white-space:nowrap;min-width:0">
+<span style="width:12px;height:12px;display:flex;align-items:center;justify-content:center;flex:none">
+<sc-if value="{{ st.sRun }}">{{ arc }}</sc-if>
+<sc-if value="{{ st.sBlock }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--st-block)"></span></sc-if>
+<sc-if value="{{ st.sIdle }}"><span style="width:7px;height:7px;border-radius:50%;border:1.5px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ st.sEnd }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-dim)"></span></sc-if>
+</span>
+<span style="color:{{ st.color }};font-weight:500;flex:none">{{ st.word }}</span>
+<span style="color:var(--st-dim);flex:none">·</span>
+<span style="font-family:var(--st-mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ where }}</span>
+</div>
+</div>
+<div style="flex:none;display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--st-line);font-size:11.5px;color:{{ conn.color }}">
+<sc-if value="{{ conn.cLive }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok)"></span></sc-if>
+<sc-if value="{{ conn.cReco }}">{{ pulse }}</sc-if>
+<sc-if value="{{ conn.cOff }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+{{ conn.text }}</div>
+</div>
+
+<div style="flex:1;min-height:0;position:relative;background:var(--a-bg)">
+<sc-if value="{{ showTerm }}" hint-placeholder-val="{{ true }}">
+<div ref="{{ termRef }}" onDoubleClick="{{ toggleZoom }}" style="position:absolute;inset:0;overflow:auto;scrollbar-width:none;padding:8px 6px;box-sizing:border-box;font-family:var(--st-mono);font-size:{{ fs }};line-height:1.3;color:var(--a-fg);opacity:{{ termOp }};filter:{{ termFilter }};transition:opacity .3s">
+<div style="width:max-content;min-width:100%;min-height:100%;display:flex;flex-direction:column;justify-content:flex-end">
+<sc-for list="{{ lines }}" as="ln" hint-placeholder-count="12">
+<div style="white-space:pre;height:1.3em"><sc-for list="{{ ln.segs }}" as="g"><span style="color:{{ g.c }};background:{{ g.bg }};font-weight:{{ g.w }}">{{ g.t }}</span></sc-for></div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ opening }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end;gap:7px;opacity:.9">
+<sc-for list="{{ skel }}" as="w"><span style="height:6px;border-radius:3px;background:var(--st-line);width:{{ w }}"></span></sc-for>
+</div>
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
+<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:20px;background:var(--st-surf2);box-shadow:var(--shadow-md);font-size:13.5px">{{ arc }}Connecting to {{ hub }}…</div>
+<div style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">encrypted · LAN 192.168.1.24</div>
+</div>
+</sc-if>
+<sc-if value="{{ err }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:28px;gap:8px;background:var(--st-bg)">
+<i class="{{ err.icon }}" style="font-size:32px;color:{{ err.ic }}"></i>
+<div style="font-size:20px;font-weight:500;margin-top:6px;text-wrap:pretty">{{ err.title }}</div>
+<div style="font-size:13.5px;color:var(--st-mute);text-wrap:pretty;max-width:460px">{{ err.body }}</div>
+<sc-if value="{{ err.detail }}"><div style="font-family:var(--st-mono);font-size:11.5px;color:var(--st-mute)">{{ err.detail }}</div></sc-if>
+<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+<sc-for list="{{ err.actions }}" as="a"><button class="{{ a.cls }}" style="height:44px;border-radius:22px;padding:0 18px;color:{{ a.color }}">{{ a.label }}</button></sc-for>
+</div>
+</div>
+</sc-if>
+<div style="position:absolute;top:6px;right:6px;display:flex;gap:4px;align-items:center">
+<sc-for list="{{ overlay }}" as="c">
+<div onClick="{{ c.onClick }}" style="display:flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:12px;background:color-mix(in oklab,var(--st-surf2) 88%,transparent);box-shadow:inset 0 0 0 1px var(--st-line);font:500 11px var(--st-mono);color:var(--st-mute);cursor:pointer;user-select:none">
+<sc-if value="{{ c.spin }}">{{ arc }}</sc-if><sc-if value="{{ c.icon }}"><i class="{{ c.icon }}" style="font-size:12px"></i></sc-if>{{ c.label }}</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSheet }}" hint-placeholder-val="{{ false }}">
+<div style="padding:24px 28px 0;display:flex;flex-direction:column;gap:4px">
+<div style="font-size:18px;font-weight:500">{{ sheetTitle }}</div>
+<div style="font-size:12.5px;color:var(--st-mute)">Key bar, banners, strips, end cards, ANSI palette, gestures</div>
+</div>
+</sc-if>
+
+<div style="display:flex;flex-direction:{{ ctlDir }};flex-wrap:{{ ctlWrap }};align-items:{{ ctlAlign }};flex:none;min-width:0;max-width:100%;box-sizing:border-box;background:{{ ctlBg }};padding:{{ ctlPad }};box-shadow:{{ ctlShadow }}">
+<sc-for list="{{ blocks }}" as="b" hint-placeholder-count="3">
+<sc-if value="{{ b.isLabel }}"><div style="font-size:11px;color:var(--st-mute);letter-spacing:.06em;text-transform:uppercase;padding:22px 0 8px">{{ b.text }}</div></sc-if>
+<sc-if value="{{ b.isSub }}"><div style="font-size:12px;color:var(--st-mute);padding:10px 0 4px">{{ b.text }}</div></sc-if>
+<sc-if value="{{ b.isText }}"><div style="font-size:12.5px;color:var(--st-mute);text-wrap:pretty;padding-bottom:4px">{{ b.text }}</div></sc-if>
+<sc-if value="{{ b.isBanner }}">
+<div style="padding:{{ b.pad }};flex-basis:{{ b.basis }};box-sizing:border-box">
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:8px 8px 8px 12px;min-height:44px;box-sizing:border-box;border-radius:12px;background:{{ b.bg }};box-shadow:inset 0 0 0 1px {{ b.ring }}">
+<i class="{{ b.icon }}" style="font-size:18px;color:{{ b.ic }};flex:none"></i>
+<div style="flex:1 1 180px;min-width:0"><div style="font-size:13px;font-weight:500">{{ b.title }}</div><sc-if value="{{ b.sub }}"><div style="font-size:12px;color:var(--st-mute)">{{ b.sub }}</div></sc-if></div>
+<sc-if value="{{ b.chips }}"><div style="display:flex;gap:6px;flex-wrap:wrap">
+<sc-for list="{{ b.chips }}" as="c"><button onClick="{{ c.onClick }}" style="height:40px;padding:0 12px;border-radius:10px;border:none;box-shadow:inset 0 0 0 1px var(--st-line);background:var(--st-bg);color:var(--st-text);display:flex;align-items:center;gap:8px;font:13px var(--font-body);cursor:pointer"><span style="font:600 13px var(--st-mono);color:var(--st-acc-ink)">{{ c.n }}</span>{{ c.label }}</button></sc-for>
+</div></sc-if>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ b.isKeys }}">
+<div style="display:flex;flex-wrap:{{ b.wrap }};gap:6px;overflow-x:auto;scrollbar-width:none;padding:{{ b.pad }};flex:{{ b.flex }};min-width:0;max-width:100%;box-sizing:border-box;background:{{ b.bg }};border-radius:{{ b.radius }}">
+<sc-for list="{{ b.keys }}" as="k" hint-placeholder-count="8">
+<button onClick="{{ k.onClick }}" disabled="{{ k.disabled }}" style="flex:none;height:44px;min-width:{{ k.w }};padding:0 10px;border-radius:10px;border:none;box-shadow:inset 0 0 0 1px {{ k.ring }};background:{{ k.bg }};color:{{ k.color }};opacity:{{ k.op }};font:500 13px var(--st-mono);display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:background .12s,box-shadow .12s"><sc-if value="{{ k.icon }}"><i class="{{ k.icon }}" style="font-size:17px"></i></sc-if>{{ k.label }}</button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ b.isInput }}">
+<div style="display:flex;flex-direction:column;gap:4px;padding:{{ b.pad }};flex:{{ b.flex }};min-width:0;box-sizing:border-box">
+<sc-if value="{{ b.note }}"><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--st-mute);padding:0 6px">{{ pulse }}{{ b.note }}</div></sc-if>
+<div style="display:flex;align-items:flex-end;gap:6px">
+<div style="flex:1;min-width:0;display:flex;border-radius:22px;background:var(--st-surf2);box-shadow:inset 0 0 0 1px var(--st-line);opacity:{{ b.op }}">
+<textarea value="{{ b.text }}" onChange="{{ b.onText }}" disabled="{{ b.disabled }}" placeholder="Reply to agent…" rows="{{ b.rows }}" style="flex:1;min-width:0;resize:none;border:none;outline:none;background:transparent;color:var(--st-text);font:14px/20px var(--font-body);padding:12px 16px;box-sizing:border-box"></textarea>
+</div>
+<button disabled="{{ b.disabled }}" class="btn btn-ghost btn-icon" style="width:44px;height:44px;border-radius:22px;font-size:20px;color:var(--st-mute);flex:none;opacity:{{ b.op }}"><i class="ph ph-microphone"></i></button>
+<button onClick="{{ b.onSend }}" onPointerDown="{{ b.onSendDown }}" onPointerUp="{{ b.onSendUp }}" onPointerLeave="{{ b.onSendUp }}" disabled="{{ b.disabled }}" style="width:44px;height:44px;border-radius:22px;flex:none;border:none;box-shadow:inset 0 0 0 1.5px var(--st-acc);background:{{ b.sendBg }};color:var(--st-acc);font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:{{ b.op }}"><i class="ph-bold ph-arrow-up"></i></button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ b.isStrip }}">
+<div style="flex-basis:{{ b.basis }};padding:{{ b.pad }};box-sizing:border-box">
+<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:{{ b.radius }};background:var(--st-surf);box-shadow:inset 0 0 0 1px {{ b.ring }}">
+<i class="{{ b.icon }}" style="font-size:19px;color:var(--st-mute);flex:none"></i>
+<div style="flex:1;min-width:0"><div style="font-size:13px;text-wrap:pretty">{{ b.title }}</div><sc-if value="{{ b.sub }}"><div style="font-size:12px;color:var(--st-mute);text-wrap:pretty">{{ b.sub }}</div></sc-if></div>
+<span style="color:var(--st-acc-ink);font-size:13px;font-weight:500;flex:none;padding:10px 4px;cursor:pointer">{{ b.link }}</span>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ b.isEnd }}">
+<div style="flex-basis:{{ b.basis }};padding:{{ b.pad }};box-sizing:border-box">
+<div style="padding:16px;border-radius:20px;background:var(--st-surf2);box-shadow:0 0 0 1px var(--st-line);display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;align-items:center;gap:10px"><i class="{{ b.icon }}" style="font-size:20px;color:{{ b.ic }}"></i><span style="font-size:15px;font-weight:500;flex:1">{{ b.title }}</span><span style="font-family:var(--st-mono);font-size:11px;color:var(--st-mute)">{{ b.time }}</span></div>
+<div style="font-size:12.5px;color:var(--st-mute);text-wrap:pretty;padding-left:30px">{{ b.sub }}</div>
+<div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-primary" style="height:44px;border-radius:22px;flex:1">Back to session</button><button class="btn btn-secondary" style="height:44px;border-radius:22px;flex:1;color:var(--st-text);gap:6px"><i class="ph ph-copy"></i>Copy last screen</button></div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ b.isChips }}">
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+<sc-for list="{{ b.chips }}" as="c">
+<div style="display:flex;align-items:center;gap:6px;height:{{ c.h }};padding:0 10px;border-radius:14px;background:{{ c.bg }};box-shadow:inset 0 0 0 1px var(--st-line);font:500 11.5px {{ c.font }};color:{{ c.color }}">
+<sc-if value="{{ c.spin }}">{{ arc }}</sc-if><sc-if value="{{ c.pulse }}">{{ pulse }}</sc-if>
+<sc-if value="{{ c.live }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--st-ok)"></span></sc-if>
+<sc-if value="{{ c.off }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
+<sc-if value="{{ c.icon }}"><i class="{{ c.icon }}" style="font-size:12px"></i></sc-if>{{ c.label }}</div>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ b.isPalette }}">
+<div style="display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px">
+<sc-for list="{{ b.sw }}" as="s">
+<div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+<div style="height:36px;border-radius:8px;background:{{ s.v }};box-shadow:inset 0 0 0 1px var(--st-line)"></div>
+<div style="font:500 10.5px var(--st-mono)">{{ s.n }} {{ s.name }}</div>
+<div style="font:9.5px var(--st-mono);color:var(--st-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.code }}</div>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ b.isSample }}">
+<div style="padding:10px 12px;border-radius:12px;background:var(--a-bg);box-shadow:inset 0 0 0 1px var(--st-line);font:12px/1.45 var(--st-mono);color:var(--a-fg);overflow:hidden">
+<sc-for list="{{ b.lines }}" as="ln"><div style="white-space:pre;height:1.45em"><sc-for list="{{ ln.segs }}" as="g"><span style="color:{{ g.c }};background:{{ g.bg }};font-weight:{{ g.w }}">{{ g.t }}</span></sc-for></div></sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ b.isNotes }}">
+<div style="display:flex;flex-direction:column;border-radius:16px;background:var(--st-surf);box-shadow:0 0 0 1px var(--st-line)">
+<sc-for list="{{ b.notes }}" as="n"><div style="display:flex;gap:14px;padding:11px 14px;border-top:{{ n.border }}"><span style="width:118px;flex:none;font-size:13px;font-weight:500">{{ n.g }}</span><span style="font-size:12.5px;color:var(--st-mute);text-wrap:pretty">{{ n.t }}</span></div></sc-for>
+</div>
+</sc-if>
+</sc-for>
+</div>
+
+<sc-if value="{{ framed }}" hint-placeholder-val="{{ true }}">
+<div style="height:{{ navH }};flex:none;display:flex;align-items:center;justify-content:center;background:{{ ctlBg }}"><span style="width:108px;height:4px;border-radius:2px;background:var(--st-text);opacity:.45"></span></div>
+</sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;fit&quot;,&quot;100&quot;],&quot;default&quot;:&quot;fit&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { phase: null, extra: null, sel: 0, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false };
+  OPTS = ['Yes', "Yes, and don't ask again for sudo apt install commands in ~/code/api", 'No, and tell Claude what to do differently (esc)'];
+  QUICK = ['Yes', 'Always', 'No'];
+  MODES = ['accept edits on', 'plan mode on', 'default mode'];
+  PAL = {
+    dark: [['k','black','0.34 0.02 275'],['r','red','0.68 0.16 22'],['g','green','0.76 0.13 150'],['y','yellow','0.83 0.12 85'],['b','blue','0.72 0.11 255'],['m','magenta','0.72 0.12 288'],['c','cyan','0.78 0.09 205'],['w','white','0.84 0.01 275'],['K','br black','0.52 0.02 275'],['R','br red','0.76 0.15 22'],['G','br green','0.84 0.12 150'],['Y','br yellow','0.90 0.11 90'],['B','br blue','0.80 0.10 255'],['M','br magenta','0.80 0.11 288'],['C','br cyan','0.86 0.08 205'],['W','br white','0.97 0.005 275']],
+    light: [['k','black','0.30 0.02 275'],['r','red','0.52 0.18 25'],['g','green','0.50 0.13 150'],['y','yellow','0.56 0.12 70'],['b','blue','0.50 0.13 255'],['m','magenta','0.50 0.15 288'],['c','cyan','0.52 0.09 210'],['w','white','0.72 0.01 275'],['K','br black','0.56 0.02 275'],['R','br red','0.60 0.17 25'],['G','br green','0.62 0.13 150'],['Y','br yellow','0.68 0.12 80'],['B','br blue','0.58 0.12 255'],['M','br magenta','0.58 0.13 288'],['C','br cyan','0.62 0.09 210'],['W','br white','0.20 0.02 275']]
+  };
+
+  componentDidMount() { setTimeout(() => this.toBottom(), 60); }
+  componentDidUpdate() { if (this.curN !== this.lastN || this.curZ !== this.lastZ) this.toBottom(); }
+  componentWillUnmount() { clearTimeout(this.tf); clearTimeout(this.tc); clearTimeout(this.lpT); }
+  toBottom() { const el = this.termEl; if (!el) return; el.scrollTop = el.scrollHeight; el.scrollLeft = 0; this.lastN = this.curN; this.lastZ = this.curZ; }
+
+  S(t, c, o = {}) { return { t, c: c ? `var(--a-${c})` : 'inherit', bg: o.bg ? `var(--a-${o.bg})` : 'transparent', w: o.b ? 600 : 400 }; }
+  L(...segs) { return { segs }; }
+  box(rows, bc) {
+    const S = this.S.bind(this), w = 118;
+    const out = [this.L(S('╭' + '─'.repeat(w - 2) + '╮', bc))];
+    rows.forEach(r => { const n = r.reduce((a, s) => a + s.t.length, 0); out.push(this.L(S('│ ', bc), ...r, S(' '.repeat(Math.max(0, w - 4 - n))), S(' │', bc))); });
+    out.push(this.L(S('╰' + '─'.repeat(w - 2) + '╯', bc)));
+    return out;
+  }
+  hist() {
+    const S = this.S.bind(this), L = this.L.bind(this), B = { b: 1 };
+    return [
+      L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('claude')), L(),
+      L(S(' * ', 'm'), S('Claude Code', 'W', B), S('   cwd: ~/code/api', 'K')), L(),
+      L(S('> ', 'K'), S('the auth tests flake on CI about 1 in 5 runs. find out why and fix it, keep the retry semantics', 'w')), L(),
+      L(S('● ', 'W'), S("I'll start with the retry helper and the spec that fails.")), L(),
+      L(S('● ', 'g'), S('Read', 'W', B), S('(src/auth/retry.ts)')), L(S('  └  ', 'K'), S('Read 214 lines', 'K')), L(),
+      L(S('● ', 'g'), S('Read', 'W', B), S('(src/auth/session.spec.ts)')), L(S('  └  ', 'K'), S('Read 388 lines', 'K')), L(),
+      L(S('● ', 'W'), S("The flake is a fixed 100ms sleep racing the mock server's 503 window. Switching to jittered backoff.")), L(),
+      L(S('● ', 'g'), S('Update', 'W', B), S('(src/auth/retry.ts)')),
+      L(S('  └  ', 'K'), S('Updated ', 'K'), S('src/auth/retry.ts', 'w', B), S(' with 12 additions and 3 removals', 'K')),
+      L(S('       39 ', 'K'), S('    for (let attempt = 0; attempt < max; attempt++) {')),
+      L(S('       40 ', 'K'), S('      if (await ok(res)) return res;')),
+      L(S('       41 ', 'K'), S('-     await sleep(100);                                                        ', 'r', { bg: 'rbg' })),
+      L(S('       41 ', 'K'), S('+     await sleep(backoff(attempt, { base: 100, cap: 2000, jitter: 0.2 }));    ', 'g', { bg: 'gbg' })),
+      L(S('       42 ', 'K'), S('    }')), L(),
+      L(S('● ', 'g'), S('Task', 'W', B), S('(Explore: find stale fixtures)')), L(S('  └  ', 'K'), S('Found 3 fixtures still pinning the old timeout', 'K')), L(),
+      L(S('● ', 'g'), S('Bash', 'W', B), S('(pnpm test --filter auth -- --runInBand)')),
+      L(S('  └  ', 'K'), S(' PASS ', 'k', { bg: 'G', b: 1 }), S(' src/auth/retry.spec.ts '), S('(31 tests)', 'K')),
+      L(S('     '), S(' PASS ', 'k', { bg: 'G', b: 1 }), S(' src/auth/session.spec.ts '), S('(14 tests)', 'K')),
+      L(S('     … +4 lines (ctrl+r to expand)', 'K')), L(),
+      L(S('● ', 'W'), S('Unit tests pass. The integration suite needs a local Postgres.'))
+    ];
+  }
+  answerLines(i) {
+    const S = this.S.bind(this), L = this.L.bind(this);
+    if (i === 2) return [L(), L(S('  └  ', 'K'), S('User declined · tell Claude what to do instead', 'r'))];
+    const o = [L(), L(S('● ', 'g'), S('Bash', 'W', { b: 1 }), S('(sudo apt install -y postgresql-16)')), L(S('  └  ', 'K'), S('Setting up postgresql-16 (16.4-1.pgdg24.04+1) …', 'K'))];
+    if (i === 1) o.push(L(S('     Allowed sudo apt install for ~/code/api', 'K')));
+    return o;
+  }
+  endLines() {
+    const S = this.S.bind(this), L = this.L.bind(this);
+    return [...this.answerLines(0), L(), L(S('● ', 'g'), S('Bash', 'W', { b: 1 }), S('(pnpm test:integration --filter auth)')),
+      L(S('  └  ', 'K'), S(' PASS ', 'k', { bg: 'G', b: 1 }), S(' 45 tests · 0 flaky across 20 runs')), L(),
+      L(S('● ', 'W'), S('Fixed: jittered backoff in retry.ts, 3 fixtures updated. Ready for review on feat/auth-retry.')), L(),
+      L(S('Total: 2m 41s · 3 files changed', 'K'))];
+  }
+  frame(phase, extra, sel, mode, paste) {
+    const S = this.S.bind(this), L = this.L.bind(this);
+    const out = [...this.hist(), ...extra];
+    if (phase === 'ended') return out;
+    if (phase === 'asking') {
+      return [...out, L(), ...this.box([[S('Bash command', 'W', { b: 1 })], [], [S('  sudo apt install -y postgresql-16')], [S('  Install Postgres for the auth integration suite', 'K')], [], [S('Do you want to proceed?')],
+        ...this.OPTS.map((o, i) => i === sel ? [S('> ', 'm', { b: 1 }), S(`${i + 1}. ${o}`, 'm', { b: 1 })] : [S('  '), S(`${i + 1}. ${o}`)])], 'm')];
+    }
+    if (phase === 'running') out.push(L(), L(S('* ', 'y'), S('Running integration suite…', 'y'), S(' (38s · ↓ 1.2k tokens · esc to interrupt)', 'K')));
+    out.push(L(), ...this.box([[S('> ', 'K'), S(paste || ''), S(' ', null, { bg: 'fg' })]], 'K'), L(S('  >> ', 'm'), S(this.MODES[mode], 'm'), S(' (shift+tab to cycle)', 'K')));
+    return out;
+  }
+  initPhase(s) { return ({ live: 'running', catching: 'running', paused: 'running', ended: 'ended' })[s] || 'asking'; }
+  initExtra(s) { return s === 'ended' ? this.endLines() : ['live', 'catching', 'paused'].includes(s) ? this.answerLines(0) : []; }
+  push(lines, phase) { this.setState(st => ({ extra: [...(st.extra ?? this.initExtra(this.props.state ?? 'waiting')), ...lines], phase })); }
+  answer(i) { this.push(this.answerLines(i), i === 2 ? 'idle' : 'running'); this.setState({ sel: 0 }); }
+
+  keyDefs() { return [['esc', 'Esc', '', '44px'], ['tab', 'Tab', '', '44px'], ['stab', '⇧Tab', '', '54px'], ['up', '', 'ph-bold ph-arrow-up', '50px', 1], ['down', '', 'ph-bold ph-arrow-down', '50px', 1], ['left', '', 'ph-bold ph-arrow-left', '50px', 1], ['right', '', 'ph-bold ph-arrow-right', '50px', 1], ['enter', 'Enter', 'ph ph-arrow-elbow-down-left', '76px'], ['space', 'Space', '', '64px'], ['ctrlc', 'Ctrl+C', '', '68px'], ['paste', 'Paste', 'ph ph-clipboard-text', '76px']]; }
+  keys(o) {
+    return this.keyDefs().map(([id, label, icon, w, arrow]) => {
+      const pr = o.pressed === id, arm = id === 'ctrlc' && o.ctrlArm;
+      let bg = arrow ? 'color-mix(in oklab,var(--st-surf2) 82%,var(--st-text))' : 'var(--st-surf2)', ring = 'var(--st-line)', color = id === 'ctrlc' ? 'var(--st-block)' : 'var(--st-text)';
+      if (pr) { bg = 'var(--st-acc-tint)'; ring = 'var(--st-acc)'; }
+      if (arm) { bg = 'var(--st-block-tint)'; ring = 'var(--st-block)'; }
+      return { label: arm ? 'Tap again' : label, icon: arm ? 'ph-bold ph-warning' : icon, w: arm ? '108px' : w, bg, ring, color, op: o.disabled ? '.38' : '1', disabled: !!o.disabled, onClick: o.onKey ? () => o.onKey(id) : () => {} };
+    });
+  }
+  onKey(id) {
+    clearTimeout(this.tf);
+    this.setState({ pressed: id }); this.tf = setTimeout(() => this.setState({ pressed: null }), 160);
+    const ph = this.state.phase ?? this.initPhase(this.props.state ?? 'waiting');
+    if (id === 'ctrlc') {
+      clearTimeout(this.tc);
+      if (!this.state.ctrlArm) { this.setState({ ctrlArm: true }); this.tc = setTimeout(() => this.setState({ ctrlArm: false }), 2500); }
+      else { this.setState({ ctrlArm: false }); this.push([this.L(this.S('  └  ', 'K'), this.S('Interrupted by user', 'r'))], 'idle'); }
+      return;
+    }
+    if (ph === 'asking') {
+      if (id === 'up') this.setState(s => ({ sel: (s.sel + 2) % 3 }));
+      if (id === 'down') this.setState(s => ({ sel: (s.sel + 1) % 3 }));
+      if (id === 'enter') this.answer(this.state.sel);
+      if (id === 'esc') this.answer(2);
+      return;
+    }
+    if (id === 'stab') this.setState(s => ({ mode: (s.mode + 1) % 3 }));
+    if (id === 'paste') this.setState({ paste: 'see CI run 4821: session.spec.ts flaked 3/20 before the fix' });
+  }
+  send(enter) {
+    const t = (this.state.text ?? '').trim();
+    if (!t) { if (enter && this.state.paste) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(this.state.paste, 'w'))], 'running'); this.setState({ paste: '' }); } return; }
+    if (enter) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(t, 'w'))], 'running'); this.setState({ text: '', paste: '' }); }
+    else this.setState({ paste: t, text: '' });
+  }
+
+  renderVals() {
+    const p = this.props, s = this.state;
+    const theme = p.theme ?? 'dark', sheet = p.screen === 'sheet', land = (p.orient ?? 'portrait') === 'landscape';
+    const S0 = p.state ?? 'waiting', hub = p.hub ?? 'MacBook';
+    const arc = React.createElement('span', { style: { display: 'block', width: 12, height: 12, boxSizing: 'border-box', borderRadius: '50%', border: '1.75px solid color-mix(in oklab, var(--st-run) 22%, transparent)', borderTopColor: 'var(--st-run)', animation: 'st-spin .9s linear infinite' } });
+    const pulse = React.createElement('span', { style: { display: 'block', flex: 'none', width: 6, height: 6, borderRadius: '50%', background: 'var(--st-run)', animation: 'st-pulse 1.2s ease-in-out infinite' } });
+    const phase = s.phase ?? this.initPhase(S0), extra = s.extra ?? this.initExtra(S0);
+    const zoom = s.zoom ?? p.zoom ?? 'fit';
+    const innerW = land ? 915 : 412;
+    const fs = zoom === 'fit' ? ((innerW - 12) / 72).toFixed(2) + 'px' : (land ? '14px' : '11px');
+    const lines = this.frame(phase, extra, s.sel, s.mode, s.paste);
+    this.curN = lines.length; this.curZ = zoom;
+    const isErr = ['revoked', 'unreachable', 'mismatch'].includes(S0);
+    const ctl = ['live', 'waiting', 'paused', 'reconnecting', 'catching', 'opening'].includes(S0);
+    const dis = ['paused', 'reconnecting', 'opening'].includes(S0);
+
+    const stMap = { asking: ['waiting for you', 'sBlock', 'var(--st-block)'], running: ['running', 'sRun', 'var(--st-text)'], idle: ['idle', 'sIdle', 'var(--st-text)'], ended: ['exited', 'sEnd', 'var(--st-mute)'] };
+    let sk = S0 === 'ended' ? 'ended' : S0 === 'paused' ? 'idle' : phase;
+    if (S0 === 'paused') stMap.idle = ['suspended', 'sIdle', 'var(--st-mute)'];
+    const sm = stMap[sk] || stMap.idle;
+    const st = { word: sm[0], color: sm[2], [sm[1]]: true };
+    const connDef = { live: ['cLive', 'live'], waiting: ['cLive', 'live'], watch: ['cLive', 'live'], nocontrol: ['cLive', 'live'], catching: ['cLive', 'live'], reconnecting: ['cReco', 'Reconnecting…'], opening: ['cReco', 'connecting'], paused: ['cOff', 'paused'], ended: ['cOff', 'ended'], unreachable: ['cOff', 'offline'], revoked: ['cOff', 'closed'], mismatch: ['cOff', 'closed'] }[S0];
+    const conn = { [connDef[0]]: true, text: connDef[1], color: connDef[0] === 'cReco' ? 'var(--st-run)' : 'var(--st-mute)' };
+
+    const overlay = [];
+    if (S0 === 'catching') overlay.push({ spin: true, label: 'Catching up…' });
+    if (['live', 'waiting'].includes(S0)) overlay.push({ icon: 'ph ph-desktop', label: 'Also open on desktop' });
+    if (!isErr && S0 !== 'opening') overlay.push({ label: `120×40 · ${zoom === 'fit' ? 'fit' : '100%'}`, onClick: () => this.setState({ zoom: zoom === 'fit' ? '100' : 'fit' }) });
+
+    const errs = {
+      revoked: { icon: 'ph ph-lock-key', ic: 'var(--st-block)', title: 'Terminal access was revoked', body: `${hub} removed Watch and Control for this phone. Session status keeps updating.`, actions: [{ label: 'Back to session', cls: 'btn btn-primary', color: '' }] },
+      unreachable: { icon: 'ph ph-plugs', ic: 'var(--st-mute)', title: `Can't reach ${hub}`, body: 'The stream stopped and neither address answers. Nothing you typed was sent.', detail: 'LAN 192.168.1.24 · timeout   tailnet · no route', actions: [{ label: 'Retry', cls: 'btn btn-primary', color: '' }, { label: 'Back to session', cls: 'btn btn-secondary', color: 'var(--st-text)' }] },
+      mismatch: { icon: 'ph ph-shield-warning', ic: 'var(--st-block)', title: 'Terminal hidden for safety', body: 'This tmux pane no longer runs Claude Code — it now runs zsh. SessionTap only ever shows the agent, so it closed the view.', detail: 'pane %14 · expected claude · found zsh', actions: [{ label: 'Back to session', cls: 'btn btn-primary', color: '' }] }
+    };
+
+    const row = !sheet && land;
+    const basis = row ? '100%' : 'auto';
+    const banner = (k, onPick) => k === 'waiting'
+      ? { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-chat-circle-dots', ic: 'var(--st-block)', bg: 'var(--st-block-tint)', ring: 'color-mix(in oklab,var(--st-block) 30%,transparent)', title: 'Agent is asking', sub: 'Tap an answer, or use ↑ ↓ then Enter', chips: this.QUICK.map((l, i) => ({ n: String(i + 1), label: l, onClick: onPick ? () => onPick(i) : () => {} })) }
+      : { isBanner: true, pad: sheet ? '0' : '8px 8px 0', basis, icon: 'ph ph-pause-circle', ic: 'var(--st-mute)', bg: 'var(--st-bg)', ring: 'var(--st-line)', title: "Agent isn't in the foreground — input paused", sub: 'Showing its last frame. Input comes back on its own.', chips: null };
+    const input = (o) => {
+      const t = o.text ?? '';
+      return { isInput: true, pad: sheet ? '0' : row ? '6px 8px 6px 0' : '2px 8px 8px', flex: row ? '0 0 360px' : 'none', text: t, rows: String(Math.min(4, Math.max(1, Math.ceil(t.length / 34)))), disabled: !!o.disabled, op: o.disabled ? '.45' : '1', note: o.note || '', sendBg: o.disabled ? 'transparent' : 'var(--st-acc-tint)',
+        onText: o.live ? e => this.setState({ text: e.target.value }) : () => {},
+        onSend: o.live ? () => { if (this.lp) { this.lp = false; return; } this.send(true); } : () => {},
+        onSendDown: o.live ? () => { this.lp = false; clearTimeout(this.lpT); this.lpT = setTimeout(() => { this.lp = true; this.send(false); }, 500); } : () => {},
+        onSendUp: o.live ? () => clearTimeout(this.lpT) : () => {} };
+    };
+    const strip = k => k === 'watch'
+      ? { isStrip: true, basis, pad: '0', radius: sheet ? '14px' : '0', ring: sheet ? 'var(--st-line)' : 'transparent', icon: 'ph ph-eye', title: `View only — this phone can't type into agents on ${hub}`, sub: '', link: 'How to allow' }
+      : { isStrip: true, basis, pad: '0', radius: sheet ? '14px' : '0', ring: sheet ? 'var(--st-line)' : 'transparent', icon: 'ph ph-lock-simple', title: "This source doesn't accept input", sub: `${hub} · sandbox streams agent terminals view-only.`, link: 'Details' };
+    const ENDS = { exited: ['ph ph-check-circle', 'var(--st-ok)', 'Agent exited', 'claude exited normally (code 0). This is its last frame.'], closed: ['ph ph-x-square', 'var(--st-mute)', 'Pane closed on desktop', `The tmux pane was closed on ${hub}, and the agent ended with it.`], tmux: ['ph ph-power', 'var(--st-mute)', 'tmux server stopped', `The tmux server on ${hub} shut down, ending every agent it hosted.`] };
+    const end = k => { const e = ENDS[k]; return { isEnd: true, basis, pad: sheet ? '0' : '8px 8px 4px', icon: e[0], ic: e[1], title: e[2], sub: e[3], time: '14:41 · after 17m' }; };
+
+    let blocks = [];
+    if (!sheet) {
+      if (ctl && phase === 'asking' && !dis) blocks.push(banner('waiting', i => this.answer(i)));
+      if (S0 === 'paused') blocks.push(banner('paused'));
+      if (ctl) {
+        blocks.push({ isKeys: true, wrap: 'nowrap', pad: row ? '6px 8px' : '8px 8px 6px', flex: row ? '1 1 0' : 'none', bg: 'transparent', radius: '0', keys: this.keys({ disabled: dis, pressed: s.pressed, ctrlArm: s.ctrlArm, onKey: id => this.onKey(id) }) });
+        const initText = S0 === 'reconnecting' ? 'use the backoff helper, not a fixed sleep' : '';
+        blocks.push(input({ live: !dis, disabled: dis, text: s.text ?? initText, note: S0 === 'reconnecting' ? `Reconnecting — your reply stays here until ${hub} is back` : '' }));
+      }
+      if (S0 === 'watch') blocks.push(strip('watch'));
+      if (S0 === 'nocontrol') blocks.push(strip('nocontrol'));
+      if (S0 === 'ended') blocks.push(end(p.end ?? 'exited'));
+    } else {
+      const Lb = t => ({ isLabel: true, text: t }), Sb = t => ({ isSub: true, text: t }), Tb = t => ({ isText: true, text: t });
+      const kb = o => ({ isKeys: true, wrap: 'wrap', pad: '10px', flex: 'none', bg: 'var(--st-surf)', radius: '14px', keys: this.keys(o) });
+      const S = this.S.bind(this), L = this.L.bind(this);
+      blocks = [
+        Lb('Key bar'),
+        Tb('44dp keys, 6dp gaps, sticky above the keyboard and scrolls sideways. Arrows sit on a raised fill — menus are the main job. Ctrl+C is red and needs a second tap within 2.5s; the first tap sends nothing.'),
+        Sb('Default'), kb({}), Sb('Pressed · ↓ (160ms accent flash)'), kb({ pressed: 'down' }), Sb('Disabled · paused, reconnecting, connecting — greyed, never hidden'), kb({ disabled: true }), Sb('Ctrl+C · confirm pending'), kb({ ctrlArm: true }),
+        Lb('Input row'),
+        Tb('Send pastes the text, then presses Enter. Long-press Send pastes without Enter, so it lands in the agent\'s prompt for review.'),
+        Sb('Empty'), input({}), Sb('Queued while reconnecting — text is kept, controls disabled'), input({ disabled: true, text: 'use the backoff helper, not a fixed sleep', note: 'Reconnecting — your reply stays here until MacBook is back' }),
+        Lb('Banners'), Sb('Waiting for you · quick-pick sends the digit'), banner('waiting'), Sb('Temporarily view only'), banner('paused'),
+        Lb('Chips · terminal overlay and top bar'),
+        { isChips: true, chips: [
+          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', label: '120×40 · fit' },
+          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', label: '120×40 · 100%' },
+          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', icon: 'ph ph-desktop', label: 'Also open on desktop' },
+          { h: '24px', font: 'var(--st-mono)', bg: 'var(--st-surf2)', color: 'var(--st-mute)', spin: true, label: 'Catching up…' },
+          { h: '28px', font: 'var(--font-body)', bg: 'transparent', color: 'var(--st-mute)', live: true, label: 'live' },
+          { h: '28px', font: 'var(--font-body)', bg: 'transparent', color: 'var(--st-run)', pulse: true, label: 'Reconnecting…' },
+          { h: '28px', font: 'var(--font-body)', bg: 'transparent', color: 'var(--st-mute)', off: true, label: 'paused' }] },
+        Lb('Strips · replace key bar and input'), Sb('Watch scope only'), strip('watch'), Sb('Source does not allow control'), strip('nocontrol'),
+        Lb('End cards · replace key bar and input'), end('exited'), Sb(''), end('closed'), Sb(''), end('tmux'),
+        Lb('Terminal palette · ANSI 16'),
+        Tb(theme === 'light' ? 'Light: background oklch(0.985 0.003 275), foreground oklch(0.27 0.02 275). Hue 275 matches the Nocturne neutrals; magenta sits on the accent hue.' : 'Dark: background is the app ground mixed 45% toward black, foreground oklch(0.93 0.006 275). Hue 275 matches the Nocturne neutrals; magenta sits on the accent hue.'),
+        { isPalette: true, sw: this.PAL[theme].map(([k, name, v], i) => ({ n: String(i), name, v: `var(--a-${k})`, code: v })) },
+        Sb(''),
+        { isSample: true, lines: [L(S('dev@macbook', 'g'), S(' ~/code/api ', 'b'), S('(feat/auth-retry)', 'm'), S(' $ '), S('claude')), L(S('● ', 'g'), S('Update', 'W', { b: 1 }), S('(src/auth/retry.ts)')), L(S('-   await sleep(100);', 'r', { bg: 'rbg' })), L(S('+   await sleep(backoff(attempt));', 'g', { bg: 'gbg' })), L(S(' PASS ', 'k', { bg: 'G', b: 1 }), S(' retry.spec.ts '), S('(31 tests)', 'K')), L(S('* ', 'y'), S('Running…', 'y'), S(' esc to interrupt', 'K')), L(S('> 1. Yes', 'm', { b: 1 }), S('   2. Always', 'c'), S('   3. No', 'r'))] },
+        Lb('Gestures'),
+        { isNotes: true, notes: [
+          ['Pinch', 'Zoom 100–200% around your fingers. Fit-to-width is the minimum; never smaller than the pane.'],
+          ['Pan', 'Vertical drag scrolls scrollback. Sideways only when zoomed past fit.'],
+          ['Double-tap', 'Toggles fit ⇄ 100%, keeping the tapped column under your finger.'],
+          ['Size chip', 'Same toggle, one-handed. Shows the desktop pane size.'],
+          ['Long-press Send', 'Paste without Enter (500ms, haptic tick).'],
+          ['Ctrl+C', 'Tap, then tap again within 2.5s. The first tap sends nothing.'],
+          ['Landscape', 'Fit-to-width reaches ~12.5sp, so 120 columns read without zooming. The key bar and input share one row.']
+        ].map(([g, t], i) => ({ g, t, border: i ? '1px solid var(--st-line)' : 'none' })) }
+      ];
+    }
+
+    return {
+      theme, arc, pulse, framed: !sheet, isSheet: sheet, sheetTitle: `Terminal components · ${theme}`,
+      rootW: sheet ? '560px' : land ? '935px' : '432px', rootH: sheet ? 'auto' : land ? '432px' : '935px', rootPad: sheet ? '0' : '10px', rootR: sheet ? '20px' : land ? '48px' : '52px',
+      rootBg: sheet ? 'transparent' : 'color-mix(in oklab,var(--color-neutral-900) 55%,#000)', innerH: sheet ? 'auto' : '100%', innerR: sheet ? '20px' : land ? '38px' : '42px',
+      statusH: land ? '24px' : '36px', navH: land ? '14px' : '22px',
+      title: p.title ?? 'Fix flaky auth tests', where: `api · feat/auth-retry · ${hub}${S0 === 'nocontrol' ? ' · sandbox' : ''}`, hub, st, conn,
+      showTerm: !isErr && S0 !== 'opening', opening: S0 === 'opening', err: isErr ? errs[S0] : null,
+      skel: ['62%', '38%', '0', '80%', '30%', '56%', '0', '72%', '44%', '66%', '0', '50%', '84%', '28%'],
+      termRef: el => { this.termEl = el; }, toggleZoom: () => this.setState({ zoom: zoom === 'fit' ? '100' : 'fit' }),
+      fs, lines, termOp: S0 === 'ended' ? '.5' : '1', termFilter: S0 === 'ended' ? 'saturate(.4)' : 'none', overlay,
+      blocks, ctlDir: row ? 'row' : 'column', ctlWrap: row ? 'wrap' : 'nowrap', ctlAlign: row ? 'flex-end' : 'stretch', ctlBg: sheet ? 'transparent' : 'var(--st-surf)', ctlPad: sheet ? '0 28px 32px' : '0', ctlShadow: sheet ? 'none' : '0 -1px 0 var(--st-line)'
+    };
+  }
+}
+</script>
+</body>
+</html>
