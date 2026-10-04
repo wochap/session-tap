@@ -547,3 +547,18 @@ The Claude adapter SHALL install `SubagentStart` and `SubagentStop` managed hook
 #### Scenario: Managed hook configuration is merged
 - **WHEN** the Claude adapter installs or removes its managed hooks
 - **THEN** the subagent lifecycle hook entries are added and removed reversibly together with the root hook entries
+
+### Requirement: Adapters declare a terminal policy
+Every adapter SHALL declare a terminal policy describing provider-specific behaviour of its live terminal. The policy SHALL contain a quick-pick mode of either `digits`, meaning a single digit key answers the provider's numbered menus, or `none`. An adapter that does not declare a policy SHALL get the default policy with quick-pick `none`. The Claude and pi adapters SHALL declare `digits`; the Codex and Qwen adapters SHALL use the default until their behaviour is verified. Provider-specific terminal behaviour SHALL be expressed only through this policy, so that the daemon, hub, and app never branch on provider names for terminal behaviour.
+
+#### Scenario: Claude approval menu
+- **WHEN** a Claude invocation's live terminal is available
+- **THEN** its terminal policy reports quick-pick `digits`
+
+#### Scenario: Unverified provider
+- **WHEN** a Codex invocation's live terminal is available
+- **THEN** its terminal policy reports quick-pick `none` and the terminal still works
+
+#### Scenario: Alias inherits policy
+- **WHEN** a configured alias inherits the Claude adapter
+- **THEN** the alias's invocations report the Claude terminal policy

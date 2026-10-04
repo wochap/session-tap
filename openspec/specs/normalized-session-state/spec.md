@@ -140,7 +140,7 @@ The broker SHALL persist at most one bounded current status-reason object per in
 - **THEN** its current status-reason row is deleted as well
 
 ### Requirement: Status payload uses typed structured fields
-Each `PublicAgentView` SHALL contain public invocation identity, configured provider identity, derived status, timestamps, working directory, optional provider session identity/name/start reason, optional sanitized provider metadata, optional verified usage and context measurements, optional repository metadata, an optional bounded status-compatible reason, and an optional `children` list of bounded child-agent views. Reason kinds SHALL be `input`, `approval`, `completed`, or `failed`. Each child-agent view SHALL contain a bounded child agent ID, a bounded agent type, a child status of `running`, `blocked`, or `stopped`, an optional bounded reason using the same reason kinds, a start time, and an updated time. The `children` field SHALL be absent when no child is retained. The public type SHALL NOT contain adapter dialect, credentials, raw hooks, executable arguments, private process identities, multiplexer details, internal lifecycle or activity, internal normalized event kinds, reducer bookkeeping, or control authority. Working directories, repository paths, session names, and bounded reasons SHALL be treated as potentially sensitive observer data intentionally shared with the single operator and configured sinks.
+Each `PublicAgentView` SHALL contain public invocation identity, configured provider identity, derived status, timestamps, working directory, optional provider session identity/name/start reason, optional sanitized provider metadata, optional verified usage and context measurements, optional repository metadata, an optional bounded status-compatible reason, an optional `children` list of bounded child-agent views, and an optional `terminal` descriptor. Reason kinds SHALL be `input`, `approval`, `completed`, or `failed`. Each child-agent view SHALL contain a bounded child agent ID, a bounded agent type, a child status of `running`, `blocked`, or `stopped`, an optional bounded reason using the same reason kinds, a start time, and an updated time. The `children` field SHALL be absent when no child is retained. The `terminal` descriptor SHALL be present exactly when a live terminal is available for the invocation, and SHALL contain only the quick-pick mode (`digits` or `none`) from the provider's terminal policy. The public type SHALL NOT contain adapter dialect, credentials, raw hooks, executable arguments, private process identities, multiplexer details, internal lifecycle or activity, internal normalized event kinds, reducer bookkeeping, or control authority. Working directories, repository paths, session names, and bounded reasons SHALL be treated as potentially sensitive observer data intentionally shared with the single operator and configured sinks.
 
 #### Scenario: Enrichment is unavailable
 - **WHEN** usage, context utilization, provider metadata, repository information, session name, or status reason cannot be determined
@@ -165,6 +165,18 @@ Each `PublicAgentView` SHALL contain public invocation identity, configured prov
 #### Scenario: Child agents are retained
 - **WHEN** an invocation retains one or more child agents
 - **THEN** the public view lists them in a deterministic order by start time and then child agent ID
+
+#### Scenario: Interactive Claude in tmux
+- **WHEN** an interactive Claude invocation inside tmux is running
+- **THEN** its public view contains `terminal` with quick-pick `digits` and no multiplexer details
+
+#### Scenario: Terminal becomes unavailable
+- **WHEN** an invocation with a live terminal stops
+- **THEN** the next public update removes the `terminal` key and lists `terminal` among the changed field paths
+
+#### Scenario: Agent without a terminal
+- **WHEN** an invocation runs headless or outside a multiplexer
+- **THEN** its serialized public view contains no `terminal` key
 
 ### Requirement: Public agent status has four values
 Every `PublicAgentView` SHALL expose exactly one of `running`, `blocked`, `idle`, or `stopped`. The projection SHALL map working activity on a live process to running, either waiting activity on a live process to blocked, stopped activity on a live process to stopped, unknown or idle activity on a live process to idle, and exited or lost lifecycle to stopped regardless of activity.
