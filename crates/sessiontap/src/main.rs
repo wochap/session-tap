@@ -437,6 +437,10 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         let _ = task.await;
     }
     if let Some(tty) = &terminal {
+        // Drop input the provider left unread so the caller's shell never runs it.
+        let _ = with_sigttou_blocked(|| {
+            nix::sys::termios::tcflush(tty, nix::sys::termios::FlushArg::TCIFLUSH)
+        });
         let _ = set_terminal_foreground(tty, nix::unistd::getpgrp());
     }
     let status = wait_result?;
@@ -527,12 +531,18 @@ async fn tail_provider_side_channel(
 /// group, such as a script that launched it. Blocking the signal for the call,
 /// as job-control shells do, lets the kernel apply the change instead.
 fn set_terminal_foreground(tty: &std::fs::File, group: nix::unistd::Pid) -> nix::Result<()> {
+    with_sigttou_blocked(|| nix::unistd::tcsetpgrp(tty, group))
+}
+
+/// Runs a terminal call that raises SIGTTOU from a background process group,
+/// such as `tcsetpgrp` or `tcflush`, with that signal blocked.
+fn with_sigttou_blocked(call: impl FnOnce() -> nix::Result<()>) -> nix::Result<()> {
     use nix::sys::signal::{SigSet, SigmaskHow, Signal, pthread_sigmask};
     let mut ttou = SigSet::empty();
     ttou.add(Signal::SIGTTOU);
     let mut previous = SigSet::empty();
     pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&ttou), Some(&mut previous))?;
-    let result = nix::unistd::tcsetpgrp(tty, group);
+    let result = call();
     let _ = pthread_sigmask(SigmaskHow::SIG_SETMASK, Some(&previous), None);
     result
 }

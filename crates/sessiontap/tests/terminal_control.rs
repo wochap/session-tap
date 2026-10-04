@@ -1,4 +1,12 @@
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+use std::{
+    fs,
+    io::{Read, Write},
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
 
 fn write_executable(path: &Path, body: &str) {
     fs::write(path, body).unwrap();
@@ -92,6 +100,64 @@ fn headless_launch_leaves_the_terminal_to_the_caller() {
     assert!(stdout.contains("provider-ran"), "stdout: {stdout}");
     // 149 = 128 + SIGTTIN: the caller was stopped reading its own terminal.
     assert!(stdout.contains("job-status:0"), "stdout: {stdout}");
+}
+
+// Input written to the terminal while an interactive provider ignores stdin
+// must not be read by the caller's shell once the wrapper hands the terminal
+// back.
+#[test]
+fn unread_input_does_not_reach_the_shell() {
+    let temp = tempfile::tempdir().unwrap();
+    let provider = temp.path().join("fake-provider");
+    write_executable(&provider, "#!/bin/sh\nsleep 1\necho provider-ran\n");
+    let config_dir = temp.path().join("config/sessiontap");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            "version = 1\n\n[adapters.fake]\nexecutable = {:?}\ninherits = \"claude\"\n",
+            provider.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let job = format!(
+        "'{}' fake; read -t 1 line; echo \"got:[$line]\"",
+        env!("CARGO_BIN_EXE_sessiontap")
+    );
+    let mut child = Command::new("timeout")
+        .args(["20", "script", "-qec"])
+        .arg(format!("bash -c {}", shell_quote(&job)))
+        .arg("/dev/null")
+        .env("HOME", temp.path().join("home"))
+        .env("XDG_CONFIG_HOME", temp.path().join("config"))
+        .env("XDG_STATE_HOME", temp.path().join("state"))
+        .env("XDG_DATA_HOME", temp.path().join("data"))
+        .env("XDG_RUNTIME_DIR", temp.path().join("runtime"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    // `script` forwards its stdin to the pty; keep it open until the job ends
+    // so no end-of-file reaches the shell.
+    let mut stdin = child.stdin.take().unwrap();
+    thread::sleep(Duration::from_millis(400));
+    stdin.write_all(b"leaked\n").unwrap();
+    stdin.flush().unwrap();
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child.wait().unwrap();
+    drop(stdin);
+
+    assert!(stdout.contains("provider-ran"), "stdout: {stdout}");
+    assert!(stdout.contains("got:[]"), "stdout: {stdout}");
+    assert!(!stdout.contains("got:[leaked]"), "stdout: {stdout}");
 }
 
 fn shell_quote(value: &str) -> String {
