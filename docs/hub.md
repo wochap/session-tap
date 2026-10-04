@@ -373,9 +373,8 @@ sessiontap-hub pair --scope read    # read-only device
 ```
 
 `pair` asks the running service to open a pairing window and prints a QR code
-with a countdown. The window lasts 120 seconds, allows one successful pairing,
-and closes after three failed proofs. A newer `pair` replaces an open window.
-The QR payload is JSON:
+with a countdown. The window lasts 120 seconds and allows one successful
+pairing. A newer `pair` replaces an open window. The QR payload is JSON:
 
 ```json
 {"v":1,"hub":"MacBook","id":"<hub_id>","ep":["100.64.0.7:8932","192.168.1.20:8932","macbook.tailnet.ts.net:8932"],"sc":["read","manage"],"s":"<base64url secret>","exp":1767225600}
@@ -393,6 +392,15 @@ window exit non-zero. `pair` also fails when the service is not running or
 remote access is not configured.
 
 Pairing an already paired device key again updates its name and scopes.
+
+Failed proofs are counted per window in three ways: at most 3 per client key,
+at most 5 per peer address (an IPv6 address counts by its /64 prefix), and at
+most 20 in total. A key or address that reaches its limit is locked out for
+the rest of the window: its later `pair.complete` calls get `pairing_failed`
+without the proof being checked, even after the window closed. A locked-out
+client does not affect other clients, so the operator's device can still pair.
+The 20th failed proof in total burns the window, and `pair` reports too many
+failed attempts. Opening a new window clears every count.
 
 ### Devices and revocation
 
@@ -442,8 +450,44 @@ authenticated.
 
 Error codes: `bad_request`, `unknown_method`, `unauthorized` (unknown or
 absent client certificate), `forbidden` (missing scope), `not_found`,
-`not_stopped`, `pairing_closed` (no open window), `pairing_failed` (bad proof
-or no client certificate), `pairing_rejected`, `internal`.
+`not_stopped`, `pairing_closed` (no open window), `pairing_failed` (bad proof,
+no client certificate, or a locked-out client), `pairing_rejected`,
+`rate_limited` (too many `pair.*` calls from this address), `busy` (too many
+requests in flight on this connection), `internal`.
+
+The hub checks the device's stored record and scopes on every request. A
+device paired or re-paired on another connection takes effect on the next
+request of every open connection with that key. After `revoke` returns, no
+request from the revoked device changes state or gets a success response, and
+its connections send nothing after the 4401 close.
+
+### Connection limits
+
+A connection is unauthenticated until its client certificate matches a stored
+device or it completes pairing. These limits are fixed:
+
+| Limit | Value |
+|---|---|
+| TLS handshake | 10 seconds from accept |
+| WebSocket upgrade | 10 seconds from the TLS handshake |
+| Unauthenticated connection lifetime | 30 seconds from accept (close code 1008); a valid proof waiting for the operator is exempt |
+| Remote connections, all addresses | 64 |
+| Unauthenticated connections | 16 |
+| Unauthenticated connections per peer address | 4 (IPv6 grouped by /64, IPv4-mapped IPv6 as IPv4) |
+| Incoming message or frame | 64 KiB |
+| Requests in flight, unauthenticated | 1 |
+| Requests in flight, paired | 8 (more get `busy`; an acknowledged `listen` does not count) |
+| Outbound write | 30 seconds |
+| `pair.begin` and `pair.complete` per peer address | burst of 5, one more every 2 seconds (more get `rate_limited` and count as no try) |
+
+A connection over an admission cap is dropped right after accept, before TLS.
+An oversized message closes the connection without an answer. An
+unauthenticated connection that sends a request before the previous one is
+answered is closed with code 1008, so unpaired clients must wait for each
+answer. A connection whose outbound write does not finish in time is closed.
+When accepting on a remote address fails (for example when the process is out
+of file descriptors), the hub logs the error once, retries after 50 ms, doubling
+up to 1 second, and keeps serving that address.
 
 ## Limits
 

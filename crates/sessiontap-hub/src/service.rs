@@ -7,7 +7,8 @@ use sessiontap_infra::json::write_json_line;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    net::IpAddr,
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -19,12 +20,24 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ingest::HubPublication;
 use crate::listen::{HubRequest, HubResponse, serve_unix_stream};
+use crate::remote::AddressKey;
 use crate::store::{Device, DeviceLookup, ForgetOutcome, HubStore};
 
 /// Pairing MAC label; bumping it invalidates older clients.
 pub const PAIR_LABEL: &[u8] = b"sessiontap-pair-v1";
 pub const PAIR_TTL: Duration = Duration::from_secs(120);
-pub const PAIR_TRIES: u32 = 3;
+/// Invalid MACs one client key may send per window.
+pub const PAIR_TRIES_PER_CLIENT: u32 = 3;
+/// Invalid MACs one peer address may send per window.
+pub const PAIR_TRIES_PER_ADDRESS: u32 = 5;
+/// Invalid MACs from anyone that burn the window.
+pub const PAIR_TRIES_TOTAL: u32 = 20;
+/// `pair.*` calls one peer address may make in a burst.
+pub const PAIR_RATE_BURST: u32 = 5;
+/// Time to regain one `pair.*` call.
+pub const PAIR_RATE_REFILL: Duration = Duration::from_secs(2);
+/// Rate limiter entries kept before full buckets are pruned.
+const PAIR_RATE_MAX_ENTRIES: usize = 1024;
 pub const SCOPE_READ: &str = "read";
 pub const SCOPE_MANAGE: &str = "manage";
 pub const SCOPES: [&str; 2] = [SCOPE_READ, SCOPE_MANAGE];
@@ -57,8 +70,75 @@ struct PairingWindow {
     secret: [u8; 32],
     scopes: Vec<String>,
     expires: Instant,
-    tries_left: u32,
     events: mpsc::Sender<PairEvent>,
+}
+
+/// Invalid MACs since the last window opened. Kept after the window closes
+/// so a locked-out client stays locked out until the next window.
+#[derive(Default)]
+struct PairFailures {
+    by_spki: HashMap<[u8; 32], u32>,
+    by_address: HashMap<AddressKey, u32>,
+    total: u32,
+}
+
+#[derive(Default)]
+struct PairingState {
+    window: Option<PairingWindow>,
+    failures: PairFailures,
+}
+
+/// Token bucket per peer address for `pair.*` calls.
+pub struct PairRateLimiter {
+    burst: f64,
+    per_second: f64,
+    buckets: Mutex<HashMap<AddressKey, Bucket>>,
+}
+
+struct Bucket {
+    tokens: f64,
+    updated: Instant,
+}
+
+impl PairRateLimiter {
+    #[must_use]
+    pub fn new(burst: u32, refill: Duration) -> Self {
+        Self {
+            burst: f64::from(burst),
+            per_second: 1.0 / refill.as_secs_f64(),
+            buckets: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn refilled(&self, bucket: &Bucket, now: Instant) -> f64 {
+        let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
+        (bucket.tokens + elapsed * self.per_second).min(self.burst)
+    }
+
+    /// Takes one call from the address's bucket. Fails closed when the
+    /// table is full of addresses that are still limited.
+    pub fn allow(&self, key: AddressKey, now: Instant) -> bool {
+        let mut buckets = self.buckets.lock().expect("rate mutex poisoned");
+        if !buckets.contains_key(&key) && buckets.len() >= PAIR_RATE_MAX_ENTRIES {
+            buckets.retain(|_, bucket| self.refilled(bucket, now) < self.burst);
+            if buckets.len() >= PAIR_RATE_MAX_ENTRIES {
+                return false;
+            }
+        }
+        let bucket = buckets.entry(key).or_insert(Bucket {
+            tokens: self.burst,
+            updated: now,
+        });
+        let tokens = self.refilled(bucket, now);
+        bucket.updated = now;
+        if tokens >= 1.0 {
+            bucket.tokens = tokens - 1.0;
+            true
+        } else {
+            bucket.tokens = tokens;
+            false
+        }
+    }
 }
 
 /// Result of checking a pairing MAC against the open window.
@@ -73,6 +153,8 @@ pub enum PairAttempt {
     Closed,
     /// The MAC did not verify.
     Failed,
+    /// This client key or address used up its tries; the MAC was not checked.
+    Locked,
 }
 
 pub struct Hub {
@@ -81,8 +163,12 @@ pub struct Hub {
     pub remote: Option<RemoteInfo>,
     pair_ttl: Duration,
     connections: Mutex<HashMap<String, Vec<CancellationToken>>>,
-    pairing: Mutex<Option<PairingWindow>>,
+    pairing: Mutex<PairingState>,
     generation: Mutex<u64>,
+    pair_rate: PairRateLimiter,
+    /// Revocation takes it for writing; remote requests that act for a
+    /// device hold it for reading from the device re-read to the action.
+    pub device_gate: RwLock<()>,
 }
 
 impl Hub {
@@ -108,9 +194,24 @@ impl Hub {
             remote,
             pair_ttl,
             connections: Mutex::new(HashMap::new()),
-            pairing: Mutex::new(None),
+            pairing: Mutex::new(PairingState::default()),
             generation: Mutex::new(0),
+            pair_rate: PairRateLimiter::new(PAIR_RATE_BURST, PAIR_RATE_REFILL),
+            device_gate: RwLock::new(()),
         }
+    }
+
+    /// Replaces the `pair.*` rate limit, for tests.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_pair_rate(mut self, burst: u32, refill: Duration) -> Self {
+        self.pair_rate = PairRateLimiter::new(burst, refill);
+        self
+    }
+
+    /// Takes one `pair.*` call from the peer address's budget.
+    pub fn allow_pair_call(&self, peer: IpAddr) -> bool {
+        self.pair_rate.allow(AddressKey::from(peer), Instant::now())
     }
 
     /// Forgets a stopped agent and re-baselines every listener.
@@ -125,7 +226,9 @@ impl Hub {
     }
 
     /// Deletes a device and closes its live remote connections.
+    /// Once it returns, no request from the device changes state.
     pub fn revoke(&self, prefix: &str) -> Result<DeviceLookup> {
+        let _gate = self.device_gate.write().expect("device gate poisoned");
         let lookup = self.store.delete_device(prefix)?;
         if let DeviceLookup::Found(device) = &lookup {
             let tokens = self
@@ -174,18 +277,17 @@ impl Hub {
         let secret: [u8; 32] = rand::random();
         let expires = Instant::now() + self.pair_ttl;
         let (events, receiver) = mpsc::channel(4);
-        let previous = self
-            .pairing
-            .lock()
-            .expect("pairing mutex poisoned")
-            .replace(PairingWindow {
+        let previous = {
+            let mut pairing = self.pairing.lock().expect("pairing mutex poisoned");
+            pairing.failures = PairFailures::default();
+            pairing.window.replace(PairingWindow {
                 generation,
                 secret,
                 scopes,
                 expires,
-                tries_left: PAIR_TRIES,
                 events,
-            });
+            })
+        };
         if let Some(previous) = previous {
             let _ = previous.events.try_send(PairEvent::Failed(
                 "replaced by a newer pairing window".into(),
@@ -201,6 +303,7 @@ impl Hub {
         self.pairing
             .lock()
             .expect("pairing mutex poisoned")
+            .window
             .as_ref()
             .map(|window| window.secret.to_vec())
     }
@@ -209,37 +312,57 @@ impl Hub {
     pub fn close_pairing(&self, generation: u64) {
         let mut pairing = self.pairing.lock().expect("pairing mutex poisoned");
         if pairing
+            .window
             .as_ref()
             .is_some_and(|window| window.generation == generation)
         {
-            *pairing = None;
+            pairing.window = None;
         }
     }
 
-    /// Checks a pairing MAC. A valid MAC consumes the window; the third
-    /// invalid one closes it.
-    pub fn attempt_pairing(&self, device_spki: &[u8], nonce: &[u8], mac: &[u8]) -> PairAttempt {
+    /// Checks a pairing MAC. Locked-out clients are refused before the
+    /// window is looked at. A valid MAC consumes the window; invalid MACs
+    /// count per client key, per address, and in total, and the total limit
+    /// burns the window.
+    pub fn attempt_pairing(
+        &self,
+        device_spki: &[u8],
+        peer: IpAddr,
+        nonce: &[u8],
+        mac: &[u8],
+    ) -> PairAttempt {
         let Some(remote) = &self.remote else {
             return PairAttempt::Closed;
         };
+        let spki_key: [u8; 32] = Sha256::digest(device_spki).into();
+        let address = AddressKey::from(peer);
         let mut pairing = self.pairing.lock().expect("pairing mutex poisoned");
-        let Some(window) = pairing.as_mut() else {
+        let failures = &pairing.failures;
+        if failures.by_spki.get(&spki_key).copied().unwrap_or(0) >= PAIR_TRIES_PER_CLIENT
+            || failures.by_address.get(&address).copied().unwrap_or(0) >= PAIR_TRIES_PER_ADDRESS
+        {
+            return PairAttempt::Locked;
+        }
+        let Some(window) = pairing.window.as_ref() else {
             return PairAttempt::Closed;
         };
         if Instant::now() >= window.expires {
-            *pairing = None;
+            pairing.window = None;
             return PairAttempt::Closed;
         }
         if verify_pair_mac(&window.secret, &remote.hub_spki, device_spki, nonce, mac) {
-            let window = pairing.take().expect("window checked above");
+            let window = pairing.window.take().expect("window checked above");
             return PairAttempt::Claimed {
                 scopes: window.scopes,
                 events: window.events,
             };
         }
-        window.tries_left -= 1;
-        if window.tries_left == 0 {
-            let window = pairing.take().expect("window checked above");
+        let failures = &mut pairing.failures;
+        *failures.by_spki.entry(spki_key).or_default() += 1;
+        *failures.by_address.entry(address).or_default() += 1;
+        failures.total += 1;
+        if failures.total >= PAIR_TRIES_TOTAL {
+            let window = pairing.window.take().expect("window checked above");
             let _ = window
                 .events
                 .try_send(PairEvent::Failed("too many failed pairing attempts".into()));
@@ -532,6 +655,10 @@ mod tests {
         )
     }
 
+    fn addr(last: u8) -> IpAddr {
+        IpAddr::from([10, 0, 0, last])
+    }
+
     #[tokio::test]
     async fn window_expires() {
         let hub = hub(Duration::from_millis(10));
@@ -539,31 +666,102 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         let mac = pair_mac(&secret, b"hub-spki", b"dev", b"n");
         assert!(matches!(
-            hub.attempt_pairing(b"dev", b"n", &mac),
+            hub.attempt_pairing(b"dev", addr(1), b"n", &mac),
             PairAttempt::Closed
         ));
     }
 
     #[tokio::test]
-    async fn three_bad_macs_close_the_window() {
+    async fn client_key_locks_out_after_three_failures() {
         let hub = hub(PAIR_TTL);
         let (_, secret, _, mut events) = hub.open_pairing(vec!["read".into()]);
-        for _ in 0..2 {
+        for last in 0..3 {
             assert!(matches!(
-                hub.attempt_pairing(b"dev", b"n", b"bad"),
+                hub.attempt_pairing(b"dev", addr(last), b"n", b"bad"),
                 PairAttempt::Failed
             ));
         }
-        assert!(events.try_recv().is_err());
-        assert!(matches!(
-            hub.attempt_pairing(b"dev", b"n", b"bad"),
-            PairAttempt::Failed
-        ));
-        assert!(matches!(events.try_recv(), Ok(PairEvent::Failed(_))));
         let mac = pair_mac(&secret, b"hub-spki", b"dev", b"n");
         assert!(matches!(
-            hub.attempt_pairing(b"dev", b"n", &mac),
+            hub.attempt_pairing(b"dev", addr(9), b"n", &mac),
+            PairAttempt::Locked
+        ));
+        assert!(events.try_recv().is_err());
+        // the window stays open for everyone else
+        let mac = pair_mac(&secret, b"hub-spki", b"other", b"n");
+        assert!(matches!(
+            hub.attempt_pairing(b"other", addr(9), b"n", &mac),
+            PairAttempt::Claimed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn address_locks_out_after_five_failures_across_keys() {
+        let hub = hub(PAIR_TTL);
+        let (_, secret, _, _events) = hub.open_pairing(vec!["read".into()]);
+        for key in 0..5u8 {
+            assert!(matches!(
+                hub.attempt_pairing(&[key], addr(1), b"n", b"bad"),
+                PairAttempt::Failed
+            ));
+        }
+        let mac = pair_mac(&secret, b"hub-spki", b"fresh", b"n");
+        assert!(matches!(
+            hub.attempt_pairing(b"fresh", addr(1), b"n", &mac),
+            PairAttempt::Locked
+        ));
+        assert!(matches!(
+            hub.attempt_pairing(b"fresh", addr(2), b"n", &mac),
+            PairAttempt::Claimed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn twenty_failures_burn_the_window() {
+        let hub = hub(PAIR_TTL);
+        let (_, secret, _, mut events) = hub.open_pairing(vec!["read".into()]);
+        for attempt in 0..PAIR_TRIES_TOTAL {
+            let key = u8::try_from(attempt).unwrap();
+            let address = addr(key / 5);
+            assert!(matches!(
+                hub.attempt_pairing(&[key], address, b"n", b"bad"),
+                PairAttempt::Failed
+            ));
+            if attempt + 1 < PAIR_TRIES_TOTAL {
+                assert!(events.try_recv().is_err());
+            }
+        }
+        assert!(
+            matches!(events.try_recv(), Ok(PairEvent::Failed(reason)) if reason == "too many failed pairing attempts")
+        );
+        let mac = pair_mac(&secret, b"hub-spki", b"dev", b"n");
+        assert!(matches!(
+            hub.attempt_pairing(b"dev", addr(200), b"n", &mac),
             PairAttempt::Closed
+        ));
+    }
+
+    #[tokio::test]
+    async fn locked_client_stays_locked_without_a_window_until_a_new_one() {
+        let hub = hub(PAIR_TTL);
+        let (generation, _, _, _events) = hub.open_pairing(vec!["read".into()]);
+        for _ in 0..3 {
+            hub.attempt_pairing(b"dev", addr(1), b"n", b"bad");
+        }
+        hub.close_pairing(generation);
+        assert!(matches!(
+            hub.attempt_pairing(b"dev", addr(1), b"n", b"bad"),
+            PairAttempt::Locked
+        ));
+        assert!(matches!(
+            hub.attempt_pairing(b"other", addr(2), b"n", b"bad"),
+            PairAttempt::Closed
+        ));
+        let (_, secret, _, _events) = hub.open_pairing(vec!["read".into()]);
+        let mac = pair_mac(&secret, b"hub-spki", b"dev", b"n");
+        assert!(matches!(
+            hub.attempt_pairing(b"dev", addr(1), b"n", &mac),
+            PairAttempt::Claimed { .. }
         ));
     }
 
@@ -575,18 +773,49 @@ mod tests {
         assert!(matches!(old_events.try_recv(), Ok(PairEvent::Failed(_))));
         let old_mac = pair_mac(&old_secret, b"hub-spki", b"dev", b"n");
         assert!(matches!(
-            hub.attempt_pairing(b"dev", b"n", &old_mac),
+            hub.attempt_pairing(b"dev", addr(1), b"n", &old_mac),
             PairAttempt::Failed
         ));
         let mac = pair_mac(&secret, b"hub-spki", b"dev", b"n");
         assert!(matches!(
-            hub.attempt_pairing(b"dev", b"n", &mac),
+            hub.attempt_pairing(b"dev", addr(1), b"n", &mac),
             PairAttempt::Claimed { scopes, .. } if scopes == vec!["manage".to_owned()]
         ));
         assert!(matches!(
-            hub.attempt_pairing(b"dev", b"n", &mac),
+            hub.attempt_pairing(b"dev", addr(1), b"n", &mac),
             PairAttempt::Closed
         ));
+    }
+
+    #[test]
+    fn rate_limiter_refills_and_prunes() {
+        let limiter = PairRateLimiter::new(5, Duration::from_secs(2));
+        let start = Instant::now();
+        let key = AddressKey::from(addr(1));
+        for _ in 0..5 {
+            assert!(limiter.allow(key, start));
+        }
+        assert!(!limiter.allow(key, start));
+        assert!(!limiter.allow(key, start + Duration::from_secs(1)));
+        assert!(limiter.allow(key, start + Duration::from_secs(3)));
+        assert!(!limiter.allow(key, start + Duration::from_secs(3)));
+        // other addresses have their own bucket
+        assert!(limiter.allow(AddressKey::from(addr(2)), start));
+
+        let limiter = PairRateLimiter::new(1, Duration::from_secs(2));
+        let fill = |limiter: &PairRateLimiter| {
+            for n in 0..PAIR_RATE_MAX_ENTRIES {
+                let n = u32::try_from(n).unwrap();
+                assert!(limiter.allow(AddressKey::from(IpAddr::from(n.to_be_bytes())), start));
+            }
+        };
+        fill(&limiter);
+        let newcomer = AddressKey::from(IpAddr::from([192, 168, 0, 1]));
+        // every bucket is still empty: fail closed
+        assert!(!limiter.allow(newcomer, start));
+        // once they refill they are pruned and the newcomer gets a bucket
+        assert!(limiter.allow(newcomer, start + Duration::from_secs(5)));
+        assert!(limiter.buckets.lock().unwrap().len() == 1);
     }
 
     /// Shared with the Android app's `PinningTest`; both sides must agree.

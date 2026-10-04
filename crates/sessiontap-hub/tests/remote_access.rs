@@ -10,15 +10,21 @@ use sessiontap_hub::{
     cli,
     ingest::{IngestAuth, IngestedRequest, handle_ingest},
     listen::{HubRequest, HubResponse, HubStreamEnvelope},
-    remote::{CLOSE_REVOKED, serve_remote},
+    remote::{CLOSE_REVOKED, RemoteGate, RemoteLimits, serve_remote},
     service::{self, Hub, RemoteInfo, pair_mac},
     store::HubStore,
     tls::{Identity, client_config, client_config_with_versions, server_config},
 };
-use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    net::{Ipv4Addr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    net::{TcpListener, TcpStream, UnixListener, UnixStream},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    net::{TcpListener, TcpSocket, TcpStream, UnixListener, UnixStream},
     sync::broadcast,
     time::timeout,
 };
@@ -54,14 +60,31 @@ fn view(status: PublicStatus) -> PublicAgentView {
     }
 }
 
+/// Default limits with roomy admission caps, so tests that churn
+/// connections from loopback do not trip them.
+fn roomy(ping: Duration) -> RemoteLimits {
+    RemoteLimits {
+        ping_interval: ping,
+        max_unauthenticated: 64,
+        max_unauthenticated_per_address: 64,
+        ..RemoteLimits::default()
+    }
+}
+
 async fn start_hub(ping: Duration) -> TestHub {
+    start_hub_with(roomy(ping), false).await
+}
+
+/// Starts a hub with the given limits. Unless `real_rate_limit`, the
+/// `pair.*` rate limit is effectively off.
+async fn start_hub_with(limits: RemoteLimits, real_rate_limit: bool) -> TestHub {
     let temp = tempfile::tempdir().unwrap();
     let identity = Identity::generate("test-hub").unwrap();
     let hub_id = identity.spki_sha256();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (updates, _) = broadcast::channel(64);
-    let hub = Arc::new(Hub::new(
+    let hub = Hub::new(
         Arc::new(HubStore::memory().unwrap()),
         updates,
         Some(RemoteInfo {
@@ -70,9 +93,21 @@ async fn start_hub(ping: Duration) -> TestHub {
             hub_spki: identity.spki.clone(),
             endpoints: vec![addr.to_string(), "hub.tailnet.ts.net:8932".into()],
         }),
-    ));
+    );
+    let hub = Arc::new(if real_rate_limit {
+        hub
+    } else {
+        hub.with_pair_rate(100_000, Duration::from_micros(1))
+    });
     let acceptor = tokio_rustls::TlsAcceptor::from(server_config(&identity).unwrap());
-    tokio::spawn(serve_remote(listener, acceptor, Arc::clone(&hub), ping));
+    let gate = RemoteGate::new(&limits);
+    tokio::spawn(serve_remote(
+        listener,
+        acceptor,
+        Arc::clone(&hub),
+        gate,
+        limits,
+    ));
     let socket = temp.path().join("hub.sock");
     let unix = UnixListener::bind(&socket).unwrap();
     tokio::spawn(service::serve_unix_listener(unix, Arc::clone(&hub)));
@@ -85,24 +120,64 @@ async fn start_hub(ping: Duration) -> TestHub {
     }
 }
 
-async fn tls_connect(
+const LOCAL: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
+
+/// Opens TCP to the hub from a chosen loopback source address.
+async fn tcp_from(hub: &TestHub, source: Ipv4Addr) -> std::io::Result<TcpStream> {
+    let socket = TcpSocket::new_v4()?;
+    socket.bind(SocketAddr::from((source, 0)))?;
+    socket.connect(hub.addr).await
+}
+
+async fn tls_connect_from(
     hub: &TestHub,
     config: Arc<tokio_rustls::rustls::ClientConfig>,
+    source: Ipv4Addr,
 ) -> std::io::Result<TlsStream<TcpStream>> {
-    let tcp = TcpStream::connect(hub.addr).await?;
+    let tcp = tcp_from(hub, source).await?;
     TlsConnector::from(config)
         .connect(ServerName::try_from("hub").unwrap(), tcp)
         .await
 }
 
-async fn connect(hub: &TestHub, client: Option<&Identity>) -> Ws {
-    let tls = tls_connect(hub, client_config(&hub.hub_id, client).unwrap())
+async fn tls_connect(
+    hub: &TestHub,
+    config: Arc<tokio_rustls::rustls::ClientConfig>,
+) -> std::io::Result<TlsStream<TcpStream>> {
+    tls_connect_from(hub, config, LOCAL).await
+}
+
+async fn connect_from(hub: &TestHub, client: Option<&Identity>, source: Ipv4Addr) -> Ws {
+    let tls = tls_connect_from(hub, client_config(&hub.hub_id, client).unwrap(), source)
         .await
         .unwrap();
     tokio_tungstenite::client_async("wss://hub/", tls)
         .await
         .unwrap()
         .0
+}
+
+async fn connect(hub: &TestHub, client: Option<&Identity>) -> Ws {
+    connect_from(hub, client, LOCAL).await
+}
+
+/// Waits until the hub ends the connection, ignoring frames sent before.
+/// Returns whether any text frame arrived and the close code, if any.
+async fn wait_closed(ws: &mut Ws) -> (bool, Option<u16>) {
+    let mut saw_text = false;
+    loop {
+        match timeout(WAIT, ws.next())
+            .await
+            .expect("connection stays open")
+        {
+            Some(Ok(Message::Text(_))) => saw_text = true,
+            Some(Ok(Message::Close(frame))) => {
+                return (saw_text, frame.map(|frame| u16::from(frame.code)));
+            }
+            Some(Ok(_)) => {}
+            Some(Err(_)) | None => return (saw_text, None),
+        }
+    }
 }
 
 async fn send(ws: &mut Ws, value: Value) {
@@ -472,6 +547,11 @@ async fn revocation_closes_connection_and_refuses_reconnect() {
         }
     };
     assert_eq!(u16::from(close.unwrap().code), CLOSE_REVOKED);
+    // nothing follows the revocation close
+    match timeout(WAIT, ws.next()).await.unwrap() {
+        None | Some(Err(_) | Ok(Message::Close(_))) => {}
+        Some(Ok(other)) => panic!("frame after revocation close: {other:?}"),
+    }
     let mut ws = connect(&hub, Some(&device)).await;
     let response = call(&mut ws, 1, "listen", json!({})).await;
     assert_eq!(response["error"]["code"], "unauthorized");
@@ -501,7 +581,17 @@ async fn dead_peers_are_closed_after_a_missed_pong() {
 
 /// A scripted device: begins pairing and proves the secret from the QR.
 async fn device_pair(hub: &TestHub, device: &Identity, secret: &[u8], name: &str) -> (Ws, Value) {
-    let mut ws = connect(hub, Some(device)).await;
+    device_pair_from(hub, device, secret, name, LOCAL).await
+}
+
+async fn device_pair_from(
+    hub: &TestHub,
+    device: &Identity,
+    secret: &[u8],
+    name: &str,
+    source: Ipv4Addr,
+) -> (Ws, Value) {
+    let mut ws = connect_from(hub, Some(device), source).await;
     let begin = call(&mut ws, 1, "pair.begin", json!({})).await;
     let nonce = URL_SAFE_NO_PAD
         .decode(begin["result"]["nonce"].as_str().unwrap())
@@ -623,8 +713,13 @@ async fn pairing_confirm_repair_and_wrong_secret() {
     let cli_task = tokio::spawn(async move {
         cli::pair(&socket, vec![], &mut Vec::new(), false, |_, _| false).await
     });
-    // wrong secrets fail without prompting; the third closes the window
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // wrong secrets fail without prompting; the third locks the key out
+    let secret = loop {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        if let Some(secret) = hub.hub.pairing_secret() {
+            break secret;
+        }
+    };
     let stranger = Identity::generate("stranger").unwrap();
     for attempt in 0..3 {
         let (_, response) = device_pair(&hub, &stranger, b"wrong", "Evil").await;
@@ -633,6 +728,22 @@ async fn pairing_confirm_repair_and_wrong_secret() {
             "attempt {attempt}"
         );
     }
+    let (_, response) = device_pair(&hub, &stranger, &secret, "Evil").await;
+    assert_eq!(response["error"]["code"], "pairing_failed");
+    assert!(!cli_task.is_finished());
+    // twenty failures in total, from several addresses, burn the window
+    let mut failures = 3;
+    for last in 1..=4u8 {
+        let source = Ipv4Addr::new(127, 0, 0, last);
+        let tries = if last == 1 { 2 } else { 5 };
+        for _ in 0..tries {
+            let fresh = Identity::generate("stranger").unwrap();
+            let (_, response) = device_pair_from(&hub, &fresh, b"wrong", "Evil", source).await;
+            assert_eq!(response["error"]["code"], "pairing_failed");
+            failures += 1;
+        }
+    }
+    assert_eq!(failures, 20);
     let error = timeout(WAIT, cli_task).await.unwrap().unwrap().unwrap_err();
     assert!(error.to_string().contains("too many"), "{error}");
     assert_eq!(hub.hub.store.devices().unwrap().len(), 1);
@@ -735,4 +846,444 @@ async fn pairing_window_expires() {
     .unwrap()
     .unwrap_err();
     assert!(error.to_string().contains("expired"), "{error}");
+}
+
+fn short(deadline: Duration) -> RemoteLimits {
+    RemoteLimits {
+        unauthenticated_deadline: deadline,
+        ..roomy(Duration::from_secs(60))
+    }
+}
+
+/// Publishes a status change for the running agent.
+fn publish_update(hub: &TestHub, running: &str, revision: u64) {
+    let mut view = hub
+        .hub
+        .store
+        .merged()
+        .unwrap()
+        .2
+        .into_iter()
+        .find(|agent| agent.view.invocation_id.to_string() == running)
+        .unwrap()
+        .view;
+    view.status = PublicStatus::Idle;
+    view.updated_at = Utc::now();
+    let update = SourceEnvelope::Update {
+        schema_version: 1,
+        source_id: "host".into(),
+        delivery_id: format!("d{revision}"),
+        revision,
+        changed: BTreeSet::from([PublicField::Status]),
+        view: Box::new(view),
+    };
+    let request = IngestedRequest {
+        method: "POST".into(),
+        path: "/".into(),
+        bearer: None,
+        body: serde_json::to_vec(&update).unwrap(),
+    };
+    let publication = handle_ingest(&hub.hub.store, &IngestAuth::default(), &request)
+        .publication
+        .unwrap();
+    hub.hub.updates.send(publication).unwrap();
+}
+
+#[tokio::test]
+async fn per_address_unauthenticated_cap() {
+    let hub = start_hub_with(RemoteLimits::default(), false).await;
+    let anonymous = client_config(&hub.hub_id, None).unwrap();
+    let mut held = Vec::new();
+    for _ in 0..4 {
+        held.push(tls_connect(&hub, Arc::clone(&anonymous)).await.unwrap());
+    }
+    assert!(tls_connect(&hub, Arc::clone(&anonymous)).await.is_err());
+    let device = paired(&hub, &["read"]);
+    let mut ws = connect_from(&hub, Some(&device), Ipv4Addr::new(127, 0, 0, 2)).await;
+    let info = call(&mut ws, 1, "hub.info", json!({})).await;
+    assert_eq!(info["result"]["hub_id"], hub.hub_id);
+    drop(held);
+}
+
+#[tokio::test]
+async fn unauthenticated_pool_cap() {
+    let hub = start_hub_with(
+        RemoteLimits {
+            max_unauthenticated: 2,
+            ..roomy(Duration::from_secs(60))
+        },
+        false,
+    )
+    .await;
+    let anonymous = client_config(&hub.hub_id, None).unwrap();
+    let first = tls_connect(&hub, Arc::clone(&anonymous)).await.unwrap();
+    let _second = tls_connect_from(&hub, Arc::clone(&anonymous), Ipv4Addr::new(127, 0, 0, 2))
+        .await
+        .unwrap();
+    assert!(
+        tls_connect_from(&hub, Arc::clone(&anonymous), Ipv4Addr::new(127, 0, 0, 3))
+            .await
+            .is_err()
+    );
+    drop(first);
+    let started = Instant::now();
+    loop {
+        if tls_connect(&hub, Arc::clone(&anonymous)).await.is_ok() {
+            break;
+        }
+        assert!(started.elapsed() < WAIT, "slot was never freed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn stalled_handshakes_are_closed() {
+    let limit = Duration::from_millis(300);
+    let slack = Duration::from_secs(2);
+    let hub = start_hub_with(
+        RemoteLimits {
+            handshake_timeout: limit,
+            ..roomy(Duration::from_secs(60))
+        },
+        false,
+    )
+    .await;
+    let started = Instant::now();
+    let mut tcp = TcpStream::connect(hub.addr).await.unwrap();
+    let mut buffer = [0u8; 64];
+    let read = timeout(limit + slack, tcp.read(&mut buffer)).await.unwrap();
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    assert!(started.elapsed() >= limit);
+
+    let mut tls = tls_connect(&hub, client_config(&hub.hub_id, None).unwrap())
+        .await
+        .unwrap();
+    let started = Instant::now();
+    let read = timeout(limit + slack, tls.read(&mut buffer)).await.unwrap();
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    assert!(started.elapsed() < limit + slack);
+}
+
+#[tokio::test]
+async fn oversized_message_closes_connection() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let stranger = Identity::generate("stranger").unwrap();
+    let mut ws = connect(&hub, Some(&stranger)).await;
+    let padding = "x".repeat(65 * 1024);
+    let _ = ws
+        .send(Message::text(
+            json!({"id": 1, "method": "pair.begin", "params": {"pad": padding}}).to_string(),
+        ))
+        .await;
+    let (saw_text, _) = wait_closed(&mut ws).await;
+    assert!(!saw_text);
+}
+
+#[tokio::test]
+async fn idle_unpaired_connection_is_closed() {
+    let deadline = Duration::from_millis(300);
+    let hub = start_hub_with(short(deadline), false).await;
+    let started = Instant::now();
+    let stranger = Identity::generate("stranger").unwrap();
+    let mut ws = connect(&hub, Some(&stranger)).await;
+    let (_, code) = wait_closed(&mut ws).await;
+    assert!(started.elapsed() >= deadline);
+    assert_eq!(code, Some(1008));
+}
+
+#[tokio::test]
+async fn pairing_wait_survives_deadline() {
+    let deadline = Duration::from_millis(300);
+    let hub = Arc::new(start_hub_with(short(deadline), false).await);
+    let (payload, lines) = open_window(&hub, vec!["read".into()]).await;
+    let secret = secret_of(&payload);
+    let hub2 = Arc::clone(&hub);
+    let device = tokio::spawn(async move {
+        let phone = Identity::generate("phone").unwrap();
+        device_pair(&hub2, &phone, &secret, "Pixel").await
+    });
+    let (read, mut write) = lines.into_inner().into_inner().into_split();
+    let mut lines = BufReader::new(read).lines();
+    timeout(WAIT, lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    tokio::time::sleep(deadline * 3).await;
+    sessiontap_infra::json::write_json_line(&mut write, &HubRequest::Accept { accept: true })
+        .await
+        .unwrap();
+    let (mut ws, response) = timeout(WAIT, device).await.unwrap().unwrap();
+    assert!(response["result"]["device_id"].is_string(), "{response}");
+    let info = call(&mut ws, 3, "hub.info", json!({})).await;
+    assert_eq!(info["result"]["scopes"], json!(["read"]));
+}
+
+#[tokio::test]
+async fn paired_connection_has_no_deadline() {
+    let deadline = Duration::from_millis(200);
+    let hub = start_hub_with(short(deadline), false).await;
+    let device = paired(&hub, &["read"]);
+    let mut ws = connect(&hub, Some(&device)).await;
+    tokio::time::sleep(deadline * 3).await;
+    let info = call(&mut ws, 1, "hub.info", json!({})).await;
+    assert_eq!(info["result"]["hub_id"], hub.hub_id);
+}
+
+#[tokio::test]
+async fn unpaired_pipelining_closes_connection() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let stranger = Identity::generate("stranger").unwrap();
+    let mut ws = connect(&hub, Some(&stranger)).await;
+    for id in 1..=2 {
+        ws.feed(Message::text(
+            json!({"id": id, "method": "pair.begin"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    }
+    ws.flush().await.unwrap();
+    let (_, code) = wait_closed(&mut ws).await;
+    assert_eq!(code, Some(1008));
+}
+
+#[tokio::test]
+async fn paired_inflight_limit_answers_busy() {
+    let hub = start_hub_with(
+        RemoteLimits {
+            max_inflight_requests: 1,
+            ..roomy(Duration::from_secs(60))
+        },
+        false,
+    )
+    .await;
+    seed(&hub);
+    let device = paired(&hub, &["read"]);
+    let mut ws = connect(&hub, Some(&device)).await;
+    assert!(call(&mut ws, 1, "listen", json!({})).await["result"].is_object());
+    assert_eq!(recv(&mut ws).await["event"], "stream");
+    // the acknowledged stream holds no permit
+    assert!(call(&mut ws, 2, "hub.info", json!({})).await["result"].is_object());
+    for id in 3..=4 {
+        ws.feed(Message::text(
+            json!({"id": id, "method": "hub.info"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    }
+    ws.flush().await.unwrap();
+    let mut responses = HashMap::new();
+    while responses.len() < 2 {
+        let message = recv(&mut ws).await;
+        if let Some(id) = message["id"].as_u64() {
+            responses.insert(id, message);
+        }
+    }
+    assert!(responses[&3]["result"].is_object(), "{responses:?}");
+    assert_eq!(responses[&4]["error"]["code"], "busy");
+    // the connection stays open
+    assert!(call(&mut ws, 5, "hub.info", json!({})).await["result"].is_object());
+}
+
+#[tokio::test]
+async fn unpaired_non_reader_does_not_stall_hub() {
+    let deadline = Duration::from_millis(500);
+    let hub = start_hub_with(short(deadline), false).await;
+    let (_, running) = seed(&hub);
+    let device = paired(&hub, &["read"]);
+    let mut listener = connect(&hub, Some(&device)).await;
+    call(&mut listener, 1, "listen", json!({})).await;
+    recv(&mut listener).await;
+
+    let started = Instant::now();
+    let stranger = Identity::generate("stranger").unwrap();
+    let mut silent = connect(&hub, Some(&stranger)).await;
+    send(&mut silent, json!({"id": 1, "method": "pair.begin"})).await;
+    publish_update(&hub, &running, 2);
+    let pushed = recv(&mut listener).await;
+    assert_eq!(pushed["data"]["type"], "update");
+    tokio::time::sleep(deadline * 2).await;
+    publish_update(&hub, &running, 3);
+    assert_eq!(recv(&mut listener).await["data"]["type"], "update");
+    wait_closed(&mut silent).await;
+    assert!(started.elapsed() < deadline + WAIT);
+}
+
+#[tokio::test]
+async fn pair_calls_are_rate_limited() {
+    let hub = Arc::new(start_hub_with(roomy(Duration::from_secs(60)), true).await);
+    let (payload, lines) = open_window(&hub, vec!["read".into()]).await;
+    let secret = secret_of(&payload);
+    let phone = Identity::generate("phone").unwrap();
+    let mut ws = connect(&hub, Some(&phone)).await;
+    let mut nonce = Vec::new();
+    for id in 1..=5 {
+        let begin = call(&mut ws, id, "pair.begin", json!({})).await;
+        nonce = URL_SAFE_NO_PAD
+            .decode(begin["result"]["nonce"].as_str().unwrap())
+            .unwrap();
+    }
+    let hub_spki = hub.hub.remote.as_ref().unwrap().hub_spki.clone();
+    let mac = URL_SAFE_NO_PAD.encode(pair_mac(&secret, &hub_spki, &phone.spki, &nonce));
+    let params = json!({"name": "Pixel", "mac": mac});
+    let limited = call(&mut ws, 6, "pair.complete", params.clone()).await;
+    assert_eq!(limited["error"]["code"], "rate_limited");
+    // after a refill the same proof still claims the window: nothing counted
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    send(
+        &mut ws,
+        json!({"id": 7, "method": "pair.complete", "params": params}),
+    )
+    .await;
+    let (read, mut write) = lines.into_inner().into_inner().into_split();
+    let mut lines = BufReader::new(read).lines();
+    let line = timeout(WAIT, lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            serde_json::from_str(&line),
+            Ok(HubResponse::PairConfirm { .. })
+        ),
+        "{line}"
+    );
+    sessiontap_infra::json::write_json_line(&mut write, &HubRequest::Accept { accept: true })
+        .await
+        .unwrap();
+    assert!(recv(&mut ws).await["result"]["device_id"].is_string());
+}
+
+#[tokio::test]
+async fn hostile_host_cannot_burn_window() {
+    let hub = Arc::new(start_hub(Duration::from_secs(60)).await);
+    let (payload, lines) = open_window(&hub, vec!["read".into()]).await;
+    let secret = secret_of(&payload);
+    for attempt in 0..8 {
+        let fresh = Identity::generate("stranger").unwrap();
+        // past the fifth failure the address is locked, even with the secret
+        let proof: &[u8] = if attempt < 5 { b"wrong" } else { &secret };
+        let (_, response) = device_pair(&hub, &fresh, proof, "Evil").await;
+        assert_eq!(
+            response["error"]["code"], "pairing_failed",
+            "attempt {attempt}"
+        );
+    }
+    let (read, mut write) = lines.into_inner().into_inner().into_split();
+    let mut lines = BufReader::new(read).lines();
+    // the conversation is still open and saw no prompt
+    assert!(
+        timeout(Duration::from_millis(200), lines.next_line())
+            .await
+            .is_err()
+    );
+    let hub2 = Arc::clone(&hub);
+    let device = tokio::spawn(async move {
+        let phone = Identity::generate("phone").unwrap();
+        device_pair_from(&hub2, &phone, &secret, "Pixel", Ipv4Addr::new(127, 0, 0, 2))
+            .await
+            .1
+    });
+    let line = timeout(WAIT, lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            serde_json::from_str(&line),
+            Ok(HubResponse::PairConfirm { .. })
+        ),
+        "{line}"
+    );
+    sessiontap_infra::json::write_json_line(&mut write, &HubRequest::Accept { accept: true })
+        .await
+        .unwrap();
+    assert!(device.await.unwrap()["result"]["device_id"].is_string());
+}
+
+#[tokio::test]
+async fn repairing_narrows_scopes_immediately() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let (stopped, _) = seed(&hub);
+    let device = paired(&hub, &["read", "manage"]);
+    let mut ws = connect(&hub, Some(&device)).await;
+    assert_eq!(
+        call(&mut ws, 1, "hub.info", json!({})).await["result"]["scopes"],
+        json!(["read", "manage"])
+    );
+    let sha = device.spki_sha256();
+    hub.hub
+        .store
+        .upsert_device(&service::device_id(&sha), &sha, "Phone", &["read".into()])
+        .unwrap();
+    let response = call(
+        &mut ws,
+        2,
+        "forget",
+        json!({"source_id": "host", "invocation_id": stopped}),
+    )
+    .await;
+    assert_eq!(response["error"]["code"], "forbidden");
+    assert_eq!(hub.hub.store.merged().unwrap().2.len(), 2);
+}
+
+#[tokio::test]
+async fn pairing_on_another_connection_authenticates_open_connection() {
+    let hub = start_hub(Duration::from_secs(60)).await;
+    let phone = Identity::generate("phone").unwrap();
+    let mut ws = connect(&hub, Some(&phone)).await;
+    let response = call(&mut ws, 1, "hub.info", json!({})).await;
+    assert_eq!(response["error"]["code"], "unauthorized");
+    let sha = phone.spki_sha256();
+    hub.hub
+        .store
+        .upsert_device(&service::device_id(&sha), &sha, "Phone", &["read".into()])
+        .unwrap();
+    let info = call(&mut ws, 2, "hub.info", json!({})).await;
+    assert_eq!(info["result"]["scopes"], json!(["read"]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn revoke_races_inflight_forget() {
+    for iteration in 0..20 {
+        let hub = start_hub(Duration::from_secs(60)).await;
+        let (stopped, _) = seed(&hub);
+        let device = paired(&hub, &["read", "manage"]);
+        let mut ws = connect(&hub, Some(&device)).await;
+        assert!(call(&mut ws, 1, "hub.info", json!({})).await["result"].is_object());
+        send(
+            &mut ws,
+            json!({"id": 2, "method": "forget", "params": {"source_id": "host", "invocation_id": stopped}}),
+        )
+        .await;
+        let core = Arc::clone(&hub.hub);
+        let id = service::device_id(&device.spki_sha256());
+        tokio::task::spawn_blocking(move || core.revoke(&id).unwrap())
+            .await
+            .unwrap();
+        let mut succeeded = false;
+        let close = loop {
+            match timeout(WAIT, ws.next()).await.unwrap() {
+                Some(Ok(Message::Text(text))) => {
+                    let message: Value = serde_json::from_str(text.as_str()).unwrap();
+                    if message["id"] == 2 && message["result"].is_object() {
+                        succeeded = true;
+                    }
+                }
+                Some(Ok(Message::Close(frame))) => break frame.map(|frame| u16::from(frame.code)),
+                Some(Ok(_)) => {}
+                other => panic!("expected close, got {other:?}"),
+            }
+        };
+        assert_eq!(close, Some(CLOSE_REVOKED));
+        let remaining = hub.hub.store.merged().unwrap().2.len();
+        // a success response means the forget happened before revoke
+        // returned; a kept agent means the device got no success
+        assert!(
+            !succeeded || remaining == 1,
+            "iteration {iteration}: success without effect"
+        );
+    }
 }

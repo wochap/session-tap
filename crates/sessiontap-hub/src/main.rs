@@ -3,7 +3,7 @@ use sessiontap_hub::config::{HubConfig, Subscription};
 use sessiontap_hub::ingest::{self, HubPublication};
 use sessiontap_hub::listen::HubRequest;
 use sessiontap_hub::paths::HubPaths;
-use sessiontap_hub::remote::{self, PING_INTERVAL};
+use sessiontap_hub::remote::{self, RemoteGate, RemoteLimits};
 use sessiontap_hub::routing::CommandLimits;
 use sessiontap_hub::service::{self, Hub, RemoteInfo};
 use sessiontap_hub::store::HubStore;
@@ -143,12 +143,15 @@ async fn run_service() -> Result<()> {
         });
     }
     let hub = Arc::new(Hub::new(Arc::clone(&store), updates.clone(), remote_info));
+    let limits = RemoteLimits::default();
+    let gate = RemoteGate::new(&limits);
     for (listener, acceptor) in remote_listeners {
         tokio::spawn(remote::serve_remote(
             listener,
             acceptor,
             Arc::clone(&hub),
-            PING_INTERVAL,
+            Arc::clone(&gate),
+            limits.clone(),
         ));
     }
     eprintln!(
