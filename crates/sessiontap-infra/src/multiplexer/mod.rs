@@ -1,27 +1,93 @@
 //! Backend-neutral multiplexer interface and backend dispatch.
 
+mod control;
 mod tmux;
 
 use anyhow::Result;
 pub use sessiontap_core::domain::MultiplexerBackend;
-use sessiontap_core::domain::{Capabilities, MultiplexerMetadata};
+use sessiontap_core::{
+    domain::{Capabilities, MultiplexerMetadata},
+    terminal::{Cursor, EndReason, Key},
+};
 use std::{collections::BTreeMap, sync::Arc};
 pub use tmux::TmuxAdapter;
+use tokio::sync::mpsc;
+
+/// Pane contents and state at one point in the pane's output stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneSnapshot {
+    pub cols: u16,
+    pub rows: u16,
+    pub cursor: Cursor,
+    pub alternate_screen: bool,
+    pub in_mode: bool,
+    /// Scrollback and visible screen as raw terminal bytes.
+    pub data: Vec<u8>,
+}
+
+/// Backend-neutral live pane events.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneEvent {
+    /// Taken in order with output: later `Output` follows it exactly.
+    Snapshot(PaneSnapshot),
+    Output(Vec<u8>),
+    /// The backend dropped output; a fresh snapshot is needed.
+    Resync,
+    ModeChanged(bool),
+    Resized,
+    Closed(EndReason),
+}
+
+/// Control side of an open stream. Dropping the last handle closes the
+/// backend connection.
+pub trait PaneStreamControl: Send + Sync {
+    /// Asks for a fresh [`PaneEvent::Snapshot`] in stream order.
+    fn request_snapshot(&self) -> Result<()>;
+}
+
+/// An open live pane stream; the first event is a snapshot.
+pub struct PaneStream {
+    pub events: mpsc::UnboundedReceiver<PaneEvent>,
+    pub control: Arc<dyn PaneStreamControl>,
+}
+
+/// Input guard inputs read from the pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaneState {
+    pub foreground_pgid: Option<u32>,
+    pub in_mode: bool,
+}
 
 pub trait MultiplexerAdapter {
     fn inspect(&self) -> Result<Option<MultiplexerMetadata>>;
     fn capture(&self, expected: &MultiplexerMetadata, process_pid: u32) -> Result<String>;
-    fn send_input(
+    /// Opens a live, output-only stream of the pane. It never resizes or
+    /// writes to the pane.
+    fn open_stream(&self, expected: &MultiplexerMetadata, process_pid: u32) -> Result<PaneStream>;
+    /// Sends named keys in the pane's key encoding and characters literally.
+    fn send_keys(
         &self,
         expected: &MultiplexerMetadata,
         process_pid: u32,
-        text: &[u8],
+        keys: &[Key],
     ) -> Result<()>;
+    /// Pastes text literally (bracketed when the application enabled it),
+    /// followed by Enter when asked.
+    fn paste(
+        &self,
+        expected: &MultiplexerMetadata,
+        process_pid: u32,
+        text: &str,
+        enter: bool,
+    ) -> Result<()>;
+    fn pane_state(&self, expected: &MultiplexerMetadata, process_pid: u32) -> Result<PaneState>;
     fn capabilities(&self, present: bool) -> Capabilities {
         Capabilities {
             capture: present,
             send_input: present,
             usage: false,
+            terminal: false,
+            terminal_policy: Default::default(),
         }
     }
 }
@@ -71,6 +137,12 @@ impl MultiplexerRegistry {
         self.adapters
             .get(&backend)
             .map(|adapter| adapter.as_ref() as &dyn MultiplexerAdapter)
+    }
+
+    /// Shared handle to the adapter for `backend`, for long-lived streams.
+    #[must_use]
+    pub fn shared(&self, backend: MultiplexerBackend) -> Option<SharedMultiplexer> {
+        self.adapters.get(&backend).cloned()
     }
 
     /// Adapter for `backend`, or a typed [`UnsupportedBackend`] error.

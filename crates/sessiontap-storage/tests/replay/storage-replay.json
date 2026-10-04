@@ -5437,7 +5437,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000001:1",
           "revision": 1,
@@ -5472,7 +5473,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000001:1",
           "revision": 1,
@@ -6273,7 +6275,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000002:25",
           "revision": 25,
@@ -6308,7 +6311,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000002:25",
           "revision": 25,
@@ -6411,7 +6415,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000003:28",
           "revision": 28,
@@ -6446,7 +6451,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000003:28",
           "revision": 28,
@@ -6561,7 +6567,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000004:31",
           "revision": 31,
@@ -6596,7 +6603,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000004:31",
           "revision": 31,
@@ -6757,7 +6765,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000005:35",
           "revision": 35,
@@ -6792,7 +6801,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000005:35",
           "revision": 35,
@@ -7009,7 +7019,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000006:44",
           "revision": 44,
@@ -7044,7 +7055,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000006:44",
           "revision": 44,
@@ -7147,7 +7159,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000007:47",
           "revision": 47,
@@ -7182,7 +7195,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000007:47",
           "revision": 47,
@@ -7741,7 +7755,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000008:62",
           "revision": 62,
@@ -7776,7 +7791,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000008:62",
           "revision": 62,
@@ -7887,7 +7903,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000009:65",
           "revision": 65,
@@ -7922,7 +7939,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000009:65",
           "revision": 65,
@@ -7957,7 +7975,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:67",
           "revision": 67,
@@ -7992,7 +8011,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000a:67",
           "revision": 67,
@@ -8291,7 +8311,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:75",
           "revision": 75,
@@ -8326,7 +8347,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000b:75",
           "revision": 75,
@@ -8773,7 +8795,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:89",
           "revision": 89,
@@ -8808,7 +8831,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000c:89",
           "revision": 89,
@@ -8937,7 +8961,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:92",
           "revision": 92,
@@ -8972,7 +8997,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000d:92",
           "revision": 92,
@@ -9483,7 +9509,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:112",
           "revision": 112,
@@ -9518,7 +9545,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000e:112",
           "revision": 112,
@@ -9629,7 +9657,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:115",
           "revision": 115,
@@ -9664,7 +9693,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-00000000000f:115",
           "revision": 115,
@@ -9771,7 +9801,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000010:118",
           "revision": 118,
@@ -9806,7 +9837,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000010:118",
           "revision": 118,
@@ -9891,7 +9923,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000011:121",
           "revision": 121,
@@ -9926,7 +9959,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000011:121",
           "revision": 121,
@@ -10147,7 +10181,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000012:129",
           "revision": 129,
@@ -10182,7 +10217,8 @@
             "metadata",
             "usage",
             "repository",
-            "children"
+            "children",
+            "terminal"
           ],
           "delivery_id": "synthetic:register:00000000-0000-4000-8000-000000000012:129",
           "revision": 129,

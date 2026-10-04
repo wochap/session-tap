@@ -69,6 +69,13 @@ impl HookDialect for PiDialect {
     fn id(&self) -> ProviderId {
         ProviderId::Pi
     }
+
+    /// A single digit answers the provider's numbered approval menus.
+    fn terminal_policy(&self) -> sessiontap_core::terminal::TerminalPolicy {
+        sessiontap_core::terminal::TerminalPolicy {
+            quick_pick: sessiontap_core::terminal::QuickPick::Digits,
+        }
+    }
     fn classify(&self, raw: &Value) -> Option<EventKind> {
         classify(raw)
     }

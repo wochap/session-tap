@@ -17,6 +17,17 @@ pub fn process_start_identity(pid: u32) -> Option<String> {
     stat_field(&read_stat(pid)?, 19).map(str::to_owned)
 }
 
+/// Foreground process group of the controlling terminal of `pid`
+/// (`/proc/<pid>/stat` field `tpgid`); `None` without a terminal.
+#[must_use]
+pub fn terminal_foreground_pgid(pid: u32) -> Option<u32> {
+    stat_field(&read_stat(pid)?, 5)?
+        .parse::<i64>()
+        .ok()
+        .and_then(|pgid| u32::try_from(pgid).ok())
+        .filter(|pgid| *pgid > 0)
+}
+
 /// Parent PID from `/proc`, falling back to `ps` where `/proc` is absent.
 #[must_use]
 pub fn parent_pid(pid: u32) -> Option<u32> {
@@ -54,6 +65,7 @@ mod tests {
         assert_eq!(stat_field(stat, 0), Some("R"));
         assert_eq!(stat_field(stat, 1), Some("77"));
         assert_eq!(stat_field(stat, 19), Some("987654"));
+        assert_eq!(stat_field(stat, 5), Some("-1"));
     }
 
     #[test]

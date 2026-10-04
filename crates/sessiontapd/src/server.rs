@@ -1,12 +1,13 @@
 //! Unix socket front end: per-connection request dispatch onto [`App`].
 
-use crate::app::App;
+use crate::{app::App, terminal::TerminalError};
 use anyhow::Result;
 use sessiontap_core::{
     SCHEMA_VERSION,
     protocol::{ErrorEnvelope, Request, Response, StreamEnvelope},
+    terminal::{TerminalFrame, error_code},
 };
-use sessiontap_infra::json::write_json_line;
+use sessiontap_infra::{json::write_json_line, multiplexer::UnsupportedBackend};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::UnixStream,
@@ -20,7 +21,39 @@ pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
     let Some(line) = lines.next_line().await? else {
         return Ok(());
     };
-    let request: Request = serde_json::from_str(&line)?;
+    let request: Request = match serde_json::from_str(&line) {
+        Ok(request) => request,
+        Err(error) => {
+            let response = error_response(error_code::BAD_REQUEST, error.to_string());
+            return Ok(write_json_line(&mut write, &response).await?);
+        }
+    };
+    if let Request::TerminalWatch { invocation_id } = &request {
+        let mut watcher = match app.terminal_watch(invocation_id) {
+            Ok(watcher) => watcher,
+            Err(error) => return Ok(write_json_line(&mut write, &error_to_response(&error)).await?),
+        };
+        loop {
+            tokio::select! {
+                incoming = lines.next_line() => match incoming {
+                    Ok(None) => break,
+                    Ok(Some(_)) => anyhow::bail!("watch connection accepts only one request"),
+                    Err(error) => return Err(error.into()),
+                },
+                frame = watcher.next() => match frame {
+                    Some(frame) => {
+                        let ended = matches!(frame, TerminalFrame::Ended { .. });
+                        write_json_line(&mut write, &frame).await?;
+                        if ended {
+                            break;
+                        }
+                    }
+                    None => break,
+                },
+            }
+        }
+        return Ok(());
+    }
     if matches!(request, Request::Listen) {
         let (revision, views, mut rx) = app.subscribe()?;
         write_json_line(
@@ -72,13 +105,27 @@ pub async fn handle(stream: UnixStream, app: App) -> Result<()> {
         }
         return Ok(());
     }
-    let response = process(request, &app).unwrap_or_else(|e| {
-        Response::Error(ErrorEnvelope {
-            code: "request_failed".into(),
-            message: e.to_string(),
-        })
-    });
+    let response = process(request, &app).unwrap_or_else(|error| error_to_response(&error));
     Ok(write_json_line(&mut write, &response).await?)
+}
+
+fn error_response(code: &str, message: String) -> Response {
+    Response::Error(ErrorEnvelope {
+        code: code.into(),
+        message,
+    })
+}
+
+/// Typed terminal and backend failures keep their code; anything else is
+/// `request_failed`.
+pub fn error_to_response(error: &anyhow::Error) -> Response {
+    if let Some(terminal) = error.downcast_ref::<TerminalError>() {
+        return error_response(terminal.code, terminal.message.clone());
+    }
+    if error.downcast_ref::<UnsupportedBackend>().is_some() {
+        return error_response(error_code::UNSUPPORTED_BACKEND, error.to_string());
+    }
+    error_response("request_failed", error.to_string())
 }
 
 /// Dispatches one non-streaming request.
@@ -137,13 +184,15 @@ pub fn process(request: Request, app: &App) -> Result<Response> {
         Request::Capture { invocation_id } => Response::Captured {
             text: app.capture(&invocation_id)?,
         },
-        Request::SendInput {
+        Request::TerminalInput {
             invocation_id,
-            text,
+            input,
         } => {
-            app.send_input(&invocation_id, &text)?;
+            app.terminal_input(&invocation_id, &input)?;
             Response::Ok
         }
-        Request::Listen => anyhow::bail!("listen is a streaming request"),
+        Request::Listen | Request::TerminalWatch { .. } => {
+            anyhow::bail!("streaming request on the request path")
+        }
     })
 }

@@ -3,6 +3,7 @@
 use crate::{completed_reason_context, failed_reason_context, status_reason_context};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sessiontap_core::terminal::TerminalPolicy;
 use sessiontap_core::{
     ProviderId,
     domain::{
@@ -23,6 +24,11 @@ pub struct NormalizeContext<'a> {
 /// is pure over the raw payload; the shared driver assembles the event.
 pub trait HookDialect: Send + Sync + 'static {
     fn id(&self) -> ProviderId;
+
+    /// Live terminal behaviour; see `AgentAdapter::terminal_policy`.
+    fn terminal_policy(&self) -> TerminalPolicy {
+        TerminalPolicy::default()
+    }
 
     /// Maps a payload to an event kind, or `None` to ignore it.
     fn classify(&self, raw: &Value) -> Option<EventKind>;

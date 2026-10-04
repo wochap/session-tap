@@ -1,3 +1,4 @@
+use crate::terminal::{TerminalDescriptor, TerminalPolicy};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -266,6 +267,8 @@ pub struct PublicAgentView {
     pub repository: Option<Repository>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<PublicChildAgentView>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalDescriptor>,
 }
 
 /// Typed public field paths, ordered by declaration for deterministic JSON.
@@ -284,6 +287,7 @@ pub enum PublicField {
     Usage,
     Repository,
     Children,
+    Terminal,
 }
 
 impl PublicField {
@@ -303,6 +307,7 @@ impl PublicField {
             Self::Usage => "usage",
             Self::Repository => "repository",
             Self::Children => "children",
+            Self::Terminal => "terminal",
         }
     }
 }
@@ -360,6 +365,11 @@ pub fn project_public(
         usage: snapshot.usage.clone(),
         repository: snapshot.repository.clone(),
         children: project_children(&snapshot.children),
+        terminal: (snapshot.capabilities.terminal && status != PublicStatus::Stopped).then_some(
+            TerminalDescriptor {
+                quick_pick: snapshot.capabilities.terminal_policy.quick_pick,
+            },
+        ),
     }
 }
 
@@ -406,6 +416,7 @@ pub fn changed_public_fields(
             PublicField::Usage,
             PublicField::Repository,
             PublicField::Children,
+            PublicField::Terminal,
         ]);
     };
     let mut changed = BTreeSet::new();
@@ -428,6 +439,7 @@ pub fn changed_public_fields(
     field!(usage, Usage);
     field!(repository, Repository);
     field!(children, Children);
+    field!(terminal, Terminal);
     changed
 }
 
@@ -537,6 +549,12 @@ pub struct Capabilities {
     pub capture: bool,
     pub send_input: bool,
     pub usage: bool,
+    /// Interactive launch inside a multiplexer: a live terminal is offered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal: bool,
+    /// Resolved by the daemon from the provider's adapter at registration.
+    #[serde(default, skip_serializing_if = "TerminalPolicy::is_default")]
+    pub terminal_policy: TerminalPolicy,
 }
 
 pub const CHILD_AGENTS_MAX: usize = 32;
@@ -1001,6 +1019,37 @@ mod tests {
     }
 
     #[test]
+    fn terminal_descriptor_projects_from_capability_and_status() {
+        let mut snapshot: InvocationSnapshot =
+            serde_json::from_str(include_str!("../tests/golden/pre-enum-tmux-snapshot.json"))
+                .unwrap();
+        snapshot.lifecycle = Lifecycle::Alive;
+        snapshot.activity = Activity::Working;
+        let without = project_public(&snapshot, None);
+        assert!(without.terminal.is_none());
+        let json = serde_json::to_string(&without).unwrap();
+        assert!(!json.contains("terminal"));
+
+        snapshot.capabilities.terminal = true;
+        snapshot.capabilities.terminal_policy.quick_pick = crate::terminal::QuickPick::Digits;
+        let with = project_public(&snapshot, None);
+        assert_eq!(
+            with.terminal,
+            Some(TerminalDescriptor {
+                quick_pick: crate::terminal::QuickPick::Digits
+            })
+        );
+        assert_eq!(
+            changed_public_fields(Some(&without), &with),
+            BTreeSet::from([PublicField::Terminal])
+        );
+        snapshot.lifecycle = Lifecycle::Exited;
+        let stopped = project_public(&snapshot, None);
+        assert!(stopped.terminal.is_none());
+        assert!(changed_public_fields(Some(&with), &stopped).contains(&PublicField::Terminal));
+    }
+
+    #[test]
     fn changed_fields_cover_blocked_stopped_failed_idle_and_lifecycle_stop() {
         let now = Utc::now();
         let base = PublicAgentView {
@@ -1016,6 +1065,7 @@ mod tests {
             usage: None,
             repository: None,
             children: None,
+            terminal: None,
         };
         let mut blocked = base.clone();
         blocked.status = PublicStatus::Blocked;

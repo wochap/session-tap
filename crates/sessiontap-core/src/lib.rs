@@ -4,6 +4,7 @@ pub mod paths;
 pub mod protocol;
 pub mod provider;
 pub mod reducer;
+pub mod terminal;
 
 pub use provider::ProviderId;
 

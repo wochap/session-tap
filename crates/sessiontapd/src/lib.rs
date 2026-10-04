@@ -4,5 +4,8 @@
 pub mod app;
 pub mod server;
 pub mod sinks;
+pub mod terminal;
+#[cfg(test)]
+mod terminal_tests;
 pub mod usage_coordinator;
 pub mod workers;

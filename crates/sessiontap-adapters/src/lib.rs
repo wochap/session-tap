@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use fs2::FileExt;
 use serde_json::{Value, json};
+use sessiontap_core::terminal::TerminalPolicy;
 use sessiontap_core::{
     ProviderId,
     config::Config,
@@ -162,6 +163,11 @@ pub trait AgentAdapter: Send + Sync {
     }
     fn redact_args(&self, args: &[String]) -> Vec<String> {
         redact_args(args)
+    }
+    /// Provider-specific live terminal behaviour; quick-pick `none` unless
+    /// the provider's menus are verified to answer to digits.
+    fn terminal_policy(&self) -> TerminalPolicy {
+        TerminalPolicy::default()
     }
     /// Prepares a launch of `executable`, the binary resolved for the
     /// configured provider or alias.
@@ -972,6 +978,30 @@ mod tests {
         let (adapter, executable) = registry.resolve("company-claude").unwrap();
         assert_eq!(adapter.provider_id(), ProviderId::Claude);
         assert_eq!(executable, "company-claude");
+    }
+
+    #[test]
+    fn terminal_policy_is_digits_only_for_verified_providers() {
+        use sessiontap_core::terminal::QuickPick;
+        let mut config = Config::default();
+        config.adapters.insert(
+            "company-claude".into(),
+            CustomAdapter {
+                executable: "company-claude".into(),
+                inherits: "claude".into(),
+            },
+        );
+        let registry = AdapterRegistry::new(&config);
+        for (provider, expected) in [
+            ("claude", QuickPick::Digits),
+            ("pi", QuickPick::Digits),
+            ("codex", QuickPick::None),
+            ("qwen", QuickPick::None),
+            ("company-claude", QuickPick::Digits),
+        ] {
+            let (adapter, _) = registry.resolve(provider).unwrap();
+            assert_eq!(adapter.terminal_policy().quick_pick, expected, "{provider}");
+        }
     }
 
     #[test]

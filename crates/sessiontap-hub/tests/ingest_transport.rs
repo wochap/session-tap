@@ -34,6 +34,7 @@ fn view(status: PublicStatus) -> PublicAgentView {
         usage: None,
         repository: None,
         children: None,
+        terminal: None,
     }
 }
 fn child(agent_id: &str, status: PublicStatus) -> PublicChildAgentView {

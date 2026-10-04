@@ -11,6 +11,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value;
+use sessiontap_core::terminal::TerminalPolicy;
 use sessiontap_core::{
     ProviderId,
     domain::{
@@ -120,6 +121,10 @@ impl<D: HookDialect, C> HookAdapter<D, C> {
 impl<D: HookDialect, C: SessionCollector + Clone> AgentAdapter for HookAdapter<D, C> {
     fn provider_id(&self) -> ProviderId {
         self.dialect.id()
+    }
+
+    fn terminal_policy(&self) -> TerminalPolicy {
+        self.dialect.terminal_policy()
     }
 
     fn prepare_launch(

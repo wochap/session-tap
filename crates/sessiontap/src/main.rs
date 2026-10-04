@@ -7,11 +7,12 @@ use sessiontap_adapters::{
 use sessiontap_core::{
     SCHEMA_VERSION,
     domain::{
-        Activity, ActivityConfirmation, EventEvidence, EvidenceChannel, EvidenceTrust,
-        InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
+        Activity, ActivityConfirmation, Capabilities, EventEvidence, EvidenceChannel,
+        EvidenceTrust, InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
     },
     paths::AppPaths,
     protocol::{Request, Response},
+    terminal::{Key, TerminalFrame, TerminalInput},
 };
 use sessiontap_infra::{
     config::load_config,
@@ -54,6 +55,13 @@ enum Cli {
     Completions {
         shell: Option<String>,
     },
+    TerminalWatch {
+        invocation: String,
+    },
+    TerminalSend {
+        invocation: String,
+        input: TerminalInput,
+    },
     Launch {
         provider: String,
         args: Vec<String>,
@@ -83,11 +91,46 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
             provider: args.next().context("missing provider")?,
         }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
+        "terminal" => parse_terminal(args),
         "--help" | "-h" => bail!("{}", usage("provider arguments...")),
         provider => Ok(Cli::Launch {
             provider: provider.into(),
             args: args.collect(),
         }),
+    }
+}
+
+const TERMINAL_USAGE: &str = "usage: sessiontap terminal watch <id> | terminal send <id> (--key <key>)... | --text <text> [--enter]";
+
+fn parse_terminal(mut args: impl Iterator<Item = String>) -> Result<Cli> {
+    let command = args.next();
+    let invocation = args.next().context(TERMINAL_USAGE)?;
+    match command.as_deref() {
+        Some("watch") if args.next().is_none() => Ok(Cli::TerminalWatch { invocation }),
+        Some("send") => {
+            let (mut keys, mut text, mut enter) = (Vec::new(), None, false);
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--key" => keys.push(
+                        args.next()
+                            .context(TERMINAL_USAGE)?
+                            .parse::<Key>()
+                            .map_err(|error| anyhow::anyhow!(error))?,
+                    ),
+                    "--text" if text.is_none() => text = Some(args.next().context(TERMINAL_USAGE)?),
+                    "--enter" => enter = true,
+                    _ => bail!(TERMINAL_USAGE),
+                }
+            }
+            let input = match (keys.is_empty(), text) {
+                (false, None) if !enter => TerminalInput::Keys(keys),
+                (true, Some(text)) => TerminalInput::Paste { text, enter },
+                _ => bail!(TERMINAL_USAGE),
+            };
+            input.validate().map_err(|error| anyhow::anyhow!(error))?;
+            Ok(Cli::TerminalSend { invocation, input })
+        }
+        _ => bail!(TERMINAL_USAGE),
     }
 }
 
@@ -99,7 +142,7 @@ fn usage(provider_args: &str) -> String {
         .collect::<Vec<_>>()
         .join("|");
     format!(
-        "usage: sessiontap <{providers}> [{provider_args}] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
+        "usage: sessiontap <{providers}> [{provider_args}] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | completions <shell>"
     )
 }
 
@@ -123,6 +166,8 @@ async fn main() -> Result<()> {
         Cli::InspectHooks => inspect_hooks(&paths).await,
         Cli::Setup { provider, action } => setup(&paths, provider, action).await,
         Cli::HookEmit { provider } => hook_emit(&paths, &provider).await,
+        Cli::TerminalWatch { invocation } => terminal_watch(&paths, &invocation).await,
+        Cli::TerminalSend { invocation, input } => terminal_send(&paths, &invocation, input).await,
         Cli::Launch { provider, args } => launch(&paths, &provider, args).await,
         Cli::Completions { .. } => unreachable!(),
     }
@@ -182,6 +227,65 @@ async fn listen(paths: &AppPaths) -> Result<()> {
         println!("{line}");
     }
     Ok(())
+}
+
+/// Resolves a full invocation ID or a unique ID prefix among tracked views.
+async fn resolve_invocation(paths: &AppPaths, prefix: &str) -> Result<InvocationId> {
+    if let Ok(id) = uuid_parse(prefix) {
+        return Ok(id);
+    }
+    let Response::Status { views, .. } = request(paths, Request::Status).await? else {
+        bail!("unexpected broker response");
+    };
+    let mut matches = views
+        .into_iter()
+        .map(|view| view.invocation_id)
+        .filter(|id| id.to_string().starts_with(prefix));
+    match (matches.next(), matches.next()) {
+        (Some(id), None) => Ok(id),
+        (None, _) => bail!("not_found"),
+        (Some(_), Some(_)) => bail!("ambiguous invocation prefix '{prefix}'"),
+    }
+}
+
+async fn terminal_watch(paths: &AppPaths, invocation: &str) -> Result<()> {
+    require_daemon(paths).await?;
+    let invocation_id = resolve_invocation(paths, invocation).await?;
+    let mut stream = UnixStream::connect(paths.socket()).await?;
+    write_request(&mut stream, &Request::TerminalWatch { invocation_id }).await?;
+    let mut lines = BufReader::new(stream).lines();
+    while let Some(line) = lines.next_line().await? {
+        if let Ok(frame) = serde_json::from_str::<TerminalFrame>(&line) {
+            println!("{line}");
+            if matches!(frame, TerminalFrame::Ended { .. }) {
+                return Ok(());
+            }
+            continue;
+        }
+        if let Ok(Response::Error(error)) = serde_json::from_str(&line) {
+            bail!("{}", error.code);
+        }
+        bail!("unexpected broker response");
+    }
+    bail!("terminal stream closed before it ended")
+}
+
+async fn terminal_send(paths: &AppPaths, invocation: &str, input: TerminalInput) -> Result<()> {
+    require_daemon(paths).await?;
+    let invocation_id = resolve_invocation(paths, invocation).await?;
+    match request(
+        paths,
+        Request::TerminalInput {
+            invocation_id,
+            input,
+        },
+    )
+    .await?
+    {
+        Response::Ok => Ok(()),
+        Response::Error(error) => bail!("{}", error.code),
+        _ => bail!("unexpected broker response"),
+    }
 }
 
 struct InspectionEndpoint {
@@ -284,6 +388,8 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
         false
     };
     let mut tracked = daemon_ready && hook_ready;
+    // Only an interactive launch takes the terminal; see below.
+    let interactive = std::io::stdin().is_terminal();
     let id = InvocationId::new();
     let credential = random_credential();
     let now = Utc::now();
@@ -327,7 +433,11 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
             usage: None,
             repository: repository_metadata(&cwd),
             multiplexer: multiplexer.clone(),
-            capabilities: multiplexers.capabilities(multiplexer.as_ref()),
+            capabilities: launch_capabilities(
+                multiplexers.capabilities(multiplexer.as_ref()),
+                interactive,
+                multiplexer.is_some(),
+            ),
             turn_generation: 0,
             completed_generation: None,
             children: Vec::new(),
@@ -386,7 +496,6 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     // Only an interactive launch takes the terminal. A headless one (stdin not
     // a terminal) stays in the caller's process group, so a caller that shows
     // its own UI while the provider runs keeps the terminal and its keys.
-    let interactive = std::io::stdin().is_terminal();
     if interactive {
         command.process_group(0);
     }
@@ -431,7 +540,8 @@ async fn launch(paths: &AppPaths, provider: &str, args: Vec<String>) -> Result<(
     } else {
         None
     };
-    let wait_result = wait_with_signal_forwarding(&mut child, pid, interactive).await;
+    let wait_result =
+        wait_with_signal_forwarding(&mut child, pid, interactive, terminal.as_ref()).await;
     if let Some(task) = side_channel_task {
         task.abort();
         let _ = task.await;
@@ -551,15 +661,20 @@ async fn wait_with_signal_forwarding(
     child: &mut tokio::process::Child,
     pid: u32,
     own_group: bool,
+    terminal: Option<&std::fs::File>,
 ) -> Result<std::process::ExitStatus> {
     use nix::{
-        sys::signal::{Signal, kill, killpg},
+        sys::{
+            signal::{Signal, kill, killpg, raise},
+            wait::{Id, WaitPidFlag, WaitStatus, waitid},
+        },
         unistd::Pid,
     };
     use tokio::signal::unix::{SignalKind, signal};
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let mut hangup = signal(SignalKind::hangup())?;
+    let mut child_changed = signal(SignalKind::child())?;
     let target = Pid::from_raw(pid as i32);
     let forward = |signal| {
         let _ = if own_group {
@@ -574,6 +689,20 @@ async fn wait_with_signal_forwarding(
             _ = interrupt.recv() => forward(Signal::SIGINT),
             _ = terminate.recv() => forward(Signal::SIGTERM),
             _ = hangup.recv() => forward(Signal::SIGHUP),
+            _ = child_changed.recv(), if terminal.is_some() => {
+                // A suspended provider suspends the wrapper's job too, so the
+                // caller's shell takes the terminal; `fg` resumes both.
+                // WSTOPPED without WEXITED never reaps the child.
+                if let Ok(WaitStatus::Stopped(..)) =
+                    waitid(Id::Pid(target), WaitPidFlag::WSTOPPED | WaitPidFlag::WNOHANG)
+                {
+                    let _ = raise(Signal::SIGTSTP);
+                    if let Some(tty) = terminal {
+                        let _ = set_terminal_foreground(tty, target);
+                    }
+                    let _ = killpg(target, Signal::SIGCONT);
+                }
+            }
         }
     }
 }
@@ -745,6 +874,17 @@ fn random_credential() -> String {
     rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// A live terminal is offered only for an interactive launch (stdin is a
+/// terminal) inside a multiplexer.
+fn launch_capabilities(
+    mut capabilities: Capabilities,
+    interactive: bool,
+    in_multiplexer: bool,
+) -> Capabilities {
+    capabilities.terminal = interactive && in_multiplexer;
+    capabilities
+}
+
 fn uuid_parse(value: &str) -> Result<InvocationId> {
     Ok(InvocationId(uuid::Uuid::parse_str(value)?))
 }
@@ -807,7 +947,7 @@ mod tests {
         let help = parse(vec!["--help".into()].into_iter()).unwrap_err();
         assert_eq!(
             help.to_string(),
-            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | completions <shell>"
+            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | completions <shell>"
         );
         let empty = parse(std::iter::empty()).unwrap_err();
         assert!(
@@ -825,6 +965,57 @@ mod tests {
                 shell: Some("zsh".into())
             }
         );
+    }
+
+    #[test]
+    fn terminal_commands_parse() {
+        let parse_args = |args: &[&str]| parse(args.iter().map(|arg| (*arg).to_owned()));
+        assert_eq!(
+            parse_args(&["terminal", "watch", "7f3c"]).unwrap(),
+            Cli::TerminalWatch {
+                invocation: "7f3c".into()
+            }
+        );
+        assert_eq!(
+            parse_args(&["terminal", "send", "7f3c", "--key", "down", "--key", "1"]).unwrap(),
+            Cli::TerminalSend {
+                invocation: "7f3c".into(),
+                input: TerminalInput::Keys(vec![
+                    Key::Named(sessiontap_core::terminal::NamedKey::Down),
+                    Key::Char('1'),
+                ]),
+            }
+        );
+        assert_eq!(
+            parse_args(&["terminal", "send", "7f3c", "--text", "a\nb", "--enter"]).unwrap(),
+            Cli::TerminalSend {
+                invocation: "7f3c".into(),
+                input: TerminalInput::Paste {
+                    text: "a\nb".into(),
+                    enter: true,
+                },
+            }
+        );
+        for bad in [
+            &["terminal"][..],
+            &["terminal", "watch"],
+            &["terminal", "send", "7f3c"],
+            &["terminal", "send", "7f3c", "--key", "pageup"],
+            &["terminal", "send", "7f3c", "--key", "1", "--text", "x"],
+            &["terminal", "send", "7f3c", "--key", "1", "--enter"],
+            &["terminal", "send", "7f3c", "--text", ""],
+            &["terminal", "peek", "7f3c"],
+        ] {
+            assert!(parse_args(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_capability_needs_interactive_multiplexer_launch() {
+        let base = Capabilities::default();
+        assert!(launch_capabilities(base.clone(), true, true).terminal);
+        assert!(!launch_capabilities(base.clone(), false, true).terminal);
+        assert!(!launch_capabilities(base, true, false).terminal);
     }
 
     #[test]
@@ -1039,6 +1230,12 @@ mod tests {
             "listen",
             "inspect-hooks",
             "completions",
+            "terminal",
+            "watch",
+            "send",
+            "--key",
+            "--text",
+            "--enter",
             "claude",
             "codex",
             "qwen",

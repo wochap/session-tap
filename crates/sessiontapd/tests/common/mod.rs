@@ -3,6 +3,7 @@
 use anyhow::{Result, bail};
 use chrono::Utc;
 use sessiontap_adapters::AdapterRegistry;
+use sessiontap_core::terminal::Key;
 use sessiontap_core::{
     config::{Config, DaemonConfig},
     domain::{
@@ -12,7 +13,9 @@ use sessiontap_core::{
     },
     protocol::{Request, StreamEnvelope},
 };
-use sessiontap_infra::multiplexer::{MultiplexerAdapter, MultiplexerBackend, MultiplexerRegistry};
+use sessiontap_infra::multiplexer::{
+    MultiplexerAdapter, MultiplexerBackend, MultiplexerRegistry, PaneState, PaneStream,
+};
 use sessiontap_storage::Storage;
 use sessiontapd::app::{App, Collection, PublishConfig};
 use std::sync::Arc;
@@ -30,7 +33,16 @@ impl MultiplexerAdapter for NoMultiplexer {
     fn capture(&self, _: &MultiplexerMetadata, _: u32) -> Result<String> {
         bail!("no multiplexer")
     }
-    fn send_input(&self, _: &MultiplexerMetadata, _: u32, _: &[u8]) -> Result<()> {
+    fn open_stream(&self, _: &MultiplexerMetadata, _: u32) -> Result<PaneStream> {
+        bail!("no multiplexer")
+    }
+    fn send_keys(&self, _: &MultiplexerMetadata, _: u32, _: &[Key]) -> Result<()> {
+        bail!("no multiplexer")
+    }
+    fn paste(&self, _: &MultiplexerMetadata, _: u32, _: &str, _: bool) -> Result<()> {
+        bail!("no multiplexer")
+    }
+    fn pane_state(&self, _: &MultiplexerMetadata, _: u32) -> Result<PaneState> {
         bail!("no multiplexer")
     }
 }

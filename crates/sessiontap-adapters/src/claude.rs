@@ -70,6 +70,13 @@ impl HookDialect for ClaudeDialect {
     fn id(&self) -> ProviderId {
         ProviderId::Claude
     }
+
+    /// A single digit answers the provider's numbered approval menus.
+    fn terminal_policy(&self) -> sessiontap_core::terminal::TerminalPolicy {
+        sessiontap_core::terminal::TerminalPolicy {
+            quick_pick: sessiontap_core::terminal::QuickPick::Digits,
+        }
+    }
     /// A child payload whose identity fails bounds, or a subagent lifecycle
     /// hook without a child identity, is ignored rather than treated as root.
     fn classify(&self, raw: &Value) -> Option<EventKind> {

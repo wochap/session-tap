@@ -556,6 +556,7 @@ subscriptions:
             PublicField::Usage,
             PublicField::Repository,
             PublicField::Children,
+            PublicField::Terminal,
         ];
         // Exhaustive: adding a variant fails to compile here until listed.
         for field in fields {
@@ -571,7 +572,8 @@ subscriptions:
                 | PublicField::Metadata
                 | PublicField::Usage
                 | PublicField::Repository
-                | PublicField::Children => {}
+                | PublicField::Children
+                | PublicField::Terminal => {}
             }
         }
         let names: Vec<String> = fields

@@ -2,6 +2,8 @@ use crate::domain::{
     ArtifactCollectionContext, InvocationId, InvocationSnapshot, NormalizedEvent, PublicAgentView,
     PublicField, StatusReasonContext,
 };
+pub use crate::terminal::TerminalFrame;
+use crate::terminal::TerminalInput;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -73,9 +75,14 @@ pub enum Request {
     Capture {
         invocation_id: InvocationId,
     },
-    SendInput {
+    /// Streaming request answered with [`TerminalFrame`] lines, or one
+    /// error response when the terminal is unavailable.
+    TerminalWatch {
         invocation_id: InvocationId,
-        text: String,
+    },
+    TerminalInput {
+        invocation_id: InvocationId,
+        input: TerminalInput,
     },
 }
 
@@ -149,6 +156,7 @@ mod tests {
                 dirty: Some(false),
             }),
             children: None,
+            terminal: None,
         }
     }
 

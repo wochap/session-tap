@@ -1,17 +1,22 @@
 //! Request-level daemon service. Every socket request maps to one method so
 //! behavior is testable without a socket.
 
-use crate::usage_coordinator::{EnrichmentApplier, UsageCoordinator};
+use crate::{
+    terminal::{AgentProcess, PaneStateFn, TerminalError, Terminals, Watcher},
+    usage_coordinator::{EnrichmentApplier, UsageCoordinator},
+};
 use anyhow::{Context, Result, bail};
 use sessiontap_adapters::AdapterRegistry;
 use sessiontap_core::{
     config::{DaemonConfig, SinkConfig},
     domain::{
-        ArtifactCollectionContext, InvocationId, InvocationSnapshot, NormalizedEvent,
-        PublicAgentView, StatusReasonContext, changed_public_fields, project_public,
+        ArtifactCollectionContext, InvocationId, InvocationSnapshot, MultiplexerMetadata,
+        NormalizedEvent, PublicAgentView, PublicStatus, StatusReasonContext, changed_public_fields,
+        project_public,
     },
+    terminal::{EndReason, TerminalInput, error_code},
 };
-use sessiontap_infra::multiplexer::MultiplexerRegistry;
+use sessiontap_infra::multiplexer::{MultiplexerRegistry, SharedMultiplexer, UnsupportedBackend};
 use sessiontap_storage::{AppliedUpdate, Publish, Storage};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use tokio::sync::broadcast;
@@ -43,6 +48,8 @@ pub struct AppCore {
     updates: broadcast::Sender<AppliedUpdate>,
     publish: PublishConfig,
     multiplexers: Arc<MultiplexerRegistry>,
+    adapters: Arc<AdapterRegistry>,
+    terminals: Arc<Terminals>,
 }
 
 impl AppCore {
@@ -112,6 +119,8 @@ impl App {
             updates,
             publish,
             multiplexers,
+            adapters: collection.registry.clone(),
+            terminals: Arc::new(Terminals::default()),
         });
         let usage = UsageCoordinator::new(
             core.clone(),
@@ -136,7 +145,13 @@ impl App {
         self.core.storage.public_snapshot()
     }
 
-    pub fn register(&self, snapshot: InvocationSnapshot, credential: &str) -> Result<()> {
+    pub fn register(&self, mut snapshot: InvocationSnapshot, credential: &str) -> Result<()> {
+        snapshot.capabilities.terminal_policy = self
+            .core
+            .adapters
+            .resolve(&snapshot.provider)
+            .map(|(adapter, _)| adapter.terminal_policy())
+            .unwrap_or_default();
         let publish = self.core.publish.publish();
         let revision = self
             .core
@@ -188,6 +203,9 @@ impl App {
             signal,
             Some(&publish),
         )?;
+        self.core
+            .terminals
+            .end(invocation_id, EndReason::AgentExited);
         self.core.broadcast(update);
         Ok(())
     }
@@ -238,18 +256,100 @@ impl App {
             .capture(&metadata, pid)
     }
 
-    pub fn send_input(&self, invocation_id: &InvocationId, text: &str) -> Result<()> {
-        let (metadata, pid) = self.multiplexer_target(invocation_id)?;
-        self.core
+    /// Resolves a live terminal target, failing with a typed code and
+    /// without running any multiplexer command.
+    fn terminal_target(
+        &self,
+        invocation_id: &InvocationId,
+    ) -> Result<(MultiplexerMetadata, AgentProcess, SharedMultiplexer)> {
+        let snapshot = self
+            .core
+            .storage
+            .invocation(invocation_id)
+            .map_err(|_| TerminalError::new(error_code::NOT_FOUND, "unknown invocation"))?;
+        if self.core.terminals.has_ended(invocation_id) {
+            return Err(
+                TerminalError::new(error_code::TERMINAL_ENDED, "terminal stream ended").into(),
+            );
+        }
+        let status = project_public(&snapshot, None).status;
+        let (Some(metadata), Some(child_pid), true, false) = (
+            snapshot.multiplexer,
+            snapshot.process.child_pid,
+            snapshot.capabilities.terminal,
+            status == PublicStatus::Stopped,
+        ) else {
+            return Err(TerminalError::new(
+                error_code::TERMINAL_UNAVAILABLE,
+                "no live terminal for this invocation",
+            )
+            .into());
+        };
+        let adapter = self
+            .core
             .multiplexers
-            .require(metadata.backend)?
-            .send_input(&metadata, pid, text.as_bytes())
+            .shared(metadata.backend)
+            .ok_or_else(|| {
+                TerminalError::new(
+                    error_code::UNSUPPORTED_BACKEND,
+                    UnsupportedBackend(metadata.backend).to_string(),
+                )
+            })?;
+        Ok((
+            metadata,
+            AgentProcess {
+                child_pid,
+                start_identity: snapshot.process.start_identity,
+            },
+            adapter,
+        ))
+    }
+
+    /// Joins (or opens) the invocation's live terminal stream.
+    pub fn terminal_watch(&self, invocation_id: &InvocationId) -> Result<Watcher> {
+        let (metadata, agent, adapter) = self.terminal_target(invocation_id)?;
+        let pid = agent.child_pid;
+        let pane_state: PaneStateFn = {
+            let (metadata, adapter) = (metadata.clone(), adapter.clone());
+            Arc::new(move || adapter.pane_state(&metadata, pid))
+        };
+        self.core
+            .terminals
+            .watch(invocation_id, agent, pane_state, || {
+                adapter.open_stream(&metadata, pid).map_err(|error| {
+                    TerminalError::new(error_code::TERMINAL_UNAVAILABLE, error.to_string()).into()
+                })
+            })
+    }
+
+    /// Delivers guarded input to the invocation's pane.
+    pub fn terminal_input(
+        &self,
+        invocation_id: &InvocationId,
+        input: &TerminalInput,
+    ) -> Result<()> {
+        let (metadata, agent, adapter) = self.terminal_target(invocation_id)?;
+        input
+            .validate()
+            .map_err(|message| TerminalError::new(error_code::BAD_REQUEST, message))?;
+        let pid = agent.child_pid;
+        let state = adapter.pane_state(&metadata, pid).map_err(|error| {
+            TerminalError::new(error_code::TERMINAL_UNAVAILABLE, error.to_string())
+        })?;
+        if let Some(blocked) = agent.guard(state) {
+            self.core.terminals.poll_guard(invocation_id);
+            return Err(TerminalError::new(blocked.code(), "input refused by the guard").into());
+        }
+        match input {
+            TerminalInput::Keys(keys) => adapter.send_keys(&metadata, pid, keys),
+            TerminalInput::Paste { text, enter } => adapter.paste(&metadata, pid, text, *enter),
+        }
     }
 
     fn multiplexer_target(
         &self,
         invocation_id: &InvocationId,
-    ) -> Result<(sessiontap_core::domain::MultiplexerMetadata, u32)> {
+    ) -> Result<(MultiplexerMetadata, u32)> {
         let snapshot = self.core.storage.invocation(invocation_id)?;
         let metadata = snapshot
             .multiplexer
@@ -282,9 +382,16 @@ impl App {
         retention_days: u64,
     ) -> Result<usize> {
         let publish = self.core.publish.publish();
-        self.core
+        let changed = self
+            .core
             .storage
-            .reconcile(is_alive, retention_days, Some(&publish))
+            .reconcile(is_alive, retention_days, Some(&publish))?;
+        self.core.terminals.end_stopped(|id| {
+            self.core.storage.invocation(id).is_ok_and(|snapshot| {
+                project_public(&snapshot, None).status == PublicStatus::Stopped
+            })
+        });
+        Ok(changed)
     }
 
     pub fn expire_stale_working(&self, now: chrono::DateTime<chrono::Utc>) -> Result<()> {
@@ -399,7 +506,7 @@ pub(crate) mod tests {
         app.register(initial.clone(), "credential").unwrap();
         let update = receiver.recv().await.unwrap();
         assert_eq!(update.view.invocation_id, initial.invocation_id);
-        assert_eq!(update.changed.len(), 12);
+        assert_eq!(update.changed.len(), 13);
         assert_eq!(app.status().unwrap().1.len(), 1);
     }
 
@@ -631,7 +738,6 @@ pub(crate) mod tests {
         app.register(initial.clone(), "credential").unwrap();
         let error = app.capture(&initial.invocation_id).unwrap_err();
         assert!(error.to_string().contains("not in a multiplexer"));
-        assert!(app.send_input(&InvocationId::new(), "x").is_err());
     }
 
     #[tokio::test]
@@ -639,6 +745,7 @@ pub(crate) mod tests {
         let app = app(Storage::memory().unwrap());
         let mut initial = snapshot();
         initial.process.child_pid = Some(std::process::id());
+        initial.capabilities.terminal = true;
         initial.multiplexer = Some(MultiplexerMetadata {
             backend: MultiplexerBackend::Tmux,
             socket: "/nonexistent/tmux.sock".into(),
@@ -646,13 +753,23 @@ pub(crate) mod tests {
             ..Default::default()
         });
         app.register(initial.clone(), "credential").unwrap();
+        assert_eq!(
+            app.capture(&initial.invocation_id)
+                .unwrap_err()
+                .downcast_ref::<UnsupportedBackend>(),
+            Some(&UnsupportedBackend(MultiplexerBackend::Tmux))
+        );
+        let input = sessiontap_core::terminal::TerminalInput::Keys(vec![
+            sessiontap_core::terminal::Key::Char('x'),
+        ]);
         for error in [
-            app.capture(&initial.invocation_id).unwrap_err(),
-            app.send_input(&initial.invocation_id, "x").unwrap_err(),
+            app.terminal_input(&initial.invocation_id, &input)
+                .unwrap_err(),
+            app.terminal_watch(&initial.invocation_id).err().unwrap(),
         ] {
             assert_eq!(
-                error.downcast_ref::<UnsupportedBackend>(),
-                Some(&UnsupportedBackend(MultiplexerBackend::Tmux))
+                error.downcast_ref::<TerminalError>().unwrap().code,
+                error_code::UNSUPPORTED_BACKEND
             );
         }
     }

@@ -247,6 +247,7 @@ mod tests {
                 usage: None,
                 repository: None,
                 children: None,
+                terminal: None,
             },
             changed: BTreeSet::from([PublicField::Reason]),
             first_seen: false,

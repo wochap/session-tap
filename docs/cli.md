@@ -18,6 +18,8 @@ sessiontap qwen [args...]
 sessiontap status                # JSON array
 sessiontap listen                # snapshot then JSONL updates
 sessiontap inspect-hooks         # ephemeral raw managed-hook JSONL
+sessiontap terminal watch <id>   # live pane frames as JSONL
+sessiontap terminal send <id> --key down --key enter   # guarded keys
 sessiontap-hub                   # merged multi-source service
 sessiontap-hub listen            # merged snapshot then JSONL updates
 sessiontap-hub pair [--scope read|manage]...   # pair a remote device (QR code)
@@ -133,8 +135,64 @@ notifications. A message-less completion or lifecycle-only exit has no reason.
 
 When launched inside tmux, the daemon retains socket/session/window/pane data
 only for local control. Public status, listen, sink, and hub payloads never
-contain it. Capture and input revalidate the server and pane locally; input is
-delivered through a tmux buffer without shell evaluation.
+contain it. Capture, streaming, and input revalidate the server and pane
+locally; pasted text is delivered through a tmux buffer without shell
+evaluation.
+
+## Live terminal
+
+An interactive launch (stdin is a terminal) inside tmux offers a live
+terminal while the agent is not `stopped`. Its public view then carries
+`terminal: {"quick_pick": "digits" | "none"}`; `digits` means a single digit
+answers the provider's numbered menus (Claude and pi). Headless launches and
+launches outside a multiplexer have no `terminal` key. Streaming needs tmux
+3.2 or newer.
+
+```sh
+sessiontap terminal watch 7f3c
+sessiontap terminal send 7f3c --key 1
+sessiontap terminal send 7f3c --key down --key enter
+sessiontap terminal send 7f3c --text 'run the tests' --enter
+```
+
+Both commands accept a full invocation ID or a unique prefix. `watch` prints
+one JSON frame per line and exits successfully after the `ended` frame:
+
+- `snapshot`: `seq`, `cols`, `rows`, `cursor` (`x`, `y`, `visible`),
+  `alternate_screen`, `data` (base64 of the last 500 scrollback lines plus the
+  visible screen, with colours), and `input`.
+- `output`: `seq` and `data`, the raw bytes the pane produced after the
+  snapshot.
+- `input`: `available` and, when refused, `reason` (`not_foreground` or
+  `pane_in_mode`).
+- `ended`: `reason` is `agent_exited`, `pane_closed`, `session_closed`,
+  `multiplexer_stopped`, or `identity_changed`.
+
+A watcher that falls behind, a pane resize, and output tmux dropped are all
+answered with a fresh snapshot. Watching never resizes the pane or writes to
+it.
+
+`send` takes repeatable `--key` (`up`, `down`, `left`, `right`, `escape`,
+`tab`, `back_tab`, `enter`, `space`, `backspace`, `ctrl_c`, or one printable
+character typed as a keystroke) or `--text` with optional `--enter`. Text is
+pasted literally, bracketed when the application enabled bracketed paste. A
+refused request prints its error code and exits non-zero: `not_found`,
+`terminal_unavailable`, `not_foreground`, `pane_in_mode`, `terminal_ended`,
+`unsupported_backend`, or `bad_request`.
+
+The input guard is best effort. Input is delivered only while the agent's own
+process group is the pane's foreground group with its recorded start
+identity, and the pane is not in copy or another mode. It prevents typing into
+the desktop shell by accident, for example after Ctrl+Z; it does not filter
+keys or stop a user from reaching a shell through the agent itself. A
+suspended agent suspends the `sessiontap` job too, so the shell's `fg`
+resumes it.
+
+The stream uses one tmux control client per watched pane, closed when the last
+watcher leaves. While it is open tmux counts it as an attached client:
+`session_attached` goes up, `client-attached` hooks run, and
+`destroy-unattached` does not fire. A tmux socket path over 108 bytes fails
+with tmux's own "File name too long" error.
 
 Sinks are disabled by default. A debug stdout sink writes on the daemon's
 stdout, never the provider terminal stream. HTTP sinks require HTTPS except for
@@ -229,7 +287,9 @@ or process exit.
 
 ## Shell completions
 
-`sessiontap completions zsh` prints the zsh completion script to stdout.
+`sessiontap completions zsh` prints the zsh completion script to stdout. It
+completes subcommands, providers, and the `terminal` commands, flags, and key
+names.
 
 Nix package users get completions automatically: `_sessiontap`,
 `_sessiontapd`, and `_sessiontap-hub` are installed under

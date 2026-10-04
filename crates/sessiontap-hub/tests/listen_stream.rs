@@ -29,6 +29,7 @@ fn view(status: PublicStatus) -> PublicAgentView {
         usage: None,
         repository: None,
         children: None,
+        terminal: None,
     }
 }
 
