@@ -269,3 +269,18 @@ The hub SHALL compute the pairing QR endpoint hints (`ep`) at the time `sessiont
 #### Scenario: Wildcard with no usable interface address
 - **WHEN** `remote.listen` is a wildcard, no interface has a usable address, and `remote.advertise` is empty
 - **THEN** `sessiontap-hub pair` opens no window, reports that no endpoint hints are available and that `remote.advertise` can name one, and exits non-zero
+
+### Requirement: Hub reports current endpoint hints to paired devices
+The `hub.info` result SHALL include an `endpoints` array of `host:port` strings. It SHALL hold the hub's current endpoint hints, computed the same way and in the same order as the endpoint hints in the pairing QR payload. The hub SHALL report endpoints only to an authenticated, paired device. An unpaired connection SHALL receive `unauthorized` for `hub.info` and no endpoint list. Endpoint hints SHALL describe reachability only. A device SHALL NOT use them to decide whether a hub is trusted, because hub identity comes only from the pinned certificate.
+
+#### Scenario: Paired device asks for hub info
+- **WHEN** a paired device sends `hub.info` to a hub configured with `remote.listen: ["192.168.1.20:8932"]` and `remote.advertise: ["macbook.tailnet.ts.net:8932"]`
+- **THEN** the result's `endpoints` is `["192.168.1.20:8932", "macbook.tailnet.ts.net:8932"]`, the same list a pairing QR code from that hub would carry
+
+#### Scenario: Unpaired connection asks for hub info
+- **WHEN** a connection without a stored device certificate sends `hub.info`
+- **THEN** the hub answers `unauthorized` and the response carries no endpoint list
+
+#### Scenario: Read-only device asks for hub info
+- **WHEN** a paired device with only the `read` scope sends `hub.info`
+- **THEN** the result includes the `endpoints` list

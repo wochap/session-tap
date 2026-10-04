@@ -18,7 +18,7 @@ The app SHALL live in `android/`, target API level 36, support API level 31 and 
 - **THEN** the app installs and starts at onboarding
 
 ### Requirement: App pairs with a hub by scanning its QR code
-The app SHALL scan a `sessiontap-hub pair` QR code with the camera and reject payloads with an unknown version or a past expiry. It SHALL create or reuse a non-exportable P-256 device key in AndroidKeyStore and connect to the payload's endpoint hints. It SHALL pin the server certificate to the payload's hub ID and complete the pairing exchange. While waiting for operator approval it SHALL show the same device fingerprint groups the hub shows. It SHALL then store the hub ID, name, endpoint hints, and granted scopes. Expired, rejected, failed, and unreachable outcomes SHALL each have a distinct message and a retry path.
+The app SHALL scan a `sessiontap-hub pair` QR code with the camera and reject payloads with an unknown version or a past expiry. It SHALL create or reuse a non-exportable P-256 device key in AndroidKeyStore and connect to the payload's endpoint hints. It SHALL pin the server certificate to the payload's hub ID and complete the pairing exchange. While waiting for operator approval it SHALL show the same device fingerprint groups the hub shows. It SHALL then store the hub ID, name, endpoint hints, and granted scopes. A paired hub is identified only by its authenticated hub ID. Pairing a hub ID that is already stored SHALL update that hub's record in place: name, scopes, and revoked state. Its endpoint hints SHALL be the endpoint that completed pairing, then the QR endpoint hints, then the previously stored hints, deduplicated and capped at 8 entries. Pairing a hub ID that is not stored SHALL add a new hub, even when its endpoints or name match a stored hub. Expired, rejected, failed, and unreachable outcomes SHALL each have a distinct message and a retry path.
 
 #### Scenario: Successful pairing
 - **WHEN** the user scans a fresh QR code and approves in the host terminal
@@ -34,7 +34,15 @@ The app SHALL scan a `sessiontap-hub pair` QR code with the camera and reject pa
 
 #### Scenario: Hub already paired
 - **WHEN** the user scans a QR code for a hub ID that is already paired
-- **THEN** the app re-pairs and replaces that hub's stored endpoints and scopes instead of adding a duplicate
+- **THEN** the app re-pairs and updates that hub's name, scopes, and revoked state in place, keeps its stored agents, and does not add a duplicate
+
+#### Scenario: Re-pair after the hub's address changed
+- **WHEN** a hub stored with endpoint hints `["192.168.1.20:8932"]` is re-paired from a QR code whose hints are `["192.168.1.37:8932"]` and pairing completes on `192.168.1.37:8932`
+- **THEN** the hub keeps a single record whose endpoint hints are `["192.168.1.37:8932", "192.168.1.20:8932"]`
+
+#### Scenario: Different hub at a known address
+- **WHEN** the user pairs a QR code whose hub ID differs from every stored hub but whose endpoint hints match a stored hub's hints
+- **THEN** the app adds it as a new hub and leaves the stored hub unchanged
 
 ### Requirement: App supports any number of paired hubs
 The app SHALL keep agents keyed by hub ID, source ID, and invocation ID. The user SHALL be able to pair additional hubs and unpair any hub after a confirmation. Unpairing SHALL close that hub's connection, delete its stored state and notifications, and delete its pinned identity. With exactly one hub paired, the session list SHALL hide hub chips and hub section headers.
@@ -151,3 +159,22 @@ Before or right after the first pairing, the app SHALL present a checklist that 
 #### Scenario: Notifications denied
 - **WHEN** the user denies the notification permission
 - **THEN** the app keeps working, the Alerts screen shows notifications as disabled, and offers to open system settings
+
+### Requirement: App refreshes endpoint hints from connected hubs
+After each successful connection whose server certificate matches the hub's pinned identity, the app SHALL read the `endpoints` list from that hub's `hub.info` result and merge it into the hub's stored endpoint hints. The merged list SHALL be the endpoint that connected, then the hub-reported hints in the hub's order, then the previously stored hints, without duplicates and capped at 8 entries. Entries that are blank or not a `host:port` with a port from 1 to 65535 SHALL be ignored. The next reconnect attempt SHALL use the merged list. The app SHALL accept endpoint hints only from a connection pinned to that hub's identity. It SHALL NOT use endpoint hints to identify, trust, or pin a hub.
+
+#### Scenario: Hub moved to a new address
+- **WHEN** the app connects through the tailnet hint and the hub reports `["192.168.1.37:8932", "macbook.tailnet.ts.net:8932"]` while the stored hints are `["192.168.1.20:8932", "macbook.tailnet.ts.net:8932"]`
+- **THEN** the stored hints become `["macbook.tailnet.ts.net:8932", "192.168.1.37:8932", "192.168.1.20:8932"]` and the next reconnect tries `192.168.1.37:8932` without re-pairing
+
+#### Scenario: Hub reports many endpoints
+- **WHEN** the merged list would hold more than 8 distinct entries
+- **THEN** the app keeps the first 8 and drops the remaining previously stored hints
+
+#### Scenario: Hub reports a malformed entry
+- **WHEN** the hub-reported list contains an empty string or an entry without a valid port
+- **THEN** the app ignores that entry and merges the rest
+
+#### Scenario: Endpoint presents a different certificate
+- **WHEN** an endpoint presents a certificate whose SPKI hash differs from the stored hub ID
+- **THEN** the app sends it no request and stores no endpoint hints from it
