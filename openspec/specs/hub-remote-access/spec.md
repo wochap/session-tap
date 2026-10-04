@@ -33,7 +33,7 @@ The hub SHALL generate a private key and self-signed certificate on first remote
 - **THEN** the hub generates a new identity with a new hub ID, and previously paired devices fail certificate pinning until they pair again
 
 ### Requirement: Pairing opens a short single-use window
-`sessiontap-hub pair` SHALL ask the running service to open a pairing window and SHALL fail with a clear message when the service is not running or remote access is not configured. The window SHALL carry a fresh random 32-byte secret, SHALL expire after 120 seconds, and SHALL allow at most one successful pairing. The command SHALL render a terminal QR code whose payload is a versioned JSON object containing the hub name, the hub ID, endpoint hints, the requested scopes, the secret, and the expiry time. Endpoint hints SHALL list every configured remote listen address plus every configured `remote.advertise` entry. Scopes SHALL default to `read` and `manage` and MAY be narrowed with `--scope`.
+`sessiontap-hub pair` SHALL ask the running service to open a pairing window and SHALL fail with a clear message when the service is not running or remote access is not configured. The window SHALL carry a fresh random 32-byte secret, SHALL expire after 120 seconds, and SHALL allow at most one successful pairing. The command SHALL render a terminal QR code whose payload is a versioned JSON object containing the hub name, the hub ID, endpoint hints, the requested scopes, the secret, and the expiry time. Endpoint hints SHALL be those defined by "Pairing endpoint hints reflect the current bind mode". Scopes SHALL default to `read` and `manage` and MAY be narrowed with `--scope`.
 
 #### Scenario: Operator starts pairing
 - **WHEN** the user runs `sessiontap-hub pair` while the service runs with remote access configured
@@ -48,7 +48,15 @@ The hub SHALL generate a private key and self-signed certificate on first remote
 - **THEN** the command reports that the service is not running and exits non-zero
 
 ### Requirement: Pairing proves possession of the secret and the operator confirms
-A device SHALL pair over a TLS connection that presents its own client certificate and pins the server certificate to the hub ID from the QR code. The hub SHALL send a fresh nonce. The device SHALL answer with its display name and an HMAC-SHA256, keyed by the pairing secret, over a fixed protocol label, the hub SPKI, the device SPKI taken from the TLS session, and the nonce. On a valid MAC the hub SHALL show the device name and a fingerprint derived from the device SPKI in the `pair` terminal and SHALL trust the device only after the operator accepts. The hub SHALL burn the pairing window after three invalid MACs, after an operator rejection, or after one successful pairing.
+A device SHALL pair over a TLS connection that presents its own client certificate and pins the server certificate to the hub ID from the QR code. The hub SHALL send a fresh nonce. The device SHALL answer with its display name and an HMAC-SHA256, keyed by the pairing secret, over a fixed protocol label, the hub SPKI, the device SPKI taken from the TLS session, and the nonce. On a valid MAC the hub SHALL show the device name and a fingerprint derived from the device SPKI in the `pair` terminal and SHALL trust the device only after the operator accepts.
+
+The hub SHALL count invalid MACs per pairing window in three ways:
+
+- Per client SPKI, at most 3.
+- Per peer address, at most 5. Addresses are grouped the same way as for connection limits.
+- In total, at most 20.
+
+A client whose SPKI or peer address has reached its limit SHALL be locked out for the rest of the window. Its later `pair.complete` calls SHALL receive `pairing_failed` without checking the MAC, whether or not a window is open. A locked-out client SHALL NOT affect other clients. The hub SHALL burn the pairing window after 20 invalid MACs in total, after an operator rejection, or after one successful pairing. A client that is not locked out SHALL receive `pairing_closed` when no window is open.
 
 #### Scenario: Successful pairing
 - **WHEN** a device presents a valid MAC within the window and the operator accepts the shown fingerprint
@@ -64,7 +72,19 @@ A device SHALL pair over a TLS connection that presents its own client certifica
 
 #### Scenario: Wrong secret
 - **WHEN** a device sends a MAC that does not verify
-- **THEN** the hub tells the device pairing failed without prompting the operator, and after the third failure the window closes
+- **THEN** the hub tells the device pairing failed without prompting the operator, and the window stays open for other clients
+
+#### Scenario: Hostile host cannot burn the window
+- **WHEN** one peer address sends invalid MACs under many different client certificates
+- **THEN** after its fifth invalid MAC that address gets `pairing_failed` for every later attempt, and a device from another address can still pair with the open window
+
+#### Scenario: Client key locked out
+- **WHEN** one client SPKI has sent 3 invalid MACs in the current window
+- **THEN** its next `pair.complete` gets `pairing_failed` even with a valid MAC, and the operator is not prompted
+
+#### Scenario: Total failure backstop
+- **WHEN** the window has received 20 invalid MACs in total from any clients
+- **THEN** the hub closes the window, and the `pair` command reports too many failed attempts and exits non-zero
 
 #### Scenario: Server certificate does not match the QR code
 - **WHEN** the certificate presented by an endpoint does not hash to the QR hub ID
@@ -84,9 +104,25 @@ After pairing, the hub SHALL accept a remote request other than pairing only fro
 ### Requirement: Devices can be listed and revoked
 `sessiontap-hub devices` SHALL list each paired device with its device ID, name, scopes, pairing time, and last-seen time. `sessiontap-hub revoke <device>` SHALL accept a device ID or unique ID prefix, delete the device, and close the device's open remote connections immediately. An ambiguous or unknown prefix SHALL fail without revoking anything.
 
+Revocation SHALL also cover requests already in flight:
+
+- Once `revoke` has returned, no request from that device SHALL change hub state.
+- Once `revoke` has returned, no request from that device SHALL receive a successful response.
+- After the revocation close, the device's connections SHALL send no further stream data.
+
+The hub SHALL check the device's stored record and scopes when it handles each request, not only when the connection opens. Re-pairing that changes a device's scopes SHALL therefore apply from the device's next request on every open connection.
+
 #### Scenario: Revoke a connected device
 - **WHEN** the user revokes a device that has a live `listen` stream
 - **THEN** the hub closes that connection and refuses the device's next connection attempt
+
+#### Scenario: Revoke races an in-flight forget
+- **WHEN** a device with the `manage` scope sends `forget` and the user revokes the device while that request is being handled
+- **THEN** either the forget completes before `revoke` returns, or it changes no state and the device gets no success response
+
+#### Scenario: Re-pairing narrows scopes
+- **WHEN** a connected device is re-paired with only the `read` scope and then sends `forget` on its existing connection
+- **THEN** the hub answers `forbidden` and changes no state
 
 #### Scenario: Ambiguous prefix
 - **WHEN** the given prefix matches two devices
@@ -128,3 +164,71 @@ The `forget` method (scope `manage`) SHALL take a source ID and an invocation ID
 #### Scenario: Forget a running agent
 - **WHEN** a device forgets an agent whose status is `running`
 - **THEN** the hub answers `not_stopped` and changes no state
+
+### Requirement: Pre-auth connections are bounded in time, count, and size
+A remote connection SHALL count as unauthenticated from accept until one of two things happens: its client certificate SPKI resolves to a stored, unrevoked device, or it completes pairing. The hub SHALL enforce these limits on remote connections:
+
+- It SHALL close a connection whose TLS handshake does not finish within 10 seconds of accept.
+- It SHALL close a connection whose WebSocket upgrade does not finish within 10 seconds of the TLS handshake.
+- It SHALL close a connection that is still unauthenticated 30 seconds after accept. The exception is a connection whose valid pairing proof is waiting for the operator's decision. That connection SHALL stay open until the operator decides or the `pair` command goes away.
+- It SHALL accept at most 64 concurrent remote connections across all listen addresses.
+- Of those, at most 16 SHALL be unauthenticated, and at most 4 unauthenticated connections SHALL come from one peer address. An IPv6 peer address SHALL be grouped by its /64 prefix, and an IPv4-mapped IPv6 address SHALL count as its IPv4 address.
+- It SHALL close a connection that exceeds a cap right after accept, without a TLS handshake.
+- It SHALL reject an incoming WebSocket message or frame larger than 64 KiB by closing the connection.
+- It SHALL limit `pair.begin` and `pair.complete` per peer address to a burst of 5 calls, refilled at one call every 2 seconds. A call over the limit SHALL receive the error code `rate_limited`, and it SHALL NOT count as a pairing try.
+
+These limits SHALL NOT be configurable.
+
+#### Scenario: Silent TCP client
+- **WHEN** a client opens a TCP connection and sends nothing
+- **THEN** the hub closes it within 10 seconds of accept
+
+#### Scenario: Stalled WebSocket upgrade
+- **WHEN** a client completes TLS but never sends the WebSocket upgrade request
+- **THEN** the hub closes it within 10 seconds of the TLS handshake
+
+#### Scenario: Idle unpaired connection
+- **WHEN** a connection without a stored device certificate completes the WebSocket upgrade and then sends nothing, or sends only pairing calls that do not pair it
+- **THEN** the hub closes it 30 seconds after accept
+
+#### Scenario: Pairing proof awaits the operator
+- **WHEN** a device's valid pairing proof is waiting for the operator's decision longer than 30 seconds after accept
+- **THEN** the connection stays open and receives the pairing result once the operator decides
+
+#### Scenario: One host floods connections
+- **WHEN** one peer address holds 4 unauthenticated connections and opens a fifth
+- **THEN** the hub closes the fifth right after accept, and connections from other addresses and paired devices are still accepted
+
+#### Scenario: Unauthenticated pool full
+- **WHEN** 16 unauthenticated connections are open and another unauthenticated connection arrives
+- **THEN** the hub closes the new connection right after accept
+
+#### Scenario: Oversized message
+- **WHEN** a client sends a WebSocket message larger than 64 KiB
+- **THEN** the hub closes the connection without processing the message
+
+#### Scenario: Pairing calls are rate limited
+- **WHEN** one peer address sends a sixth `pair.begin` or `pair.complete` within the first 2 seconds
+- **THEN** the hub answers it with `rate_limited`, does not check any proof it carries, and does not count it as a try
+
+### Requirement: Requests per connection are bounded
+The hub SHALL answer at most one request at a time on an unauthenticated connection. It SHALL close an unauthenticated connection that sends a request while an earlier one is still unanswered. On an authenticated connection, the hub SHALL run at most 8 requests at a time and SHALL answer any request beyond that with the error code `busy`. An active `listen` stream SHALL NOT count toward that limit once its request has been acknowledged. The hub SHALL close any connection where an outbound write cannot finish within 30 seconds. A peer that stops reading SHALL NOT block the hub from serving other connections or from enforcing the unauthenticated deadline.
+
+#### Scenario: Unpaired client pipelines requests
+- **WHEN** an unauthenticated connection sends a second request before the first is answered
+- **THEN** the hub closes the connection
+
+#### Scenario: Paired device exceeds the in-flight limit
+- **WHEN** a paired device has 8 requests running and sends a ninth
+- **THEN** the hub answers the ninth with `busy` and keeps the connection open
+
+#### Scenario: Unpaired client stops reading
+- **WHEN** an unauthenticated client sends requests and never reads responses
+- **THEN** the hub closes it no later than the unauthenticated deadline, and other connections keep being served
+
+### Requirement: Remote listeners survive accept errors
+When accepting a TCP connection on a remote listen address fails, the hub SHALL log the error and wait before accepting again. It SHALL keep serving that address. The wait SHALL start at 50 milliseconds, double on each consecutive failure up to 1 second, and reset after a successful accept. An accept error SHALL NOT stop any remote listener or the hub.
+
+#### Scenario: File descriptors exhausted
+- **WHEN** accepting on a remote address fails because the process is out of file descriptors
+- **THEN** the hub logs the error, backs off, and accepts connections on that address again once descriptors are available
