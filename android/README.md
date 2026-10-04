@@ -17,6 +17,9 @@ nix develop .#android
 cd android
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew test lint            # unit tests and lint
+
+# ./gradlew assembleRelease      # app/build/outputs/apk/release/app-release.apk
+# adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 ## Install
