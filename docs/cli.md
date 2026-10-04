@@ -170,7 +170,8 @@ fields = ["status", "usage"]
 Hub sinks deliver the canonical versioned source stream (snapshots and
 updates) to a `sessiontap-hub` service and require a stable `source_id`; see
 `docs/hub.md`. Cleartext HTTP is limited to loopback or the sink's explicitly
-configured `trusted_addresses`:
+configured `trusted_addresses`. Cleartext delivery to a trusted non-loopback
+address requires `token_env` or `token_file`; validation fails without one:
 
 ```toml
 source_id = "host"
@@ -187,7 +188,9 @@ Hub sinks always deliver complete envelopes, so `fields` on a hub sink is a
 configuration error (`sink '<name>' is a hub sink and does not accept fields`)
 and the daemon refuses to start. A hub `409` whose body is
 `{"error":"snapshot_required"}` makes the daemon resend a source snapshot and
-then the held update; any other `409` or `4xx` is a permanent rejection that is
+then the held update. A hub `401` or `403` means the credential needs an operator
+fix: the daemon logs a diagnostic and keeps retrying with backoff instead of
+dropping the delivery. Any other `409` or `4xx` is a permanent rejection that is
 retried a bounded number of times and then dropped.
 
 Failures are retried from the durable outbox. Each sink backlog is capped at

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sessiontap_core::domain::{PublicField, PublicReasonKind, PublicStatus};
-use std::{io, path::Path};
+use std::{collections::BTreeMap, io, path::Path};
 
 fn default_version() -> u32 {
     1
@@ -31,10 +31,11 @@ pub struct HubConfig {
     /// HTTP ingestion bind address.
     #[serde(default = "default_listen")]
     pub listen: String,
-    /// Optional private bearer-token file. When neither side configures a
-    /// token, ingestion is unauthenticated.
+    /// Ingestion tokens keyed by source ID. Each token authorizes writes
+    /// only for the sources whose token file yields it. Empty means
+    /// unauthenticated ingestion, which validation allows only on loopback.
     #[serde(default)]
-    pub token_file: Option<String>,
+    pub sources: BTreeMap<String, SourceAuth>,
     #[serde(default = "default_retention")]
     pub retention_days: u64,
     #[serde(default = "default_max_body")]
@@ -50,6 +51,13 @@ pub struct HubConfig {
     /// Remote device access; absent means no remote port is opened.
     #[serde(default)]
     pub remote: Option<RemoteConfig>,
+}
+
+/// Private bearer-token file for one ingestion source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceAuth {
+    pub token_file: String,
 }
 
 /// Remote listener for paired devices. Every bind address must be a concrete
@@ -129,7 +137,7 @@ impl Default for HubConfig {
         Self {
             version: 1,
             listen: default_listen(),
-            token_file: None,
+            sources: BTreeMap::new(),
             retention_days: 7,
             max_body_bytes: default_max_body(),
             max_concurrent_commands: default_max_concurrent_commands(),
@@ -216,8 +224,22 @@ impl HubConfig {
                 self.version
             ));
         }
-        if self.listen.parse::<std::net::SocketAddr>().is_err() {
+        let Ok(listen) = self.listen.parse::<std::net::SocketAddr>() else {
             return Err(format!("invalid listen address: {}", self.listen));
+        };
+        for (source, auth) in &self.sources {
+            if source.trim().is_empty() {
+                return Err("sources must not contain an empty source ID".into());
+            }
+            if auth.token_file.trim().is_empty() {
+                return Err(format!("sources.{source}.token_file must not be empty"));
+            }
+        }
+        if !listen.ip().is_loopback() && self.sources.is_empty() {
+            return Err(format!(
+                "ingestion listen address {} is not loopback; configure sources with token files to accept remote sources",
+                self.listen
+            ));
         }
         if self.max_concurrent_commands == 0 {
             return Err("max_concurrent_commands must be at least 1".into());
@@ -252,7 +274,7 @@ mod tests {
     fn defaults_bind_loopback_and_local_only() {
         let config = HubConfig::default();
         assert_eq!(config.listen, "127.0.0.1:8931");
-        assert!(config.token_file.is_none());
+        assert!(config.sources.is_empty());
         assert!(config.subscriptions.is_empty());
         config.validate().unwrap();
     }
@@ -263,7 +285,8 @@ mod tests {
             r#"
 version: 1
 listen: "127.0.0.1:8931"
-token_file: /run/keys/sessiontap-hub-token
+sources:
+  sandbox: { token_file: /run/keys/sessiontap-hub-sandbox }
 retention_days: 14
 subscriptions:
   - name: waiting-notify
@@ -280,6 +303,10 @@ subscriptions:
         .unwrap();
         config.validate().unwrap();
         assert_eq!(config.retention_days, 14);
+        assert_eq!(
+            config.sources["sandbox"].token_file,
+            "/run/keys/sessiontap-hub-sandbox"
+        );
         assert_eq!(config.subscriptions.len(), 1);
         let sub = &config.subscriptions[0];
         assert_eq!(sub.match_criteria.sources, vec!["sandbox".to_owned()]);
@@ -370,6 +397,44 @@ subscriptions:
         let bad = HubConfig::parse("version: 1\nremote:\n  listen: [\"laptop:8932\"]\n").unwrap();
         assert!(bad.validate().unwrap_err().contains("laptop:8932"));
         assert!(HubConfig::parse("version: 1\nremote:\n  name: x\n").is_err());
+    }
+
+    #[test]
+    fn sources_reject_empty_ids_paths_and_top_level_token_file() {
+        let empty_key =
+            HubConfig::parse("version: 1\nsources:\n  \"\": { token_file: /k }\n").unwrap();
+        assert!(
+            empty_key
+                .validate()
+                .unwrap_err()
+                .contains("empty source ID")
+        );
+        let empty_path =
+            HubConfig::parse("version: 1\nsources:\n  host: { token_file: \"\" }\n").unwrap();
+        assert!(empty_path.validate().unwrap_err().contains("sources.host"));
+        assert!(HubConfig::parse("version: 1\nsources:\n  host: { token: x }\n").is_err());
+        let error = HubConfig::parse("version: 1\ntoken_file: /k\n").unwrap_err();
+        assert!(error.contains("token_file"), "{error}");
+    }
+
+    #[test]
+    fn non_loopback_listen_requires_sources() {
+        for listen in ["0.0.0.0:8931", "[::]:8931", "192.168.1.5:8931"] {
+            let config = HubConfig::parse(&format!("version: 1\nlisten: \"{listen}\"\n")).unwrap();
+            let error = config.validate().unwrap_err();
+            assert!(error.contains(listen), "{error}");
+            let config = HubConfig::parse(&format!(
+                "version: 1\nlisten: \"{listen}\"\nsources:\n  host: {{ token_file: /k/host }}\n  sandbox: {{ token_file: /k/sandbox }}\n"
+            ))
+            .unwrap();
+            config.validate().unwrap();
+        }
+        for listen in ["127.0.0.1:8931", "[::1]:8931"] {
+            HubConfig::parse(&format!("version: 1\nlisten: \"{listen}\"\n"))
+                .unwrap()
+                .validate()
+                .unwrap();
+        }
     }
 
     #[test]

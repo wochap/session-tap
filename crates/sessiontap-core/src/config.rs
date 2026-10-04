@@ -267,6 +267,23 @@ pub fn validate_sink_url(raw: &str, trusted_addresses: &[String]) -> Result<(), 
     ))
 }
 
+/// True when `raw` is plain HTTP to a host other than loopback, which
+/// validation allows only through `trusted_addresses`.
+fn is_cleartext_non_loopback(raw: &str) -> bool {
+    let Ok(url) = url::Url::parse(raw) else {
+        return false;
+    };
+    if url.scheme() != "http" {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain("localhost")) => false,
+        Some(url::Host::Ipv4(ip)) => !ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => !ip.is_loopback(),
+        _ => true,
+    }
+}
+
 impl Config {
     /// Parses TOML configuration and checks its version. File access lives
     /// in `sessiontap_infra::config::load_config`.
@@ -307,6 +324,8 @@ impl Config {
                     url,
                     trusted_addresses,
                     fields,
+                    token_env,
+                    token_file,
                     ..
                 } => {
                     if !fields.is_empty() {
@@ -315,6 +334,15 @@ impl Config {
                         ));
                     }
                     validate_sink_url(url, trusted_addresses)?;
+                    if *enabled
+                        && token_env.is_none()
+                        && token_file.is_none()
+                        && is_cleartext_non_loopback(url)
+                    {
+                        return Err(format!(
+                            "sink '{name}' delivers cleartext to a non-loopback address and requires token_env or token_file"
+                        ));
+                    }
                     if *enabled && self.source_id.as_deref().is_none_or(str::is_empty) {
                         return Err(format!(
                             "sink '{name}' is a hub sink and requires a non-empty source_id"
@@ -384,6 +412,33 @@ trusted_addresses = ["192.168.100.1"]
         assert_eq!(sink.max_payload_bytes(), 65536);
         assert!(sink.fields().is_empty());
         c.validate().unwrap();
+    }
+
+    fn hub_sink(url: &str, credential: &str) -> Config {
+        toml::from_str(&format!(
+            "version=1\nsource_id='sandbox'\n[sinks.hub]\ntype='hub'\nenabled=true\nurl='{url}'\ntrusted_addresses=['192.168.100.10']\n{credential}"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn trusted_cleartext_hub_sink_requires_credential() {
+        let url = "http://192.168.100.10:8931/ingest";
+        let error = hub_sink(url, "").validate().unwrap_err();
+        assert!(error.contains("'hub'"), "{error}");
+        assert!(error.contains("token_env or token_file"), "{error}");
+        hub_sink(url, "token_file='/run/keys/hub'\n")
+            .validate()
+            .unwrap();
+        hub_sink(url, "token_env='HUB_TOKEN'\n").validate().unwrap();
+        for url in [
+            "http://127.0.0.1:8931/ingest",
+            "http://localhost:8931/ingest",
+            "http://[::1]:8931/ingest",
+            "https://hub.example:8931/ingest",
+        ] {
+            hub_sink(url, "").validate().unwrap();
+        }
     }
 
     #[test]

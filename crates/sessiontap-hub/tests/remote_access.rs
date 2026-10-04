@@ -8,7 +8,7 @@ use sessiontap_core::{
 };
 use sessiontap_hub::{
     cli,
-    ingest::{IngestedRequest, handle_ingest},
+    ingest::{IngestAuth, IngestedRequest, handle_ingest},
     listen::{HubRequest, HubResponse, HubStreamEnvelope},
     remote::{CLOSE_REVOKED, serve_remote},
     service::{self, Hub, RemoteInfo, pair_mac},
@@ -144,7 +144,10 @@ fn ingest(store: &HubStore, envelope: &SourceEnvelope) {
         bearer: None,
         body: serde_json::to_vec(envelope).unwrap(),
     };
-    assert_eq!(handle_ingest(store, None, &request).status, 200);
+    assert_eq!(
+        handle_ingest(store, &IngestAuth::default(), &request).status,
+        200
+    );
 }
 
 /// Seeds one stopped and one running agent; returns their invocation IDs.
@@ -386,7 +389,7 @@ async fn remote_listen_streams_and_answers_requests() {
         bearer: None,
         body: serde_json::to_vec(&update).unwrap(),
     };
-    let publication = handle_ingest(&hub.hub.store, None, &request)
+    let publication = handle_ingest(&hub.hub.store, &IngestAuth::default(), &request)
         .publication
         .unwrap();
     hub.hub.updates.send(publication).unwrap();

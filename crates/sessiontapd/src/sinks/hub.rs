@@ -52,6 +52,15 @@ impl HubSink {
                 _ => DeliveryOutcome::Reject,
             };
         }
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            // A wrong or rotated credential is an operator fix; keep the
+            // delivery queued instead of dropping it.
+            eprintln!(
+                "sessiontapd: hub sink '{}' credential rejected with HTTP {status}; retrying",
+                self.name
+            );
+            return DeliveryOutcome::Retry;
+        }
         if status.is_client_error() {
             return DeliveryOutcome::Reject;
         }
@@ -157,6 +166,54 @@ mod tests {
         assert_eq!(
             outcome_for(response("503 Service Unavailable", "")).await,
             DeliveryOutcome::Retry
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_credentials_retry() {
+        assert_eq!(
+            outcome_for(response("401 Unauthorized", r#"{"error":"unauthorized"}"#)).await,
+            DeliveryOutcome::Retry
+        );
+        assert_eq!(
+            outcome_for(response(
+                "403 Forbidden",
+                r#"{"error":"source_not_permitted"}"#
+            ))
+            .await,
+            DeliveryOutcome::Retry
+        );
+    }
+
+    #[tokio::test]
+    async fn token_file_is_sent_as_bearer() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let temp = tempfile::tempdir().unwrap();
+        let token = temp.path().join("token");
+        fs::write(&token, "secret-token\n").unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/ingest", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.windows(4).any(|w| w == b"\r\n\r\n") {
+                let mut chunk = [0_u8; 4096];
+                let count = stream.read(&mut chunk).await.unwrap();
+                bytes.extend_from_slice(&chunk[..count]);
+            }
+            stream
+                .write_all(response("200 OK", "{}").as_bytes())
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&bytes).to_ascii_lowercase()
+        });
+        let hub = sink(url, TokenSource::File(token));
+        assert_eq!(hub.deliver(b"{}").await, DeliveryOutcome::Ack);
+        let head = server.await.unwrap();
+        assert!(
+            head.contains("authorization: bearer secret-token\r\n"),
+            "{head}"
         );
     }
 

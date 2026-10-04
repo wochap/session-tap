@@ -1,4 +1,7 @@
-use crate::store::{HubStore, Reject, SnapshotAccept, UpdateAccept};
+use crate::{
+    config::SourceAuth,
+    store::{HubStore, Reject, SnapshotAccept, UpdateAccept},
+};
 use anyhow::Result;
 use sessiontap_core::{
     domain::{PublicAgentView, PublicField},
@@ -8,7 +11,11 @@ use sessiontap_infra::{
     http::{HttpLimits, HttpReadError, read_http_request},
     token::{constant_time_eq, read_private_token},
 };
-use std::{collections::BTreeSet, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -71,38 +78,76 @@ pub async fn read_request(
     })
 }
 
-fn token_matches(provided: Option<&str>, token_file: Option<&str>) -> bool {
-    let Some(path) = token_file else {
-        return true;
-    };
-    let Ok(expected) = read_private_token(Path::new(path)) else {
-        return false;
-    };
-    provided.is_some_and(|provided| constant_time_eq(provided.as_bytes(), expected.as_bytes()))
+/// Ingestion credentials: source ID to private token file. Empty means
+/// unauthenticated ingestion (loopback only, enforced by config validation).
+#[derive(Debug, Clone, Default)]
+pub struct IngestAuth {
+    sources: BTreeMap<String, PathBuf>,
+}
+
+impl IngestAuth {
+    #[must_use]
+    pub fn new(sources: &BTreeMap<String, SourceAuth>) -> Self {
+        Self {
+            sources: sources
+                .iter()
+                .map(|(id, auth)| (id.clone(), PathBuf::from(&auth.token_file)))
+                .collect(),
+        }
+    }
+
+    /// Source IDs the bearer may write, or `None` when unauthenticated.
+    /// Token files are read per request so rotation needs no restart, and
+    /// every configured token is compared without early exit.
+    fn permitted(&self, bearer: Option<&str>) -> Option<BTreeSet<&str>> {
+        let bearer = bearer.unwrap_or_default();
+        let mut permitted = BTreeSet::new();
+        for (source, path) in &self.sources {
+            let Ok(expected) = read_private_token(path) else {
+                continue;
+            };
+            if constant_time_eq(bearer.as_bytes(), expected.as_bytes()) && !bearer.is_empty() {
+                permitted.insert(source.as_str());
+            }
+        }
+        (!permitted.is_empty()).then_some(permitted)
+    }
 }
 
 pub fn handle_ingest(
     store: &HubStore,
-    token_file: Option<&str>,
+    auth: &IngestAuth,
     request: &IngestedRequest,
 ) -> IngestOutcome {
     if request.method == "GET" && request.path == "/health" {
-        return outcome(
-            200,
-            serde_json::json!({"status":"ok","revision":store.revision().unwrap_or(0)}),
-            None,
-        );
+        return outcome(200, serde_json::json!({"status":"ok"}), None);
     }
     if request.method != "POST" {
         return outcome(405, serde_json::json!({"error":"method_not_allowed"}), None);
     }
-    if !token_matches(request.bearer.as_deref(), token_file) {
-        return outcome(401, serde_json::json!({"error":"unauthorized"}), None);
-    }
+    let permitted = if auth.sources.is_empty() {
+        None
+    } else {
+        match auth.permitted(request.bearer.as_deref()) {
+            Some(permitted) => Some(permitted),
+            None => return outcome(401, serde_json::json!({"error":"unauthorized"}), None),
+        }
+    };
     let envelope: SourceEnvelope = match serde_json::from_slice(&request.body) {
         Ok(value) => value,
         Err(_) => return outcome(400, serde_json::json!({"error":"malformed_envelope"}), None),
     };
+    let source_id = match &envelope {
+        SourceEnvelope::Snapshot { source, .. } => source.id.as_str(),
+        SourceEnvelope::Update { source_id, .. } => source_id.as_str(),
+    };
+    if permitted.is_some_and(|permitted| !permitted.contains(source_id)) {
+        return outcome(
+            403,
+            serde_json::json!({"error":"source_not_permitted"}),
+            None,
+        );
+    }
     match &envelope {
         SourceEnvelope::Snapshot { .. } => match store.ingest_snapshot(&envelope) {
             Ok(SnapshotAccept::Applied { hub_revision }) => outcome(
@@ -181,6 +226,7 @@ pub async fn write_response(stream: &mut TcpStream, outcome: &IngestOutcome) -> 
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         405 => "Method Not Allowed",
         409 => "Conflict",
         411 => "Length Required",
@@ -234,7 +280,7 @@ pub fn transport_rejection(error: &HttpReadError) -> IngestOutcome {
 pub async fn serve_connection(
     mut stream: TcpStream,
     store: Arc<HubStore>,
-    token_file: Option<String>,
+    auth: Arc<IngestAuth>,
     max_body_bytes: usize,
 ) -> Option<HubPublication> {
     let request = match read_request(&mut stream, max_body_bytes).await {
@@ -246,7 +292,7 @@ pub async fn serve_connection(
             return None;
         }
     };
-    let result = handle_ingest(&store, token_file.as_deref(), &request);
+    let result = handle_ingest(&store, &auth, &request);
     let publication = result.publication.clone();
     let _ = write_response(&mut stream, &result).await;
     publication

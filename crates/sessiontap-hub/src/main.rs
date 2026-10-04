@@ -117,6 +117,7 @@ async fn run_service() -> Result<()> {
         subscriptions,
         CommandLimits::from_config(&config),
     ));
+    let auth = Arc::new(ingest::IngestAuth::new(&config.sources));
     let tcp_listener = TcpListener::bind(&config.listen)
         .await
         .with_context(|| format!("bind ingestion address {}", config.listen))?;
@@ -170,12 +171,12 @@ async fn run_service() -> Result<()> {
             accepted = tcp_listener.accept() => {
                 let (stream, _) = accepted?;
                 let store = Arc::clone(&store);
-                let token_file = config.token_file.clone();
+                let auth = Arc::clone(&auth);
                 let max_body = config.max_body_bytes;
                 let sender = updates.clone();
                 tokio::spawn(async move {
                     if let Some(publication) =
-                        ingest::serve_connection(stream, store, token_file, max_body).await
+                        ingest::serve_connection(stream, store, auth, max_body).await
                     {
                         let _ = sender.send(publication);
                     }

@@ -38,11 +38,21 @@ index and the accepted values.
 version: 1
 listen: "127.0.0.1:8931"        # HTTP ingestion bind address
 retention_days: 7               # stopped agents + accepted-event identities
-# token_file: /run/keys/sessiontap-hub-token   # optional bearer token
 max_body_bytes: 1048576         # largest accepted request body
 max_concurrent_commands: 4      # subscription commands running at once
 command_timeout_secs: 30        # a command running longer is killed
 subscriptions: []
+```
+
+A hub that accepts sources from containers binds a non-loopback address and
+must configure per-source tokens (see [Token authentication](#token-authentication)):
+
+```yaml
+version: 1
+listen: "0.0.0.0:8931"
+sources:
+  host: { token_file: /run/keys/sessiontap-hub-host }
+  sandbox: { token_file: /run/keys/sessiontap-hub-sandbox }
 ```
 
 The database lives at `$XDG_STATE_HOME/sessiontap-hub/hub.sqlite3` (mode
@@ -76,7 +86,8 @@ UUID from two sources remains two distinct agents.
 
 For a daemon inside a NixOS container delivering to a hub on the container
 host, cleartext HTTP is still limited to loopback unless the host address is
-explicitly trusted:
+explicitly trusted. Cleartext delivery to a trusted non-loopback address also
+requires `token_env` or `token_file`; validation fails without one:
 
 ```toml
 source_id = "sandbox"
@@ -87,6 +98,7 @@ type = "hub"
 enabled = true
 url = "http://10.233.0.1:8931/ingest"
 trusted_addresses = ["10.233.0.1"]
+token_file = "/run/keys/sessiontap-hub-sandbox"
 ```
 
 `trusted_addresses` is an intentional deployment choice; SessionTap never
@@ -126,24 +138,45 @@ body is JSON with a structured `error` code:
 | 400 | `malformed_request` | Request line or headers cannot be parsed, or the connection ended early |
 | 400 | `malformed_envelope` | Body is not a valid canonical envelope |
 | 400 | `unsupported_schema_version` | Envelope schema version is not supported |
-| 401 | `unauthorized` | Bearer token missing or wrong |
+| 401 | `unauthorized` | Bearer token missing or matches no configured source token |
+| 403 | `source_not_permitted` | Envelope source ID is not bound to the presented token |
 | 405 | `method_not_allowed` | Not a `POST` (except `GET /health`) |
 | 409 | `snapshot_required` | Hub has no baseline for this source |
 | 411 | `length_required` | `content-length` missing or not a number |
 | 413 | `payload_too_large` | Body exceeds `max_body_bytes` |
 | 431 | `headers_too_large` | Request headers exceed 64 KiB |
 
-Daemon hub sinks re-send a source snapshot on `409 snapshot_required`, treat
+Daemon hub sinks re-send a source snapshot on `409 snapshot_required`, retry
+`401` and `403` with a diagnostic (a credential the operator must fix), treat
 every other 4xx as a permanent rejection, and retry 5xx and transport failures.
+
+`GET /health` needs no token and answers exactly `{"status":"ok"}`; it reveals
+no stored state.
 
 ## Token authentication
 
-Both sides may configure a bearer token. The hub reads its token from
-`token_file` at request time; daemons support `token_env` or `token_file` on
-the hub sink. Token files must be regular files, not symlinks, and have no
-group/other permissions. When neither side configures a token, ingestion is
-unauthenticated — acceptable for local deployments bound to trusted
-interfaces.
+The hub `sources` map binds each source ID to a private token file. A token
+authorizes writes only for the source IDs whose token file yields it, so one
+source can never write another source's agents. Sharing one token file across
+several sources deliberately binds that token to all of them.
+
+- The hub authenticates every ingestion `POST` before parsing its body. A
+  missing bearer or one that matches no configured token gets
+  `401 unauthorized`.
+- A valid token whose envelope names a source ID outside its bindings
+  (including a source with no `sources` entry) gets `403 source_not_permitted`.
+- Rejected requests change no state, publish nothing, and run no subscription.
+- Token files are read at request time, so rotating a token needs no restart.
+  They must be regular files, not symlinks, with no group/other permissions; a
+  file that fails these checks authorizes nothing.
+- A `listen` address that is not loopback (including `0.0.0.0` and `::`)
+  without `sources` is a configuration error naming the address. The hub then
+  runs with defaults and never binds that address unauthenticated.
+- Loopback ingestion without `sources` accepts any source without a token.
+
+Daemons send the bearer from `token_env` or `token_file` on the hub sink. Keep a
+sandbox's token file outside paths its agents can read where possible; a leaked
+token can only write its own source.
 
 ## Routing: subscriptions and scripts
 

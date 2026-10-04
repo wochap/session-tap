@@ -598,7 +598,10 @@ mod tests {
             hex::encode(mac),
             "e7bfbc2f5bb0ccb26433c010b012b0d2cb34cf81b76b2f80c7328371011ff41f"
         );
-        assert_eq!(fingerprint(b"device-spki"), "781b1751 7a877c9a 5199a93c 45e3a9b7");
+        assert_eq!(
+            fingerprint(b"device-spki"),
+            "781b1751 7a877c9a 5199a93c 45e3a9b7"
+        );
     }
 
     #[test]
