@@ -29,7 +29,7 @@ The `sessiontap` CLI SHALL treat the first recognized provider name as the end o
 - **THEN** the provider receives the same argument value without splitting or shell expansion
 
 ### Requirement: Wrapped sessions remain interactive
-SessionTap SHALL launch the provider with the caller's terminal streams and environment semantics intact and SHALL NOT switch an interactive provider into a headless or stdout JSON mode.
+SessionTap SHALL launch the provider with the caller's terminal streams and environment semantics intact and SHALL NOT switch an interactive provider into a headless or stdout JSON mode. For an interactive launch, after the provider exits and before the wrapper restores its own process group as the terminal's foreground group, the wrapper SHALL discard terminal input that was received but not yet read, so that input meant for the provider is never read by the caller's shell. Failing to discard input SHALL NOT change the terminal hand-back or the wrapper's exit status. A headless launch SHALL leave pending terminal input untouched.
 
 #### Scenario: Interactive TUI launch
 - **WHEN** the user launches `sessiontap claude`, `sessiontap codex`, or `sessiontap qwen` from a terminal
@@ -38,6 +38,14 @@ SessionTap SHALL launch the provider with the caller's terminal streams and envi
 #### Scenario: Terminal is returned after the provider exits
 - **WHEN** the provider exits and the wrapper runs as a job-control job, including a pipeline or background process group launched by a script
 - **THEN** the wrapper restores its own process group as the terminal's foreground group without being stopped by `SIGTTOU`, and exits with the provider's exit status
+
+#### Scenario: Unread input does not reach the shell
+- **WHEN** a line is written to the terminal while an interactive provider runs without reading it, and the provider then exits
+- **THEN** the wrapper discards that line before returning the terminal, and the next read by the caller's shell does not receive it
+
+#### Scenario: Headless launch keeps pending input
+- **WHEN** the provider is launched with stdin that is not a terminal
+- **THEN** the wrapper does not discard any terminal input when the provider exits
 
 ### Requirement: The wrapper supervises provider lifecycle
 When the broker is available, the wrapper SHALL register an invocation before launch, report the child process identity after spawn, forward termination-related signals, record the child's termination, and exit with the provider's exit status or corresponding signal status. When the broker is unavailable, the wrapper SHALL skip tracking registration and lifecycle reporting while preserving signal forwarding and provider exit behavior.
