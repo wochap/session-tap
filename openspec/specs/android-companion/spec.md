@@ -214,7 +214,7 @@ The app SHALL store the scopes from every `hub.info` result as the hub's granted
 - **THEN** the app does not call `listen`, keeps the connection, and shows the hub as having no session access with a re-pair action
 
 ### Requirement: Session detail offers the agent terminal by scope
-The session detail screen SHALL offer "Open terminal" when the hub's effective scopes for this device include `control` and the agent's public view carries a `terminal` descriptor, and SHALL offer "View terminal" when the effective scopes include `watch` but not `control`. When the terminal is available but the device has neither scope, the screen SHALL show a muted line saying the hub did not grant terminal access and how to re-pair with it, and SHALL NOT show a button that would fail. When the agent's public view carries no `terminal` descriptor (not in a multiplexer, headless, or stopped), the screen SHALL show no terminal entry. Session rows SHALL show a terminal icon when the device can open that agent's terminal.
+The session detail screen SHALL offer "Open terminal" when the hub's effective scopes for this device include `control` and the agent's public view carries a `terminal` descriptor, and SHALL offer "View terminal" when the effective scopes include `watch` but not `control`. When the terminal is available but the device has neither scope, the screen SHALL show a muted line saying the hub did not grant terminal access and how to re-pair with it, and SHALL NOT show a button that would fail. When the agent's public view carries no `terminal` descriptor (not in a multiplexer, headless, or its process has exited), the screen SHALL show no terminal entry. An agent that is `stopped` after a finished turn while its process keeps running SHALL keep its terminal entry. Session rows SHALL show a terminal icon when the device can open that agent's terminal.
 
 #### Scenario: Control scope
 - **WHEN** the device has `control` on the hub and the agent's terminal is available
@@ -231,6 +231,10 @@ The session detail screen SHALL offer "Open terminal" when the hub's effective s
 #### Scenario: Headless agent
 - **WHEN** the agent's public view has no `terminal` descriptor
 - **THEN** the detail screen shows no terminal entry and the row shows no terminal icon
+
+#### Scenario: Stopped after a finished turn
+- **WHEN** the device has `control`, the agent's status is `stopped` with reason `completed`, and its process is still running in tmux
+- **THEN** the detail screen shows "Open terminal" and the session row shows the terminal icon
 
 ### Requirement: Terminal screen shows only the agent's pane
 The terminal screen SHALL show exactly one agent's pane, opened with `terminal.open` for that source and invocation and closed with `terminal.close` when the user leaves. It SHALL NOT offer tabs, a new terminal, or any way to open a shell. It SHALL render each `snapshot` frame by resetting the view to its contents, cursor, and size, SHALL append `output` frames, SHALL render the pane at the desktop pane's size, SHALL show that size in a chip that updates when a new `snapshot` reports a new size, and SHALL NOT ask the hub to resize the pane. The top bar SHALL show the session name, the effective status, the branch and hub, and the connection state (live, connecting, reconnecting, input paused, ended, offline, closed).

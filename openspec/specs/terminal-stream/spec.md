@@ -7,7 +7,7 @@ Lets a trusted local consumer watch a tracked agent's live terminal and send it 
 ## Requirements
 
 ### Requirement: Terminal is available only for interactive agents in a multiplexer
-A live terminal SHALL be available for an invocation only when it was launched interactively (its standard input was a terminal), it runs inside a multiplexer that has a registered adapter, and its status is not `stopped`. A watch or input request for any other invocation SHALL fail with error code `terminal_unavailable`, and a request naming an unknown invocation SHALL fail with `not_found`. Both SHALL fail without running any multiplexer command.
+A live terminal SHALL be available for an invocation only when it was launched interactively (its standard input was a terminal), it runs inside a multiplexer that has a registered adapter, and its agent process is still running. The status `stopped` from a finished turn, while the agent process keeps running, SHALL NOT make the terminal unavailable. A watch or input request for any other invocation SHALL fail with error code `terminal_unavailable`, and a request naming an unknown invocation SHALL fail with `not_found`. Both SHALL fail without running any multiplexer command.
 
 #### Scenario: Headless launch
 - **WHEN** a consumer asks to watch an invocation whose standard input was not a terminal
@@ -16,6 +16,18 @@ A live terminal SHALL be available for an invocation only when it was launched i
 #### Scenario: Agent outside tmux
 - **WHEN** a consumer asks to watch an invocation with no multiplexer metadata
 - **THEN** the daemon answers `terminal_unavailable` and runs no multiplexer command
+
+#### Scenario: Agent finished its turn
+- **WHEN** an interactive agent in tmux completes a turn, its status becomes `stopped`, and its process keeps running
+- **THEN** a consumer can start watching it and send it input
+
+#### Scenario: Watched agent finishes its turn
+- **WHEN** a consumer watches an agent and the agent completes a turn while its process keeps running
+- **THEN** the stream stays open and keeps forwarding output
+
+#### Scenario: Agent process exited
+- **WHEN** a consumer asks to watch an invocation whose agent process has exited
+- **THEN** the daemon answers `terminal_unavailable` or `terminal_ended` and runs no multiplexer command
 
 ### Requirement: Watching starts with a complete snapshot
 A watch request on the daemon socket SHALL be answered first with a snapshot message. The snapshot SHALL hold the pane's last 500 lines of scrollback and its visible screen as raw terminal bytes with colour and attribute sequences, the cursor column, row, and visibility, whether the alternate screen is active, the pane width and height in cells, and the current input availability. Every following output message SHALL carry only bytes the pane produced after the snapshot was taken, with none dropped and none repeated.
