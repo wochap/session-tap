@@ -25,6 +25,15 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 .dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 12px/1.3 var(--font-body);color:var(--color-neutral-400)}
 .dv-opt:target .dv-oid{background:var(--color-accent);color:var(--color-bg)}
 .dv-next{margin:24px 0 0;font:12px/1.5 var(--font-body);color:var(--color-neutral-500)}
+.ic{position:relative;flex:none;overflow:hidden;color:var(--color-text);--ic-acc:var(--color-accent);background:radial-gradient(120% 120% at 28% 18%,var(--color-accent-800),var(--color-bg) 62%);box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--color-accent) 22%,transparent)}
+.ic svg{position:absolute;inset:0;width:100%;height:100%}
+.ic-glow svg{filter:drop-shadow(0 0 3px color-mix(in oklab,var(--color-accent) 55%,transparent))}
+.ic-mono{color:var(--color-accent-800);--ic-acc:var(--color-accent-800);background:var(--color-accent-100);box-shadow:none}
+.ic-card{display:flex;flex-direction:column;gap:16px;padding:22px;width:292px;box-sizing:border-box;background:var(--color-neutral-900);border-radius:var(--radius-lg,12px);box-shadow:inset 0 0 0 1px var(--color-neutral-800)}
+.ic-row{display:flex;align-items:flex-end;gap:14px}
+.ic-cap{font:400 10.5px/1.2 var(--font-body);color:var(--color-neutral-500);text-align:center;margin-top:6px}
+.ic-name{font:500 14px/1.2 var(--font-body);color:var(--color-text)}
+.ic-why{font:400 12px/1.45 var(--font-body);color:var(--color-neutral-400);text-wrap:pretty}
 </style>
 </helmet>
 
@@ -35,6 +44,20 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 <div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--color-neutral-500)">
 <span>Assumptions: amber/red/green status hues added in OKLCH (not in Nocturne)</span><span>Provider marks are letter placeholders until real icons</span><span>Light theme derived from Nocturne neutral ramps</span>
 </div>
+</div>
+</section>
+
+<section class="dv-turn" id="t11">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="gB" viewBox="0 0 108 108"><path d="M33 39l16 15-16 15" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path><rect x="57" y="62" width="20" height="7" rx="2.5" fill="var(--ic-acc)"></rect></symbol>
+</defs></svg>
+<div class="dv-thd"><a class="dv-tid" href="#t11">11</a><span class="dv-tname">App icon · Prompt caret</span><span class="dv-tsub">Adaptive icon (108dp, glyph inside the 66dp safe zone) shown in circle and squircle masks, small launcher size, and Android 13 themed (monochrome) layer.</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="11b"><div class="dv-olabel"><a class="dv-oid" href="#11b">11b</a>Prompt caret</div><div class="ic-card">
+<div class="ic ic-glow" style="width:168px;height:168px;border-radius:30%"><svg><use href="#gB"></use></svg></div>
+<div class="ic-row"><div><div class="ic ic-glow" style="width:56px;height:56px;border-radius:50%"><svg><use href="#gB"></use></svg></div><div class="ic-cap">Circle</div></div><div><div class="ic ic-glow" style="width:56px;height:56px;border-radius:30%"><svg><use href="#gB"></use></svg></div><div class="ic-cap">Squircle</div></div><div><div class="ic ic-mono" style="width:56px;height:56px;border-radius:50%"><svg><use href="#gB"></use></svg></div><div class="ic-cap">Themed</div></div><div><div class="ic ic-glow" style="width:32px;height:32px;border-radius:50%"><svg><use href="#gB"></use></svg></div><div class="ic-cap">32</div></div></div>
+<div style="display:flex;flex-direction:column;gap:4px"><div class="ic-name">Prompt caret</div><div class="ic-why">The agent's prompt with a lit cursor waiting for you. Instantly reads as "terminal".</div></div>
+</div></div>
 </div>
 </section>
 
