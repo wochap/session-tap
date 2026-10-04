@@ -7,7 +7,7 @@ use sessiontap_hub::remote::{self, RemoteGate, RemoteLimits};
 use sessiontap_hub::routing::CommandLimits;
 use sessiontap_hub::service::{self, Hub, RemoteInfo};
 use sessiontap_hub::store::HubStore;
-use sessiontap_hub::{cli, tls};
+use sessiontap_hub::{cli, endpoints, tls};
 use sessiontap_infra::{
     fs::prepare_private_dir,
     json::write_json_line,
@@ -128,30 +128,28 @@ async fn run_service() -> Result<()> {
         let identity =
             tls::load_or_create_identity(&paths.state_dir.join(tls::IDENTITY_FILE), &hub_name)?;
         let acceptor = tokio_rustls::TlsAcceptor::from(tls::server_config(&identity)?);
-        for listener in remote::bind_all(&remote.listen_addrs()).await {
-            eprintln!(
-                "sessiontap-hub: remote access on {}",
-                listener.local_addr()?
-            );
-            remote_listeners.push((listener, acceptor.clone()));
+        for address in remote.listen_mode().addresses() {
+            remote_listeners.push((address, acceptor.clone()));
         }
         remote_info = Some(RemoteInfo {
             hub_id: identity.spki_sha256(),
             hub_name,
             hub_spki: identity.spki.clone(),
-            endpoints: remote.endpoints(),
+            remote: remote.clone(),
+            interfaces: endpoints::system_interfaces,
         });
     }
     let hub = Arc::new(Hub::new(Arc::clone(&store), updates.clone(), remote_info));
     let limits = RemoteLimits::default();
     let gate = RemoteGate::new(&limits);
-    for (listener, acceptor) in remote_listeners {
-        tokio::spawn(remote::serve_remote(
-            listener,
+    for (address, acceptor) in remote_listeners {
+        tokio::spawn(remote::supervise_listener(
+            address,
             acceptor,
             Arc::clone(&hub),
             Arc::clone(&gate),
             limits.clone(),
+            remote::BIND_BACKOFF,
         ));
     }
     eprintln!(

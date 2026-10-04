@@ -47,8 +47,6 @@ pub const MAX_MESSAGE_SIZE: usize = 64 * 1024;
 pub const MAX_FRAME_SIZE: usize = 64 * 1024;
 pub const MAX_INFLIGHT_REQUESTS: usize = 8;
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-pub const ACCEPT_BACKOFF_MIN: Duration = Duration::from_millis(50);
-pub const ACCEPT_BACKOFF_MAX: Duration = Duration::from_secs(1);
 const LAST_SEEN_THROTTLE: Duration = Duration::from_secs(60);
 const OUTBOUND_CAPACITY: usize = 256;
 /// How often an expired deadline is rechecked while the operator decides.
@@ -172,69 +170,86 @@ impl RemoteGate {
     }
 }
 
-/// Binds every address, logging (and skipping) the ones that fail.
-pub async fn bind_all(addresses: &[SocketAddr]) -> Vec<TcpListener> {
-    let mut listeners = Vec::new();
-    for address in addresses {
-        match TcpListener::bind(address).await {
-            Ok(listener) => listeners.push(listener),
+/// Retry delays for binding a remote address: `initial`, doubling up to
+/// `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Backoff {
+    pub initial: Duration,
+    pub max: Duration,
+}
+
+/// Production bind retry: 1 s doubling to 30 s.
+pub const BIND_BACKOFF: Backoff = Backoff {
+    initial: Duration::from_secs(1),
+    max: Duration::from_secs(30),
+};
+
+impl Backoff {
+    /// The delay after `previous`, or `initial` when a streak starts.
+    #[must_use]
+    pub fn next(&self, previous: Option<Duration>) -> Duration {
+        previous.map_or(self.initial, |previous| (previous * 2).min(self.max))
+    }
+}
+
+/// Keeps one remote address served forever. Binding is retried with
+/// `backoff`; a failure streak and a successful bind are each logged once.
+/// When the accept loop fails, the address goes back to the retry loop.
+pub async fn supervise_listener(
+    address: SocketAddr,
+    acceptor: TlsAcceptor,
+    hub: Arc<Hub>,
+    gate: Arc<RemoteGate>,
+    limits: RemoteLimits,
+    backoff: Backoff,
+) {
+    let mut delay = None;
+    loop {
+        let listener = match TcpListener::bind(address).await {
+            Ok(listener) => listener,
             Err(error) => {
-                eprintln!("sessiontap-hub: cannot bind remote address {address}: {error}");
+                if delay.is_none() {
+                    eprintln!(
+                        "sessiontap-hub: cannot bind remote address {address}: {error}; retrying"
+                    );
+                }
+                let wait = backoff.next(delay);
+                delay = Some(wait);
+                tokio::time::sleep(wait).await;
+                continue;
             }
-        }
-    }
-    listeners
-}
-
-/// Wait between failed accepts: doubles per failure, resets on success.
-#[derive(Debug, Default)]
-struct AcceptBackoff {
-    current: Option<Duration>,
-}
-
-impl AcceptBackoff {
-    /// Returns the wait and whether this failure starts a new streak.
-    fn failure(&mut self) -> (Duration, bool) {
-        let (next, first) = match self.current {
-            None => (ACCEPT_BACKOFF_MIN, true),
-            Some(current) => ((current * 2).min(ACCEPT_BACKOFF_MAX), false),
         };
-        self.current = Some(next);
-        (next, first)
-    }
-
-    fn success(&mut self) {
-        self.current = None;
+        let local = listener.local_addr().unwrap_or(address);
+        eprintln!("sessiontap-hub: remote access on {local}");
+        let error = serve_remote(
+            listener,
+            acceptor.clone(),
+            Arc::clone(&hub),
+            Arc::clone(&gate),
+            limits.clone(),
+        )
+        .await;
+        eprintln!("sessiontap-hub: remote listener {address} failed: {error}; rebinding");
+        // the failure above starts the streak, so its retries stay quiet
+        let wait = backoff.next(None);
+        delay = Some(wait);
+        tokio::time::sleep(wait).await;
     }
 }
 
-/// Accepts remote connections on one listener forever. Accept errors are
-/// logged once per streak and retried after a backoff.
+/// Accepts remote connections on one listener until `accept` fails, and
+/// returns that error.
 pub async fn serve_remote(
     listener: TcpListener,
     acceptor: TlsAcceptor,
     hub: Arc<Hub>,
     gate: Arc<RemoteGate>,
     limits: RemoteLimits,
-) {
-    let address = listener
-        .local_addr()
-        .map_or_else(|_| "?".to_owned(), |address| address.to_string());
-    let mut backoff = AcceptBackoff::default();
+) -> std::io::Error {
     loop {
         let (tcp, peer) = match listener.accept().await {
-            Ok(accepted) => {
-                backoff.success();
-                accepted
-            }
-            Err(error) => {
-                let (wait, first) = backoff.failure();
-                if first {
-                    eprintln!("sessiontap-hub: remote accept on {address} failed: {error}");
-                }
-                tokio::time::sleep(wait).await;
-                continue;
-            }
+            Ok(accepted) => accepted,
+            Err(error) => return error,
         };
         // over a cap: drop the socket before TLS, without logging
         let Some(admission) = gate.admit(peer.ip()) else {
@@ -847,27 +862,15 @@ mod tests {
     }
 
     #[test]
-    fn accept_backoff_doubles_caps_and_resets() {
-        let mut backoff = AcceptBackoff::default();
-        let waits: Vec<(u64, bool)> = (0..7)
+    fn bind_backoff_doubles_to_the_cap() {
+        let mut delay = None;
+        let waits: Vec<u64> = (0..7)
             .map(|_| {
-                let (wait, first) = backoff.failure();
-                (u64::try_from(wait.as_millis()).unwrap(), first)
+                let wait = BIND_BACKOFF.next(delay);
+                delay = Some(wait);
+                wait.as_secs()
             })
             .collect();
-        assert_eq!(
-            waits,
-            vec![
-                (50, true),
-                (100, false),
-                (200, false),
-                (400, false),
-                (800, false),
-                (1000, false),
-                (1000, false),
-            ]
-        );
-        backoff.success();
-        assert_eq!(backoff.failure(), (ACCEPT_BACKOFF_MIN, true));
+        assert_eq!(waits, vec![1, 2, 4, 8, 16, 30, 30]);
     }
 }

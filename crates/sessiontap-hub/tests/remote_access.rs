@@ -8,9 +8,10 @@ use sessiontap_core::{
 };
 use sessiontap_hub::{
     cli,
+    config::RemoteConfig,
     ingest::{IngestAuth, IngestedRequest, handle_ingest},
     listen::{HubRequest, HubResponse, HubStreamEnvelope},
-    remote::{CLOSE_REVOKED, RemoteGate, RemoteLimits, serve_remote},
+    remote::{Backoff, CLOSE_REVOKED, RemoteGate, RemoteLimits, serve_remote, supervise_listener},
     service::{self, Hub, RemoteInfo, pair_mac},
     store::HubStore,
     tls::{Identity, client_config, client_config_with_versions, server_config},
@@ -91,7 +92,8 @@ async fn start_hub_with(limits: RemoteLimits, real_rate_limit: bool) -> TestHub 
             hub_id: hub_id.clone(),
             hub_name: "Test Hub".into(),
             hub_spki: identity.spki.clone(),
-            endpoints: vec![addr.to_string(), "hub.tailnet.ts.net:8932".into()],
+            remote: remote_config(&[&addr.to_string()], &["hub.tailnet.ts.net:8932"]),
+            interfaces: Vec::new,
         }),
     );
     let hub = Arc::new(if real_rate_limit {
@@ -118,6 +120,87 @@ async fn start_hub_with(limits: RemoteLimits, real_rate_limit: bool) -> TestHub 
         socket,
         _temp: temp,
     }
+}
+
+fn remote_config(listen: &[&str], advertise: &[&str]) -> RemoteConfig {
+    RemoteConfig {
+        name: None,
+        listen: listen.iter().map(|entry| (*entry).to_owned()).collect(),
+        advertise: advertise.iter().map(|entry| (*entry).to_owned()).collect(),
+    }
+}
+
+/// Starts a hub whose remote listener is supervised on `listen`; the test
+/// connects to `connect`.
+async fn start_supervised_hub(
+    listen: SocketAddr,
+    connect: SocketAddr,
+    backoff: Backoff,
+) -> TestHub {
+    let temp = tempfile::tempdir().unwrap();
+    let identity = Identity::generate("test-hub").unwrap();
+    let hub_id = identity.spki_sha256();
+    let (updates, _) = broadcast::channel(64);
+    let hub = Arc::new(Hub::new(
+        Arc::new(HubStore::memory().unwrap()),
+        updates,
+        Some(RemoteInfo {
+            hub_id: hub_id.clone(),
+            hub_name: "Test Hub".into(),
+            hub_spki: identity.spki.clone(),
+            remote: remote_config(&[&listen.to_string()], &[]),
+            interfaces: Vec::new,
+        }),
+    ));
+    let limits = roomy(Duration::from_secs(60));
+    tokio::spawn(supervise_listener(
+        listen,
+        tokio_rustls::TlsAcceptor::from(server_config(&identity).unwrap()),
+        Arc::clone(&hub),
+        RemoteGate::new(&limits),
+        limits,
+        backoff,
+    ));
+    let socket = temp.path().join("hub.sock");
+    let unix = UnixListener::bind(&socket).unwrap();
+    tokio::spawn(service::serve_unix_listener(unix, Arc::clone(&hub)));
+    TestHub {
+        hub,
+        hub_id,
+        addr: connect,
+        socket,
+        _temp: temp,
+    }
+}
+
+const TEST_BACKOFF: Backoff = Backoff {
+    initial: Duration::from_millis(10),
+    max: Duration::from_millis(50),
+};
+
+/// Retries a paired `hub.info` call until the listener answers.
+async fn info_when_bound(hub: &TestHub, phone: &Identity) -> Value {
+    timeout(WAIT, async {
+        loop {
+            let config = client_config(&hub.hub_id, Some(phone)).unwrap();
+            if let Ok(tls) = tls_connect(hub, config).await
+                && let Ok((mut ws, _)) = tokio_tungstenite::client_async("wss://hub/", tls).await
+            {
+                return call(&mut ws, 1, "hub.info", json!({})).await;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("listener binds")
+}
+
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 const LOCAL: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
@@ -818,6 +901,73 @@ async fn pair_without_remote_access_fails_clearly() {
 }
 
 #[tokio::test]
+async fn pair_without_endpoint_hints_fails_clearly() {
+    let temp = tempfile::tempdir().unwrap();
+    let identity = Identity::generate("hub").unwrap();
+    let (updates, _) = broadcast::channel(8);
+    let hub = Arc::new(Hub::new(
+        Arc::new(HubStore::memory().unwrap()),
+        updates,
+        Some(RemoteInfo {
+            hub_id: identity.spki_sha256(),
+            hub_name: "hub".into(),
+            hub_spki: identity.spki.clone(),
+            remote: remote_config(&["0.0.0.0:8932"], &[]),
+            interfaces: Vec::new,
+        }),
+    ));
+    let socket = temp.path().join("hub.sock");
+    tokio::spawn(service::serve_unix_listener(
+        UnixListener::bind(&socket).unwrap(),
+        Arc::clone(&hub),
+    ));
+    let error = timeout(
+        WAIT,
+        cli::pair(&socket, vec![], &mut Vec::new(), false, |_, _| true),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("no_endpoints") || message.contains("no endpoint hints"),
+        "{message}"
+    );
+    assert!(message.contains("remote.advertise"), "{message}");
+    assert!(hub.pairing_secret().is_none(), "a window was opened");
+}
+
+#[tokio::test]
+async fn bind_that_fails_then_succeeds() {
+    let blocker = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = blocker.local_addr().unwrap();
+    let hub = start_supervised_hub(address, address, TEST_BACKOFF).await;
+    let phone = paired(&hub, &["read"]);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let response = cli::request_once(&hub.socket, &HubRequest::Devices)
+        .await
+        .unwrap();
+    assert!(matches!(response, HubResponse::Devices { devices } if devices.len() == 1));
+    drop(blocker);
+    let info = info_when_bound(&hub, &phone).await;
+    assert!(info["result"].is_object(), "{info}");
+}
+
+#[tokio::test]
+async fn wildcard_listener_serves_loopback() {
+    let port = free_port();
+    let hub = start_supervised_hub(
+        SocketAddr::from(([0, 0, 0, 0], port)),
+        SocketAddr::from((LOCAL, port)),
+        TEST_BACKOFF,
+    )
+    .await;
+    let phone = paired(&hub, &["read"]);
+    let info = info_when_bound(&hub, &phone).await;
+    assert!(info["result"].is_object(), "{info}");
+}
+
+#[tokio::test]
 async fn pairing_window_expires() {
     let temp = tempfile::tempdir().unwrap();
     let identity = Identity::generate("hub").unwrap();
@@ -829,7 +979,8 @@ async fn pairing_window_expires() {
             hub_id: identity.spki_sha256(),
             hub_name: "hub".into(),
             hub_spki: identity.spki.clone(),
-            endpoints: vec![],
+            remote: remote_config(&["127.0.0.1:8932"], &[]),
+            interfaces: Vec::new,
         }),
         Duration::from_millis(200),
     ));

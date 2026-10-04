@@ -18,6 +18,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::config::RemoteConfig;
+use crate::endpoints::{InterfaceAddr, endpoints_with};
 use crate::ingest::HubPublication;
 use crate::listen::{HubRequest, HubResponse, serve_unix_stream};
 use crate::remote::AddressKey;
@@ -42,13 +44,28 @@ pub const SCOPE_READ: &str = "read";
 pub const SCOPE_MANAGE: &str = "manage";
 pub const SCOPES: [&str; 2] = [SCOPE_READ, SCOPE_MANAGE];
 
+/// Source of host interface addresses for wildcard endpoint hints.
+pub type InterfaceSource = fn() -> Vec<InterfaceAddr>;
+
 /// Remote identity facts the service needs for pairing and `hub.info`.
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
     pub hub_id: String,
     pub hub_name: String,
     pub hub_spki: Vec<u8>,
-    pub endpoints: Vec<String>,
+    /// Listen mode and advertised hints, for endpoint hints.
+    pub remote: RemoteConfig,
+    /// Interface addresses consulted in wildcard mode; production uses
+    /// `endpoints::system_interfaces`.
+    pub interfaces: InterfaceSource,
+}
+
+impl RemoteInfo {
+    /// Endpoint hints for the host as it is now.
+    #[must_use]
+    pub fn endpoints(&self) -> Vec<String> {
+        endpoints_with(&self.remote, self.interfaces)
+    }
 }
 
 /// Messages from the remote side to the `pair` conversation.
@@ -554,13 +571,25 @@ where
             return Ok(());
         }
     };
+    let endpoints = remote.endpoints();
+    if endpoints.is_empty() {
+        write_json_line(
+            write,
+            &HubResponse::error(
+                "no_endpoints",
+                "no endpoint hints available; set remote.advertise or use explicit remote.listen addresses",
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
     let (generation, secret, expires, mut events) = hub.open_pairing(scopes.clone());
     let expires_at = unix_seconds(expires);
     let payload = serde_json::json!({
         "v": 1,
         "hub": remote.hub_name,
         "id": remote.hub_id,
-        "ep": remote.endpoints,
+        "ep": endpoints,
         "sc": scopes,
         "s": URL_SAFE_NO_PAD.encode(secret),
         "exp": expires_at,
@@ -649,7 +678,12 @@ mod tests {
                 hub_id: "id".into(),
                 hub_name: "hub".into(),
                 hub_spki: b"hub-spki".to_vec(),
-                endpoints: vec![],
+                remote: RemoteConfig {
+                    name: None,
+                    listen: vec!["127.0.0.1:8932".into()],
+                    advertise: vec![],
+                },
+                interfaces: Vec::new,
             }),
             ttl,
         )

@@ -349,11 +349,46 @@ remote:
   advertise: ["macbook.tailnet.ts.net:8932"]    # extra QR endpoint hints
 ```
 
-Every `remote.listen` entry must be a concrete IP and port. Wildcard addresses
-(`0.0.0.0`, `::`), an empty list, and unparsable entries make the configuration
-invalid, so the hub runs with defaults and no remote listener. An address that
-fails to bind (for example a LAN address after switching networks) is logged
-with its address and skipped; the other addresses keep serving.
+Explicit IP addresses are the recommended setup: the hub listens only where
+you name it. An empty list or an entry that is not an IP and port makes the
+configuration invalid, so the hub runs with defaults and no remote listener.
+
+When an address fails to bind (the LAN address is not assigned yet because
+DHCP or Tailscale is still starting, or the laptop switched networks), the hub
+keeps running and retries that address after 1 second, doubling the wait up to
+30 seconds, with no retry limit. It logs one line when a failure streak starts
+and one line (`remote access on <address>`) when the address binds, so a hub
+started before the network is ready recovers by itself. When a bound listener
+fails, the hub logs it and returns the address to the same retry loop. A
+retrying address never affects the other addresses, ingestion, or the unix
+socket.
+
+### Wildcard binding
+
+A wildcard address (`0.0.0.0:<port>` for every IPv4 interface, or
+`[::]:<port>` for every IPv6 interface and, on default Linux, IPv4 as well)
+is opt-in and must be the only `remote.listen` entry. Combining a wildcard
+with any other entry, including the other wildcard, is invalid.
+
+```yaml
+version: 1
+remote:
+  name: MacBook
+  listen: ["0.0.0.0:8932"]
+  advertise: ["macbook.tailnet.ts.net:8932"]
+```
+
+With a wildcard bind, the firewall is the only thing that limits who can reach
+the pre-authentication pairing surface (the TLS handshake and `pair.*`
+calls). Mutual TLS and operator-confirmed pairing still gate all access to
+data. Open the port only on the interfaces you trust. On NixOS:
+
+```nix
+networking.firewall.interfaces."wlan0".allowedTCPPorts = [ 8932 ];
+networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 8932 ];
+```
+
+Do not add the port to the global `networking.firewall.allowedTCPPorts`.
 
 On first remote start the hub creates an ECDSA P-256 identity at
 `$XDG_STATE_HOME/sessiontap-hub/remote-identity.pem` (mode 0600) and reuses it
@@ -380,8 +415,24 @@ pairing. A newer `pair` replaces an open window. The QR payload is JSON:
 {"v":1,"hub":"MacBook","id":"<hub_id>","ep":["100.64.0.7:8932","192.168.1.20:8932","macbook.tailnet.ts.net:8932"],"sc":["read","manage"],"s":"<base64url secret>","exp":1767225600}
 ```
 
-`ep` lists every `remote.listen` address and then every `remote.advertise`
-entry. `s` is a 32-byte secret; `exp` is the expiry in Unix seconds.
+`s` is a 32-byte secret; `exp` is the expiry in Unix seconds. `ep` holds
+endpoint hints, computed each time `pair` opens a window:
+
+- With explicit addresses, `ep` is every `remote.listen` address in
+  configuration order, then every `remote.advertise` entry.
+- With a wildcard, `ep` is every address currently assigned to an interface
+  that is up, with the wildcard's port, in the order the system reports them,
+  then every `remote.advertise` entry. `0.0.0.0` uses IPv4 addresses; `[::]`
+  uses IPv6 and IPv4 addresses. Loopback and link-local addresses
+  (`169.254.0.0/16`, `fe80::/10`) are left out, as are interfaces whose names
+  start with `docker`, `veth`, `virbr`, or `br-`. IPv6 hints use the
+  `[addr]:port` form. A changed DHCP address shows up at the next `pair`
+  without a restart.
+
+Duplicates are removed, keeping the first. When the list is empty, `pair`
+fails with `no_endpoints` and opens no window; name a reachable host in
+`remote.advertise`. Hints only tell the device where to connect. They grant
+no trust: the device pins the hub ID from the QR code.
 
 When a device proves the secret, the terminal shows its name and fingerprint
 (the first 16 bytes of the SHA-256 of the device key, as four groups of eight

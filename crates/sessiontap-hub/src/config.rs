@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sessiontap_core::domain::{PublicField, PublicReasonKind, PublicStatus};
-use std::{collections::BTreeMap, io, path::Path};
+use std::{collections::BTreeMap, io, net::SocketAddr, path::Path};
 
 fn default_version() -> u32 {
     1
@@ -60,8 +60,9 @@ pub struct SourceAuth {
     pub token_file: String,
 }
 
-/// Remote listener for paired devices. Every bind address must be a concrete
-/// IP and port so the hub never listens on every interface.
+/// Remote listener for paired devices. `listen` holds concrete IP and port
+/// entries, or a single wildcard entry (`0.0.0.0:<port>` or `[::]:<port>`)
+/// that binds every interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteConfig {
@@ -74,14 +75,39 @@ pub struct RemoteConfig {
     pub advertise: Vec<String>,
 }
 
-impl RemoteConfig {
-    /// Parsed bind addresses; call after `validate`.
+/// How the remote listener binds, derived from a validated `remote.listen`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListenMode {
+    /// Concrete addresses in configuration order.
+    Explicit(Vec<SocketAddr>),
+    /// One wildcard address covering every interface of its family.
+    Wildcard(SocketAddr),
+}
+
+impl ListenMode {
+    /// Every address to bind.
     #[must_use]
-    pub fn listen_addrs(&self) -> Vec<std::net::SocketAddr> {
-        self.listen
+    pub fn addresses(&self) -> Vec<SocketAddr> {
+        match self {
+            Self::Explicit(addresses) => addresses.clone(),
+            Self::Wildcard(address) => vec![*address],
+        }
+    }
+}
+
+impl RemoteConfig {
+    /// Parsed bind mode; call after `validate`.
+    #[must_use]
+    pub fn listen_mode(&self) -> ListenMode {
+        let addresses: Vec<SocketAddr> = self
+            .listen
             .iter()
             .filter_map(|entry| entry.parse().ok())
-            .collect()
+            .collect();
+        match addresses.as_slice() {
+            [address] if address.ip().is_unspecified() => ListenMode::Wildcard(*address),
+            _ => ListenMode::Explicit(addresses),
+        }
     }
 
     #[must_use]
@@ -89,23 +115,17 @@ impl RemoteConfig {
         self.name.clone().unwrap_or_else(host_name)
     }
 
-    /// Endpoint hints: every listen address, then every advertised entry.
-    #[must_use]
-    pub fn endpoints(&self) -> Vec<String> {
-        self.listen.iter().chain(&self.advertise).cloned().collect()
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         if self.listen.is_empty() {
             return Err("remote.listen must name at least one address".into());
         }
         for entry in &self.listen {
-            let address: std::net::SocketAddr = entry
+            let address: SocketAddr = entry
                 .parse()
                 .map_err(|_| format!("invalid remote.listen address: {entry}"))?;
-            if address.ip().is_unspecified() {
+            if address.ip().is_unspecified() && self.listen.len() > 1 {
                 return Err(format!(
-                    "remote.listen address {entry} is a wildcard; wildcard addresses are not allowed"
+                    "remote.listen wildcard {entry} must be the only remote.listen entry"
                 ));
             }
         }
@@ -372,31 +392,55 @@ subscriptions:
         .unwrap();
         config.validate().unwrap();
         let remote = config.remote.unwrap();
-        assert_eq!(remote.listen_addrs().len(), 2);
-        assert_eq!(
-            remote.endpoints(),
-            vec![
-                "100.64.0.7:8932",
-                "[fd00::1]:8932",
-                "macbook.tailnet.ts.net:8932"
-            ]
-        );
+        assert_eq!(remote.listen_mode().addresses().len(), 2);
         assert_eq!(remote.display_name(), "MacBook");
     }
 
+    fn remote(listen: &str) -> HubConfig {
+        HubConfig::parse(&format!("version: 1\nremote:\n  listen: {listen}\n")).unwrap()
+    }
+
     #[test]
-    fn remote_section_rejects_wildcards_empty_and_unparsable() {
+    fn remote_section_accepts_only_a_lone_wildcard() {
         for listen in ["[\"0.0.0.0:8932\"]", "[\"[::]:8932\"]"] {
-            let config =
-                HubConfig::parse(&format!("version: 1\nremote:\n  listen: {listen}\n")).unwrap();
-            let error = config.validate().unwrap_err();
-            assert!(error.contains("wildcard"), "{error}");
+            remote(listen).validate().unwrap();
         }
-        let empty = HubConfig::parse("version: 1\nremote:\n  listen: []\n").unwrap();
-        assert!(empty.validate().unwrap_err().contains("at least one"));
-        let bad = HubConfig::parse("version: 1\nremote:\n  listen: [\"laptop:8932\"]\n").unwrap();
-        assert!(bad.validate().unwrap_err().contains("laptop:8932"));
+        for (listen, wildcard) in [
+            ("[\"0.0.0.0:8932\", \"100.64.0.7:8932\"]", "0.0.0.0:8932"),
+            ("[\"100.64.0.7:8932\", \"0.0.0.0:8932\"]", "0.0.0.0:8932"),
+            ("[\"0.0.0.0:8932\", \"[::]:8932\"]", "0.0.0.0:8932"),
+        ] {
+            let error = remote(listen).validate().unwrap_err();
+            assert!(error.contains(wildcard), "{error}");
+        }
+        assert!(
+            remote("[]")
+                .validate()
+                .unwrap_err()
+                .contains("at least one")
+        );
+        let bad = remote("[\"laptop:8932\"]").validate().unwrap_err();
+        assert!(bad.contains("laptop:8932"), "{bad}");
         assert!(HubConfig::parse("version: 1\nremote:\n  name: x\n").is_err());
+    }
+
+    #[test]
+    fn listen_mode_reports_explicit_and_wildcard() {
+        let explicit = remote("[\"100.64.0.7:8932\", \"[fd00::1]:8932\"]");
+        assert_eq!(
+            explicit.remote.unwrap().listen_mode(),
+            ListenMode::Explicit(vec![
+                "100.64.0.7:8932".parse().unwrap(),
+                "[fd00::1]:8932".parse().unwrap(),
+            ])
+        );
+        for wildcard in ["0.0.0.0:8932", "[::]:8932"] {
+            let config = remote(&format!("[\"{wildcard}\"]"));
+            let mode = config.remote.unwrap().listen_mode();
+            let address: SocketAddr = wildcard.parse().unwrap();
+            assert_eq!(mode, ListenMode::Wildcard(address));
+            assert_eq!(mode.addresses(), vec![address]);
+        }
     }
 
     #[test]
