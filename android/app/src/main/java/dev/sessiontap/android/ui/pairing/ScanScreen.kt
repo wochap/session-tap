@@ -1,11 +1,14 @@
 package dev.sessiontap.android.ui.pairing
 
 import android.Manifest
+import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -123,7 +126,13 @@ private fun CameraPreview(onScanned: (String) -> Boolean) {
     val executor = remember { Executors.newSingleThreadExecutor() }
     val done = remember { AtomicBoolean(false) }
     val reader = remember {
-        BarcodeReader().apply { options.formats = setOf(BarcodeReader.Format.QR_CODE) }
+        BarcodeReader().apply {
+            options.formats = setOf(BarcodeReader.Format.QR_CODE)
+            // Dark terminals render the code light-on-dark; the wrapper defaults these to false.
+            options.tryInvert = true
+            options.tryHarder = true
+            options.tryRotate = true
+        }
     }
     DisposableEffect(Unit) { onDispose { executor.shutdown() } }
     AndroidView(
@@ -135,6 +144,14 @@ private fun CameraPreview(onScanned: (String) -> Boolean) {
                 val provider = future.get()
                 val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                 val analysis = ImageAnalysis.Builder()
+                    // The default 640x480 is too coarse for a dense terminal QR code.
+                    .setResolutionSelector(
+                        ResolutionSelector.Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(Size(1920, 1080), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER),
+                            )
+                            .build(),
+                    )
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                 analysis.setAnalyzer(executor) { image ->
