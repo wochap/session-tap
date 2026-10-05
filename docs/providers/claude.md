@@ -4,7 +4,8 @@ Contract basis: the official [Claude Code hooks reference](https://code.claude.c
 The managed exact-match table maps `SessionStart`, `UserPromptSubmit`,
 `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`,
 `Elicitation`, `Notification`, `PreCompact`, `PostCompact`, `Stop`,
-`StopFailure`, and `SessionEnd`.
+`StopFailure`, `SessionEnd`, `SubagentStart`, `SubagentStop`, and
+`PostModelSwitch`.
 `UserPromptSubmit` starts a turn, tool activity marks working, permission prompts
 mark waiting for approval, input notifications mark waiting for input, and
 `Stop`/`StopFailure` leave a live process publicly stopped. `Stop` with exact
@@ -70,6 +71,23 @@ expired, and a later event for a removed child recreates it as running.
 `SubagentStart` and `SubagentStop` are managed hooks. Existing installations
 must re-run `sessiontap setup claude` to install them; until then, children
 appear only through their tool hooks and never report a start or stop.
+
+## Model sources
+
+The session model comes from three sources, each sanitized and bounded to 160
+characters:
+
+- `SessionStart` carries `model` when Claude Code reports it. A `SessionStart`
+  without `model` leaves any known model unchanged.
+- `PostModelSwitch` is classified as root enrichment, and its `to_model`
+  becomes the session model after a `/model` switch. It requires Claude Code
+  2.1.251 or later. Older versions never send it, so switches are only seen
+  through the transcript.
+- Transcript collection reports `message.model` of the latest assistant
+  record, skipping empty and `<synthetic>` values. This value only fills a
+  missing model and never replaces a model reported by a hook.
+
+The last model stays in the retained snapshot after the session ends.
 
 Minimum locally tested version: Claude Code 2.1.241. New event fields and
 unsupported exact event names or notification subtypes are ignored. Live smoke testing is opt-in; see

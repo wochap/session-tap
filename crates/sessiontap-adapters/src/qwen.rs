@@ -337,6 +337,7 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
                 context_tokens: context,
                 context_window_percent: percent,
             }),
+            model: None,
         },
         cursor: OpaqueCursor::new(cursor),
     })

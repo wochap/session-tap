@@ -4,7 +4,7 @@
   "session_name": "adapter work",
   "model": "anthropic/claude-sonnet-4-5",
   "thinking_level": "high",
-  "mode": "interactive",
+  "mode": "tui",
   "settled_status": "complete",
   "excerpt": "Refactored the adapter registry and ran the workspace tests.",
   "input_tokens": 1543,

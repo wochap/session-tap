@@ -91,6 +91,7 @@ function lastAssistantMessage(ctx: any): any {
   return undefined;
 }
 
+// Any other stop reason, including pi v1 `deferred`, settles as complete.
 function settledStatus(ctx: any): string {
   const message = lastAssistantMessage(ctx);
   if (message && message.stopReason === "error") return "error";
@@ -214,15 +215,21 @@ export default function sessiontapBroker(pi: ExtensionAPI): void {
         // Fail open.
       }
     });
-    // Local accounting only: accumulate per-turn usage and capture the
-    // bounded last-assistant excerpt consumed by the next settled payload.
-    // This event is never forwarded.
-    pi.on("turn_end", (event: any, _ctx: any) => {
+    // Accumulates per-turn usage and captures the bounded last-assistant
+    // excerpt consumed by the next settled payload. When the assistant
+    // message names its provider and model, forwards the model that actually
+    // answered, which differs from the selection for virtual models.
+    pi.on("turn_end", (event: any, ctx: any) => {
       try {
         const message = event && event.message;
         if (message && message.role === "assistant") {
           addUsage(message.usage);
           lastExcerpt = boundedText(messageText(message), BOUND_CHARS);
+          if (typeof message.provider === "string" && typeof message.model === "string") {
+            const payload = Object.assign({ pi_event: "turn_end" }, sessionFields(ctx));
+            payload.served_model = message.provider + "/" + message.model;
+            forward(payload);
+          }
         }
       } catch {
         // Fail open.

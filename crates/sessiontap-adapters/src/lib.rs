@@ -112,6 +112,7 @@ pub struct CollectSessionDataRequest {
 pub struct SessionEnrichment {
     pub session_name: Option<String>,
     pub usage: Option<Usage>,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -485,7 +486,7 @@ pub(crate) fn provider_metadata(
 pub(crate) fn effort_level(value: &str) -> Option<String> {
     matches!(
         value,
-        "minimal" | "low" | "medium" | "high" | "max" | "xhigh"
+        "off" | "minimal" | "low" | "medium" | "high" | "max" | "xhigh"
     )
     .then(|| value.to_owned())
 }
@@ -1067,7 +1068,7 @@ mod tests {
         .unwrap();
         let v: Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
         assert!(v["hooks"]["Stop"].to_string().contains("mine"));
-        for event in ["SubagentStart", "SubagentStop"] {
+        for event in ["SubagentStart", "SubagentStop", "PostModelSwitch"] {
             assert!(
                 v["hooks"][event]
                     .to_string()
@@ -1097,7 +1098,7 @@ mod tests {
         let v: Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
         assert!(v.to_string().contains("mine"));
         assert!(!v.to_string().contains("SessionTap observability"));
-        for event in ["SubagentStart", "SubagentStop"] {
+        for event in ["SubagentStart", "SubagentStop", "PostModelSwitch"] {
             assert!(
                 !v["hooks"][event]
                     .to_string()
@@ -1862,5 +1863,15 @@ mod tests {
             .into_event()
             .unwrap();
         assert!(normalized.collection_context.is_none());
+    }
+
+    #[test]
+    fn effort_level_accepts_off_and_rejects_unknown_values() {
+        assert_eq!(effort_level("off").as_deref(), Some("off"));
+        assert_eq!(effort_level("high").as_deref(), Some("high"));
+        assert_eq!(effort_level("Off"), None);
+        assert_eq!(effort_level("turbo"), None);
+        let metadata = provider_metadata(&json!({"effort": {"level": "off"}}), None).unwrap();
+        assert_eq!(metadata.effort.as_deref(), Some("off"));
     }
 }

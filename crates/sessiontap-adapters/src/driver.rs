@@ -286,6 +286,7 @@ mod tests {
                     enrichment: SessionEnrichment {
                         session_name: Some("n".into()),
                         usage: None,
+                        model: None,
                     },
                     cursor: OpaqueCursor::new(1_u8),
                 }),

@@ -4,6 +4,7 @@
 | --- | --- | --- | --- | --- |
 | Claude Code | 2.1.241 | Yes | Transcript totals + latest verified context tokens | Context percentage is absent without a verified denominator; subagents are reported as `children` |
 | Codex CLI | 0.149.1 | Yes, after `/hooks` trust | Latest cumulative rollout snapshot | Nullable locators are harmless |
+| Pi | 1.0.2 | Managed extension | Extension-accumulated totals + context | See `docs/providers/pi.md`; no artifact collection |
 | Qwen Code | Not yet established | Contract implemented | Summed assistant usage + latest context | Telemetry is ignored |
 
 Usage, context, provider metadata, repository, provider-session, children, and tmux fields are optional.

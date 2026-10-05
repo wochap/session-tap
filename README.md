@@ -41,7 +41,8 @@ a persistent owner.
 
 Provider lifecycle hooks are installed into each provider's config file by
 `sessiontap setup`; Pi has no config-file hooks, so setup instead installs one
-SessionTap-managed extension into `~/.pi/agent/extensions/`. Each hook or
+SessionTap-managed extension into `$PI_CODING_AGENT_DIR/extensions/` (default
+`~/.pi/agent/extensions/`). Each hook or
 extension handler runs `sessiontap hook emit <provider>`, which reads the hook
 JSON on stdin and forwards a normalized event to the broker.
 

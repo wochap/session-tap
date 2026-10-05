@@ -720,7 +720,8 @@ pub fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
     }
     if let Some(metadata) = &event.provider_metadata {
         let current = snapshot.provider_metadata.get_or_insert_default();
-        if metadata.model.is_some() {
+        let fills_only = event.evidence.channel == EvidenceChannel::ProviderArtifact;
+        if metadata.model.is_some() && !(fills_only && current.model.is_some()) {
             current.model.clone_from(&metadata.model);
         }
         if metadata.effort.is_some() {
@@ -1245,6 +1246,45 @@ mod tests {
         let (_, changed) = finalize(&prior_view, &mut again, None, at(99));
         assert!(changed.is_empty());
         assert_eq!(again.updated_at, state.snapshot.updated_at);
+    }
+
+    #[test]
+    fn artifact_model_only_fills_a_missing_model() {
+        let model = |value: &str| {
+            Some(ProviderMetadata {
+                model: Some(value.into()),
+                ..Default::default()
+            })
+        };
+        let mut artifact = event(EventKind::Working);
+        artifact.evidence = EventEvidence::local(EvidenceChannel::ProviderArtifact);
+        artifact.provider_metadata = model("transcript-model");
+        let mut hook = event(EventKind::Working);
+        hook.provider_metadata = model("hook-model");
+        let current = |state: &State| {
+            state
+                .snapshot
+                .provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.model.clone())
+        };
+
+        let mut state = State::new();
+        state.apply(&artifact, None);
+        assert_eq!(current(&state).as_deref(), Some("transcript-model"));
+        state.apply(&hook, None);
+        assert_eq!(current(&state).as_deref(), Some("hook-model"));
+        state.apply(&artifact, None);
+        assert_eq!(current(&state).as_deref(), Some("hook-model"));
+        state.apply(&event(EventKind::SessionEnded), None);
+        assert_eq!(current(&state).as_deref(), Some("hook-model"));
+        assert_eq!(
+            project_public(&state.snapshot, None)
+                .metadata
+                .and_then(|metadata| metadata.model)
+                .as_deref(),
+            Some("hook-model")
+        );
     }
 
     #[test]

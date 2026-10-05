@@ -5,7 +5,7 @@ use sessiontap_adapters::{
 };
 use sessiontap_core::domain::{
     ArtifactCollectionContext, EventEvidence, EventKind, EvidenceChannel, InvocationId,
-    NormalizedEvent,
+    NormalizedEvent, ProviderMetadata,
 };
 use std::{
     collections::HashMap,
@@ -354,7 +354,10 @@ impl UsageCoordinator {
                 provider_session_id: Some(key.provider_session_id.clone()),
                 provider_session_name: enrichment.session_name.clone(),
                 provider_session_start_reason: None,
-                provider_metadata: None,
+                provider_metadata: enrichment.model.clone().map(|model| ProviderMetadata {
+                    model: Some(model),
+                    ..ProviderMetadata::default()
+                }),
                 usage: enrichment.usage.clone(),
                 turn_id: None,
                 tool_activity: None,
@@ -547,6 +550,7 @@ mod tests {
                     enrichment: SessionEnrichment {
                         session_name: None,
                         usage: Some(usage.clone()),
+                        model: Some("claude-sonnet-5".into()),
                     },
                     cursor: OpaqueCursor::new(cursor),
                 },
@@ -563,6 +567,13 @@ mod tests {
             assert_eq!(event.provider, "claude");
             assert_eq!(event.provider_session_id.as_deref(), Some("s1"));
             assert_eq!(event.usage, Some(usage));
+            assert_eq!(
+                event
+                    .provider_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.model.as_deref()),
+                Some("claude-sonnet-5")
+            );
         }
         assert_eq!(stored_cursor(&coordinator, &key), Some(cursor));
 

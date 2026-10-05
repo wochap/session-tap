@@ -40,6 +40,7 @@ pub const HOOK_EVENTS: &[&str] = &[
     "SessionEnd",
     "SubagentStart",
     "SubagentStop",
+    "PostModelSwitch",
 ];
 
 pub type ClaudeAdapter = HookAdapter<ClaudeDialect, ClaudeCollector>;
@@ -102,7 +103,11 @@ impl HookDialect for ClaudeDialect {
             .filter(|v| matches!(v.as_str(), "startup" | "clear" | "resume" | "compact"))
     }
     fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
-        provider_metadata(raw, Some("prompt_id"))
+        let mut metadata = provider_metadata(raw, Some("prompt_id"));
+        if let Some(model) = bounded_field(raw, &["to_model"], MODEL_MAX_CHARS) {
+            metadata.get_or_insert_default().model = Some(model);
+        }
+        metadata
     }
     fn turn_id(&self, raw: &Value) -> Option<String> {
         raw.get("turn_id")
@@ -144,6 +149,7 @@ impl HookDialect for ClaudeDialect {
     }
 }
 
+const MODEL_MAX_CHARS: usize = 160;
 const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 
@@ -178,6 +184,7 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
     let mut response_ids = BTreeSet::new();
     let mut usage_observed = false;
     let mut session_name = None;
+    let mut model = None;
     let mut reader = BufReader::new(file);
     let mut line = Vec::new();
     loop {
@@ -208,6 +215,16 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
             .and_then(|title| sanitize_bounded(title, 160))
         {
             session_name = Some(title);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("assistant")
+            && let Some(latest) = value
+                .get("message")
+                .and_then(|message| message.get("model"))
+                .and_then(Value::as_str)
+                .filter(|name| *name != "<synthetic>")
+                .and_then(|name| sanitize_bounded(name, MODEL_MAX_CHARS))
+        {
+            model = Some(latest);
         }
         let Some(usage) = value
             .get("message")
@@ -255,6 +272,7 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
                 context_tokens: context,
                 context_window_percent: None,
             }),
+            model,
         },
         cursor: OpaqueCursor::new(cursor),
     })
@@ -300,6 +318,7 @@ fn classify(raw: &Value) -> Option<EventKind> {
         "StopFailure" => Some(EventKind::Failed),
         "SubagentStart" => Some(EventKind::NewTurn),
         "SubagentStop" => Some(EventKind::Completed),
+        "PostModelSwitch" => Some(EventKind::Enrichment),
         _ => None,
     }
 }
@@ -370,6 +389,31 @@ mod collection_tests {
                 context_window_percent: None,
             }
         );
+    }
+
+    #[test]
+    fn collector_reports_latest_assistant_model() {
+        let (temp, path) = fixture(
+            "s1",
+            &[
+                r#"{"sessionId":"s1","type":"assistant","message":{"id":"m1","model":"claude-sonnet-5"}}"#,
+                r#"{"sessionId":"s1","type":"user","message":{"model":"user-model"}}"#,
+                r#"{"sessionId":"s1","type":"assistant","message":{"id":"m2","model":"claude-opus-5-5"}}"#,
+                r#"{"sessionId":"s1","type":"assistant","message":{"id":"m3","model":"<synthetic>"}}"#,
+                r#"{"sessionId":"s1","type":"assistant","message":{"id":"m4","model":""}}"#,
+            ],
+        );
+        let (enrichment, _) = collect(request(&temp, "s1", path)).unwrap();
+        assert_eq!(enrichment.model.as_deref(), Some("claude-opus-5-5"));
+
+        let (temp, path) = fixture(
+            "s2",
+            &[
+                r#"{"sessionId":"s2","type":"assistant","message":{"id":"m1","model":"<synthetic>"}}"#,
+            ],
+        );
+        let (enrichment, _) = collect(request(&temp, "s2", path)).unwrap();
+        assert!(enrichment.model.is_none());
     }
 
     #[test]
@@ -667,6 +711,62 @@ mod tool_activity_tests {
         let event = ClaudeAdapter.normalize(&id, &payload).unwrap().event;
         assert_eq!(event.tool_activity.as_ref().unwrap().phase, phase);
         assert!(!serde_json::to_string(&event).unwrap().contains("PRIVATE"));
+    }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use crate::AgentAdapter;
+    use serde_json::json;
+    use sessiontap_core::domain::InvocationId;
+
+    fn model(raw: &Value) -> (EventKind, Option<String>) {
+        let event = AgentAdapter::normalize(&ClaudeAdapter, &InvocationId::new(), raw)
+            .unwrap()
+            .into_event()
+            .unwrap()
+            .event;
+        (
+            event.kind,
+            event.provider_metadata.and_then(|metadata| metadata.model),
+        )
+    }
+
+    #[test]
+    fn session_start_reports_model_when_present() {
+        assert_eq!(
+            model(
+                &json!({"hook_event_name":"SessionStart","session_id":"s","source":"startup","model":"claude-sonnet-5"})
+            ),
+            (
+                EventKind::ProviderSessionStarted,
+                Some("claude-sonnet-5".into())
+            )
+        );
+        assert_eq!(
+            model(&json!({"hook_event_name":"SessionStart","session_id":"s","source":"startup"})),
+            (EventKind::ProviderSessionStarted, None)
+        );
+    }
+
+    #[test]
+    fn post_model_switch_maps_sanitized_bounded_to_model() {
+        assert_eq!(
+            model(
+                &json!({"hook_event_name":"PostModelSwitch","session_id":"s","from_model":"claude-sonnet-5","to_model":"claude-opus-5-5"})
+            ),
+            (EventKind::Enrichment, Some("claude-opus-5-5".into()))
+        );
+        assert_eq!(
+            model(&json!({"hook_event_name":"PostModelSwitch","session_id":"s","to_model":"\u{1b}[31mclaude-opus-5-5\u{1b}[0m"})).1,
+            Some("claude-opus-5-5".into())
+        );
+        let long = "m".repeat(MODEL_MAX_CHARS + 1);
+        assert_eq!(
+            model(&json!({"hook_event_name":"PostModelSwitch","session_id":"s","to_model":long})).1,
+            None
+        );
     }
 }
 

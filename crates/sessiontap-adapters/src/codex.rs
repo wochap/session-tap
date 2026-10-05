@@ -280,6 +280,7 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
         enrichment: SessionEnrichment {
             session_name: index_name.or(session_name),
             usage: latest,
+            model: None,
         },
         cursor: OpaqueCursor::new(cursor),
     })

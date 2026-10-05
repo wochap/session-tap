@@ -1,226 +1,179 @@
-# Prompt: extract an agent/harness hooks and lifecycle API
+# Prompt: explore an agent's integration surfaces for SessionTap
 
-Use this prompt from the root of the AI agent or harness repository whose hook
-contract you want to document (for example Claude Code, Codex, Qwen Code, or a
-similar project).
+This is the explorer prompt. It maps every integration surface of one AI agent
+or harness (for example Claude Code, Codex, Qwen Code, or pi) to the data that
+SessionTap's normalized schema needs. A small model can run it: follow the
+steps in order and fill the fixed output template. The report it writes is the
+input of `update-sessiontap-adapter-from-hooks-report.md`.
 
 ## Inputs
 
-Set these values before running the prompt. A value of `AUTO` means infer it
-from the repository and record the result.
+Set these values before running. `AUTO` means infer the value and record it.
 
 ```text
-PRODUCT_OR_HARNESS: AUTO
+SESSIONTAP_REPO: REQUIRED_PATH_TO_SESSIONTAP_CHECKOUT
+AGENT_REPO: .
+TARGET_PROVIDER: AUTO
 VERSION_OR_REVISION: AUTO
-OUTPUT_FILE: agent-hooks-lifecycle-api.md
-PREVIOUS_DOCUMENTATION: NONE
-SCOPE: hooks, lifecycle events, notifications, callbacks, plugins, and event side channels
+OUTPUT_FILE: agent-integration-report.md
+PREVIOUS_REPORT: NONE
 ```
 
-`PREVIOUS_DOCUMENTATION` may be `NONE` or the path to a Markdown file produced
-by an earlier run of this prompt.
+`TARGET_PROVIDER` is the SessionTap provider ID (`claude`, `codex`, `qwen`,
+`pi`, or a new one). `PREVIOUS_REPORT` is `NONE` or the path to an earlier
+report from this prompt.
 
-## Prompt
+## Rules
 
-You are performing a contract-focused repository investigation. Determine the
-externally usable hooks, lifecycle events, notifications, callbacks, plugin
-events, and event side channels exposed by this AI agent/harness. Document their
-registration API, delivery semantics, and payload schemas in one Markdown file.
+- Write only `OUTPUT_FILE`. Do not change either repository.
+- Never paste source code. Describe facts and data shapes in your own words.
+- Every claim needs evidence: a repository-relative path plus a symbol,
+  heading, or test name.
+- Label every claim with one confidence value:
+  - `documented`: part of a public contract or public docs.
+  - `tested`: asserted by a test or fixture in the agent repository.
+  - `observed`: present in the implementation, not promised publicly.
+  - `inferred`: your interpretation, still needs verification.
+  - `unknown`: the repository does not answer it.
+- Record the agent repository license. The implementer uses it with
+  SessionTap's `docs/clean-room.md` to decide what it may use.
+- Use invented values in every example. Never copy real prompts, paths,
+  credentials, or captured payloads.
 
-This is an evidence-gathering and documentation task. Do not modify product
-source, tests, configuration, generated files, dependencies, or lockfiles. The
-only permitted write is `OUTPUT_FILE`.
+## Step 1: read the SessionTap schema from code
 
-First read all repository instructions that apply to the current directory.
-Inspect the repository broadly enough to find both documented and implemented
-contracts. Search documentation, schemas and generated types, configuration
-parsers, CLI help, hook registries, event enums, dispatchers, serializers,
-fixtures, tests, examples, changelogs, and release/version metadata. Do not
-assume the feature is named `hook`; also search for lifecycle, callback,
-notification, event, plugin, middleware, listener, telemetry, protocol, and
-side-channel concepts.
+Do this before you look at the agent. Do not rely on a field list in this
+prompt; the code is the source of truth, so new fields are picked up
+automatically.
 
-Use this evidence priority:
+In `SESSIONTAP_REPO`, read these definitions and list every field they hold:
 
-1. Published or repository-local public API documentation and machine-readable
-   schemas.
-2. Public CLI help, generated public types, configuration schemas, and official
-   examples.
-3. Contract and integration tests that exercise public behavior.
-4. Runtime implementation details, used only to resolve gaps and clearly
-   labeled as implementation-observed rather than publicly guaranteed.
-5. Inference, used only when unavoidable and explicitly labeled.
+1. `crates/sessiontap-core/src/domain.rs`: `NormalizedEvent`, `EventKind`
+   (every variant), `ProviderMetadata`, `Usage`, `ChildAgentRef`,
+   `ToolActivityUpdate`, `ToolActivityPhase`, `StatusReasonContext`, and
+   `ArtifactCollectionContext`.
+2. `crates/sessiontap-adapters/src/lib.rs`: `SessionEnrichment` and the
+   `AgentAdapter` trait.
+3. `crates/sessiontap-adapters/src/dialect.rs`: the `HookDialect` trait. Each
+   method is one thing an adapter can supply.
+4. `crates/sessiontap-core/src/terminal.rs`: `TerminalPolicy`.
+5. `crates/sessiontap-adapters/src/<TARGET_PROVIDER>.rs` and
+   `docs/providers/<TARGET_PROVIDER>.md`, if they exist: what the current
+   adapter subscribes to and maps today.
 
-Do not claim that a field, event, ordering rule, or guarantee exists without
-evidence. Distinguish these confidence labels throughout the report:
+Write the result as the **field checklist**: one row per field or event kind,
+with its type and one line on its meaning. Every later step refers to it.
 
-- `documented`: explicitly part of a public contract;
-- `tested`: asserted by a repository test or fixture;
-- `observed`: present in implementation but not promised publicly;
-- `inferred`: a reasoned interpretation that still needs verification;
-- `unknown`: the repository does not establish the answer.
+## Step 2: inventory every integration surface
 
-For every material claim, cite a repository-relative file path plus a symbol,
-heading, test name, or line number when practical. Prefer stable symbols and
-headings over line numbers. Never paste substantial source code. Describe API
-facts and data shapes in original language. Record the repository license and
-whether each important conclusion came from public-contract material or
-implementation inspection, so downstream clean-room consumers can decide what
-they may use.
+In `AGENT_REPO`, search for each surface below. Do not assume a feature is
+called "hook". Also search for lifecycle, callback, listener, event, plugin,
+extension, mod, middleware, telemetry, and protocol. For each surface record:
+whether it exists, how it is enabled, its transport, its payload shape, and
+evidence.
 
-Investigate all of the following when available:
+1. Hooks: config-file hooks, command hooks, HTTP hooks.
+2. In-process extension points: function hooks, mods, plugins, extensions.
+3. Transcripts and session files: location, format, record types.
+4. Statusline or prompt-line commands and their input payloads.
+5. SDK, RPC, JSON, or stream-JSON output modes.
+6. OpenTelemetry or other telemetry exporters.
+7. Environment variables and CLI flags that change any of the above, such as
+   config or agent directories.
+8. Side channels: log files, sockets, dual-output files, notifications.
 
-- how hooks are enabled, registered, configured, trusted, disabled, and removed;
-- supported configuration locations and precedence;
-- event names and aliases, including deprecated or version-gated events;
-- process/transport model: stdin, stdout, environment, argv, HTTP, socket,
-  JSONL, transcript, log, plugin API, or another channel;
-- common envelope fields and event-specific fields;
-- required, optional, nullable, conditional, and omitted-field behavior;
-- exact scalar/object/array types, enum values, aliases, and nesting;
-- identifiers and correlation rules for session, conversation, turn, tool call,
-  subagent, request, and event identities;
-- timestamps, sequence numbers, event ordering, concurrency, duplication,
-  retries, timeouts, and delivery guarantees;
-- hook exit-code, stdout, stderr, response-payload, cancellation, mutation,
-  permission, or allow/deny semantics;
-- root-agent versus subagent behavior and parent/child correlation (see the
-  dedicated subagent investigation below);
-- session start/resume/clear/compact/end and turn start/stop/failure/interrupt;
-- tool start/success/failure, approval requests, user questions, idle signals,
-  notifications, usage/context data, model and permission metadata;
-- payload size or string limits, security-sensitive fields, secrets, prompts,
-  transcript paths, arbitrary tool input, and other privacy concerns;
-- platform or version differences and known gaps.
+## Step 3: build the coverage matrix
 
-Subagents need their own investigation because a consumer must be able to
-detect that an event belongs to a subagent and resolve which agent spawned it.
-Treat the harness as possibly running nested agents (a root agent that spawns
-subagents, which may spawn further subagents) even if the repository only
-documents one level. Establish, with evidence and confidence labels:
+For every row of the field checklist, and for every surface from step 2, say
+whether the surface can supply the field. Use the confidence labels. Note
+version gates, for example "added in 2.1.251".
 
-- how a subagent is started and stopped (tool call, task, worker, fork, team,
-  or another mechanism) and which events fire around that boundary;
-- every field that marks an event as coming from a subagent (for example an
-  agent identifier, agent type, agent name, role, depth, or a flag), and how a
-  root-agent event looks in the same field (missing key, empty string, `null`,
-  or a root sentinel);
-- every field that links a subagent to its parent (for example a parent agent
-  ID, parent session ID, spawning tool-call ID, root session ID, or a nested
-  session/transcript identity), whether the link points to the immediate parent
-  or to the root, and whether a subagent can be its own parent's sibling;
-- whether a subagent shares the parent's session ID, turn ID, transcript path,
-  cwd, process, hook configuration, and environment, or receives its own;
-- whether the subagent's own hooks (session start/end, turn boundaries, tool
-  events, notifications, usage) fire at all, which events fire only for the
-  root, which fire only for subagents, and which fire for both;
-- whether the subagent-start and subagent-stop payloads carry enough identity
-  to correlate them with the tool call or prompt that spawned the subagent and
-  with the subagent's own later events;
-- whether root and subagent events interleave, whether a root turn can
-  complete while a subagent is still running, and whether a subagent can
-  outlive its root turn or session;
-- how usage, context size, model, effort, and permission metadata are
-  attributed between root and subagent events;
-- whether a resumed, forked, or background subagent reuses the same
-  identifiers, and whether identifiers are unique per process, per session, or
-  globally;
-- whether the harness exposes a configurable or documented maximum depth or
-  concurrency, and how identifiers change with depth.
+Pay special attention to:
 
-Write the answer as a decision procedure that a downstream consumer can apply
-to a single raw payload without additional state: which fields to read, in
-which order, to decide `root` versus `subagent`, and which field or fields
-yield the parent identity. If no parent identity is available, state which
-field or side channel is the closest substitute (for example the root session
-ID plus the spawning tool-call ID) and label it `inferred` or `unknown`.
+- model: the selected model and the model that actually answered, and how a
+  mid-session switch is reported;
+- effort or thinking level, including an "off" value;
+- usage and context: cumulative or per-turn, cache tokens, context window;
+- turn boundaries: start, completion, failure, interrupt, idle;
+- waiting states: approval versus user question;
+- subagents: how a payload is recognized as a subagent, and which field links
+  it to its parent.
 
-Represent schemas precisely. Start with a common-envelope table, then add one
-event table per event or one explicitly factored event-family table when events
-share a schema. Each field row must contain:
+## Step 4: rank the options per field
 
-```text
-JSON path | type | presence | meaning | example/allowed values | evidence | confidence | sensitivity
-```
+For each field with more than one possible surface, rank the options. Score
+each option on:
 
-Use `presence` values such as `required`, `optional`, `nullable`, or a concrete
-condition. Preserve the distinction between a missing key and a key containing
-`null`. If the repository supports multiple payload dialects, document each
-accepted spelling and identify the canonical one. If exact payload shape is not
-available, say so instead of fabricating a schema.
+- stability: public contract, versioned, or internal;
+- enablement cost: none, setup writes config, user must trust or opt in;
+- latency: live on the event, delayed until collection, or on exit;
+- provenance: whether `docs/clean-room.md` allows its use, given the evidence
+  class and license.
 
-Include small synthetic JSON examples for important event families. Examples
-must contain invented identifiers and harmless placeholder content. Do not copy
-credentials, account data, real prompts, transcript contents, paths, or raw
-captured payloads. Mark inferred fields in examples with an adjacent note; do
-not make an inferred example look authoritative.
+## Step 5: recommend a mix and diff it against the current adapter
 
-If `PREVIOUS_DOCUMENTATION` is not `NONE`, read it after independently
-establishing the current contract. Compare it with current evidence and include
-a change analysis containing:
+Pick one primary source, and a fallback if useful, for each field. Then
+compare the recommended mix with what the current adapter does (step 1,
+item 5). List each difference as add, change, remove, or keep.
 
-- added, removed, renamed, or deprecated events;
-- added, removed, renamed, retyped, or presence-changed fields;
-- changed registration, transport, control-flow, ordering, or retry semantics;
-- newly documented behavior that may not be a product change;
-- earlier claims that are now contradicted or no longer verifiable;
-- unchanged areas that were actually re-verified;
-- migration impact for hook consumers.
+## Step 6: compare with the previous report
 
-Do not silently carry old claims forward. Label each change as `confirmed`,
-`probable`, or `uncertain`, and distinguish an API change from a documentation
-or evidence-quality change. When versions are unavailable, compare the two
-repository revisions and state that limitation.
+Skip this step when `PREVIOUS_REPORT` is `NONE`. Otherwise list added,
+removed, or changed surfaces, events, and fields. Label each one `confirmed`,
+`probable`, or `uncertain`. Do not carry old claims forward without checking
+them again.
 
-Write `OUTPUT_FILE` with exactly this top-level structure:
+## Step 7: self-check
+
+- Every field checklist row appears in the coverage matrix.
+- Every surface in the catalog has evidence or says `unknown`.
+- No source code is pasted and all examples use invented values.
+
+## Output template
+
+Write `OUTPUT_FILE` with exactly these sections, in this order. Write
+`none found` in a section instead of leaving it out.
 
 ```markdown
-# <product> hooks and lifecycle API
+# <product> integration report for SessionTap
 
-## Investigation metadata
-## Executive summary
-## Evidence and confidence model
-## Hook registration and configuration
-## Delivery and control-flow semantics
-## Common payload envelope
-## Event catalog
-## Event payload schemas
-## Correlation and lifecycle model
-## Subagent identity and parent correlation
-## Ordering, concurrency, retries, and failure behavior
-## Security and privacy notes
-## Version and platform compatibility
-## Changes from previous documentation
-## Unknowns and verification gaps
-## Consumer implementation checklist
+## Metadata
+Product, version or revision, license, target provider, SessionTap revision,
+date, previous report compared (yes/no).
+
+## Field checklist
+| Field or event kind | Type | Meaning | Defined in |
+
+## Surface catalog
+| Surface | Exists | Enablement | Transport | Payload summary | Version gate | Confidence | Evidence |
+
+## Coverage matrix
+| Field | <surface 1> | <surface 2> | ... |
+Each cell: `yes (<confidence>)`, `partial (<note>)`, or `no`.
+
+## Options per field
+For each field: a ranked list. Each option states surface, stability,
+enablement cost, latency, provenance, and evidence.
+
+## Subagent identity
+How to tell a subagent payload from a root payload, and which field gives the
+parent. Include confidence and evidence.
+
+## Recommended mix
+| Field | Primary source | Fallback | Reason |
+
+## Diff against current adapter
+| Change | Field or event | Current behavior | Recommended behavior | Evidence |
+`Change` is one of add, change, remove, keep.
+
+## Changes from previous report
+
+## Unknowns
+Each unknown with the evidence that would resolve it.
+
 ## Evidence index
+| ID | Path | Symbol or heading | Class (public contract or implementation) |
 ```
 
-Under `Event catalog`, include a compact table with event name, trigger,
-transport, root/subagent scope, lifecycle meaning, confidence, and best evidence.
-Under `Correlation and lifecycle model`, include a provider-event-to-neutral-
-meaning table, but do not invent a universal state machine. Under `Subagent identity
-and parent correlation`, include the root/subagent decision procedure, a table
-of identity and parent-link fields (field, present on which events, root value,
-subagent value, points to immediate parent or root, confidence, evidence), a
-table of which events fire for root only, subagent only, or both, and a short
-synthetic example showing one root event, one subagent-start event, and one
-subagent event with a resolvable parent link. Under `Consumer
-implementation checklist`, call out which facts are safe to rely on and which
-need feature detection or defensive parsing, including how to detect a subagent
-payload and how to resolve its parent.
-
-If no hook or lifecycle API exists, still create `OUTPUT_FILE`. Explain what
-was searched, document the closest available mechanisms, and state that no
-supported hook contract was found.
-
-Before finishing, audit the report for internal contradictions, unsupported
-certainty, accidentally copied source, unsafe sample data, and missing event
-families. Confirm that every event in the catalog has either a payload schema or
-an explicit `schema unavailable` entry, and that every event in the catalog
-states its root/subagent scope. In your final response, report the
-output path, identified product/version/revision, event count, whether
-subagent detection and parent resolution are `documented`, `observed`,
-`inferred`, or `unknown`, whether a prior document was compared, and the most
-important remaining unknowns.
-
+In your final response, give the output path, the product and version, the
+number of surfaces found, and the three most important unknowns.

@@ -12,13 +12,12 @@ use sessiontap_core::domain::{
 };
 use sessiontap_infra::fs::atomic_write;
 use std::{
+    ffi::OsString,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
 };
 
-/// Pi lifecycle events the managed extension subscribes to. `turn_end` is
-/// subscribed for local excerpt and usage accounting only and is never
-/// forwarded to the broker.
+/// Pi lifecycle events the managed extension subscribes to.
 pub const SUBSCRIBED_EVENTS: &[&str] = &[
     "session_start",
     "session_shutdown",
@@ -42,6 +41,7 @@ pub const FORWARDED_EVENTS: &[&str] = &[
     "thinking_level_select",
     "before_agent_start",
     "turn_start",
+    "turn_end",
     "tool_execution_start",
     "tool_execution_end",
     "agent_settled",
@@ -51,6 +51,8 @@ pub const MANAGED_EXTENSION_FILE: &str = "sessiontap.ts";
 pub const OWNERSHIP_MARKER: &str = "// sessiontap-managed-extension v1";
 
 const SESSION_NAME_MAX_CHARS: usize = 160;
+const MODEL_MAX_CHARS: usize = 160;
+const AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
 const EXECUTABLE_PLACEHOLDER: &str = "\"__SESSIONTAP_EXECUTABLE__\"";
 
 /// Pi observes agent lifecycle through in-process TypeScript extensions
@@ -91,7 +93,8 @@ impl HookDialect for PiDialect {
     }
     fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
         let metadata = ProviderMetadata {
-            model: bounded_field(raw, &["model"], 160),
+            model: bounded_field(raw, &["served_model"], MODEL_MAX_CHARS)
+                .or_else(|| bounded_field(raw, &["model"], MODEL_MAX_CHARS)),
             effort: bounded_field(raw, &["thinking_level"], 32)
                 .and_then(|level| effort_level(&level)),
             permission_mode: None,
@@ -149,7 +152,7 @@ fn classify(raw: &Value) -> Option<EventKind> {
         "before_agent_start" => Some(EventKind::NewTurn),
         "turn_start" => Some(EventKind::Working),
         "tool_execution_start" | "tool_execution_end" => Some(EventKind::Working),
-        "session_info_changed" | "model_select" | "thinking_level_select" => {
+        "session_info_changed" | "model_select" | "thinking_level_select" | "turn_end" => {
             Some(EventKind::Enrichment)
         }
         "agent_settled" => match raw.get("settled_status").and_then(Value::as_str) {
@@ -161,8 +164,13 @@ fn classify(raw: &Value) -> Option<EventKind> {
     }
 }
 
-fn extension_path(home: &Path) -> PathBuf {
-    home.join(".pi/agent/extensions")
+/// Pi's user extension directory: `$PI_CODING_AGENT_DIR/extensions` when the
+/// variable is set and non-empty, otherwise `~/.pi/agent/extensions`.
+fn extension_path(home: &Path, agent_dir: Option<OsString>) -> PathBuf {
+    agent_dir
+        .filter(|dir| !dir.is_empty())
+        .map_or_else(|| home.join(".pi/agent"), PathBuf::from)
+        .join("extensions")
         .join(MANAGED_EXTENSION_FILE)
 }
 
@@ -184,11 +192,20 @@ pub fn manage_extension(
     executable: &Path,
     action: SetupAction,
 ) -> Result<SetupReport> {
+    manage_extension_in(home, std::env::var_os(AGENT_DIR_ENV), executable, action)
+}
+
+fn manage_extension_in(
+    home: &Path,
+    agent_dir: Option<OsString>,
+    executable: &Path,
+    action: SetupAction,
+) -> Result<SetupReport> {
     let executable = executable
         .to_str()
         .context("SessionTap executable path is not valid UTF-8")?;
     let rendered = render_extension(executable)?;
-    let path = extension_path(home);
+    let path = extension_path(home, agent_dir);
     let dir = path.parent().expect("extension path has a parent");
     let existing = managed_content(&path);
     match action {
@@ -265,8 +282,17 @@ mod tests {
     use sessiontap_core::domain::{AdapterOutcome, InvocationId};
     use std::collections::BTreeSet;
 
+    /// Tests never read the caller's `PI_CODING_AGENT_DIR`.
+    fn manage_extension(
+        home: &Path,
+        executable: &Path,
+        action: SetupAction,
+    ) -> Result<SetupReport> {
+        manage_extension_in(home, None, executable, action)
+    }
+
     /// Length of the template before it moved to `assets/pi-extension.ts`.
-    const TEMPLATE_BYTES: usize = 9737;
+    const TEMPLATE_BYTES: usize = 10216;
 
     #[test]
     fn fixture_covers_every_forwarded_event_and_matches_expected_kinds() {
@@ -305,7 +331,6 @@ mod tests {
             json!({"pi_event":"tool_execution_update","tool_name":"bash"}),
             json!({"pi_event":"message_end"}),
             json!({"pi_event":"agent_end"}),
-            json!({"pi_event":"turn_end","session_id":"s"}),
             json!({"hook_event_name":"session_start"}),
             json!({"event_name":"session_start"}),
             json!({"session_id":"s"}),
@@ -405,7 +430,7 @@ mod tests {
                     "session_name":"My session",
                     "model":"anthropic/claude-sonnet-4-5",
                     "thinking_level":"minimal",
-                    "mode":"interactive"
+                    "mode":"tui"
                 }),
             )
             .unwrap();
@@ -459,6 +484,36 @@ mod tests {
             oversized.event.provider_session_name.as_deref().is_none(),
             "oversized session name must be dropped, not truncated"
         );
+    }
+
+    #[test]
+    fn served_model_wins_over_selected_model_and_off_is_an_effort() {
+        let id = InvocationId::new();
+        let model = |payload: Value| {
+            PiAdapter
+                .normalize(&id, &payload)
+                .unwrap()
+                .event
+                .provider_metadata
+                .unwrap_or_default()
+        };
+        let served = model(json!({
+            "pi_event":"turn_end",
+            "session_id":"s",
+            "model":"openai-codex/auto",
+            "served_model":"openai-codex/gpt-5.5"
+        }));
+        assert_eq!(served.model.as_deref(), Some("openai-codex/gpt-5.5"));
+        let selected = model(json!({"pi_event":"model_select","model":"openai-codex/auto"}));
+        assert_eq!(selected.model.as_deref(), Some("openai-codex/auto"));
+        let oversized = model(json!({
+            "pi_event":"turn_end",
+            "model":"openai-codex/auto",
+            "served_model":"m".repeat(MODEL_MAX_CHARS + 1)
+        }));
+        assert_eq!(oversized.model.as_deref(), Some("openai-codex/auto"));
+        let off = model(json!({"pi_event":"thinking_level_select","thinking_level":"off"}));
+        assert_eq!(off.effort.as_deref(), Some("off"));
     }
 
     #[test]
@@ -590,7 +645,7 @@ mod tests {
         assert!(healthy.healthy);
         assert!(!healthy.changed);
 
-        let path = extension_path(temp.path());
+        let path = extension_path(temp.path(), None);
         fs::write(&path, format!("{OWNERSHIP_MARKER}\n// edited\n")).unwrap();
         assert!(
             !manage_extension(temp.path(), executable, SetupAction::Doctor)
@@ -671,6 +726,37 @@ mod tests {
         .unwrap();
         assert!(!report.changed);
         assert_eq!(fs::read(&managed).unwrap(), user_content);
+    }
+
+    #[test]
+    fn custom_agent_directory_is_used_for_setup_doctor_and_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let agent_dir = temp.path().join("srv/pi-agent");
+        let custom = || Some(agent_dir.clone().into_os_string());
+        let executable = Path::new("/opt/sessiontap");
+        assert_eq!(
+            extension_path(temp.path(), Some(OsString::new())),
+            temp.path()
+                .join(".pi/agent/extensions")
+                .join(MANAGED_EXTENSION_FILE)
+        );
+
+        manage_extension_in(temp.path(), custom(), executable, SetupAction::Ensure).unwrap();
+        let managed = agent_dir.join("extensions").join(MANAGED_EXTENSION_FILE);
+        assert!(managed.exists());
+        assert!(!temp.path().join(".pi").exists());
+        assert!(
+            manage_extension_in(temp.path(), custom(), executable, SetupAction::Doctor)
+                .unwrap()
+                .healthy
+        );
+        assert!(
+            !manage_extension(temp.path(), executable, SetupAction::Doctor)
+                .unwrap()
+                .healthy
+        );
+        manage_extension_in(temp.path(), custom(), executable, SetupAction::Remove).unwrap();
+        assert!(!managed.exists());
     }
 
     #[test]
