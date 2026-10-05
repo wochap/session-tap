@@ -454,7 +454,7 @@ Adapters SHALL normalize verified usage supplied directly by supported hook fiel
 - **THEN** the adapter normalizes the cumulative totals as managed-hook usage and no transcript record or conversational content enters the hook event
 
 ### Requirement: Pi hooks are installed as one managed extension file
-Pi hook installation SHALL manage exactly one SessionTap-owned TypeScript extension file inside pi's user extension directory, identified by a SessionTap ownership marker and embedding the resolved SessionTap executable path. Setup SHALL be idempotent and SHALL refresh the managed file when its content or executable path drifts. Doctor SHALL verify presence, marker, and executable path without modifying anything. Removal SHALL delete only the marked SessionTap file. Installation SHALL NOT create, modify, or remove any other extension in that directory, and the managed extension SHALL load without project trust in every pi run mode.
+Pi hook installation SHALL manage exactly one SessionTap-owned TypeScript extension file inside pi's user extension directory, identified by a SessionTap ownership marker and embedding the resolved SessionTap executable path. Pi's user extension directory SHALL be `$PI_CODING_AGENT_DIR/extensions` when `PI_CODING_AGENT_DIR` is set and non-empty, and `~/.pi/agent/extensions` otherwise. Setup SHALL be idempotent and SHALL refresh the managed file when its content or executable path drifts. Doctor SHALL verify presence, marker, and executable path without modifying anything. Removal SHALL delete only the marked SessionTap file. Installation SHALL NOT create, modify, or remove any other extension in that directory, and the managed extension SHALL load without project trust in every pi run mode.
 
 #### Scenario: User-authored extensions coexist
 - **WHEN** setup runs against a pi extension directory containing user-authored extensions
@@ -471,6 +471,10 @@ Pi hook installation SHALL manage exactly one SessionTap-owned TypeScript extens
 #### Scenario: Unwrapped pi launches stay untracked
 - **WHEN** pi runs directly without SessionTap invocation context
 - **THEN** the managed extension's emit path exits silently and no event is attributed to any invocation
+
+#### Scenario: Custom agent directory
+- **WHEN** `PI_CODING_AGENT_DIR` is `/srv/pi-agent` during setup
+- **THEN** setup writes the managed extension to `/srv/pi-agent/extensions/` and doctor checks that location
 
 ### Requirement: Pi event forwarding never delays or alters pi
 Managed pi extension handlers SHALL return synchronously without handing pi an awaited delivery promise, SHALL forward each bounded payload by spawning a detached `sessiontap hook emit pi` child process carrying JSON on stdin, and SHALL treat every delivery failure as a silent no-op. The extension SHALL NOT write to stdout or stderr. Pi startup latency, turn latency, exit behavior, and protocol streams SHALL be identical with and without the broker.
@@ -562,3 +566,22 @@ Every adapter SHALL declare a terminal policy describing provider-specific behav
 #### Scenario: Alias inherits policy
 - **WHEN** a configured alias inherits the Claude adapter
 - **THEN** the alias's invocations report the Claude terminal policy
+
+### Requirement: Session model follows provider switches
+The Claude and Pi adapters SHALL keep the session's model current from every model signal their provider exposes. Claude SHALL take the model from `SessionStart` when present, and SHALL subscribe `PostModelSwitch` and map its `to_model` to the session model. Pi SHALL take the selected model from every forwarded event and `model_select`, and the managed extension SHALL forward the provider and model of the assistant message that ended each turn, which then becomes the session model. Every model value SHALL be sanitized and bounded to 160 characters. The thinking level `off` SHALL be a valid effort value, so a switch to `off` replaces the previous effort. The last reported model and effort SHALL remain in the snapshot after the session ends.
+
+#### Scenario: Claude model switch
+- **WHEN** a wrapped Claude session runs `/model` and `PostModelSwitch` reports `to_model` `claude-opus-5-5`
+- **THEN** the session's model becomes `claude-opus-5-5`
+
+#### Scenario: Claude SessionStart without model
+- **WHEN** a Claude `SessionStart` hook carries no `model`
+- **THEN** the adapter emits no model and keeps any previously known model
+
+#### Scenario: Pi virtual model
+- **WHEN** pi has `openai-codex/auto` selected and a turn ends with an assistant message from provider `openai-codex` and model `gpt-5.5`
+- **THEN** the session's model becomes `openai-codex/gpt-5.5`
+
+#### Scenario: Thinking turned off
+- **WHEN** pi reports `thinking_level_select` with level `off` after `high`
+- **THEN** the session's effort becomes `off`
