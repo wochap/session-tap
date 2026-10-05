@@ -275,7 +275,7 @@ In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to 
 - **THEN** both glyphs render as their icons, each one cell wide, and the following text stays aligned to the column grid
 
 ### Requirement: Control scope sends input to the agent
-With the `control` scope the terminal screen SHALL show a key bar with Esc, Tab, Shift+Tab, Up, Down, Left, Right, Enter, Space, Backspace, Ctrl+C, and Paste, and a reply field with a Send button. Each key SHALL send that named key to the agent as `terminal.input` `keys`. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error. Tapping the reply field SHALL focus it and open the soft keyboard, and the field SHALL keep focus while the controls rearrange around the keyboard.
+With the `control` scope the terminal screen SHALL show a key bar laid out as rows of keys, a keyboard toggle, and a reply field with a Send button. The default key bar SHALL have two rows of seven keys: Esc, Tab, Shift+Tab, Up, Ctrl+C, Paste, Backspace, then Ctrl, Alt, Left, Down, Right, Space, Enter. Each named key SHALL send that key to the agent as `terminal.input` `keys`, and each character key SHALL send that character. Ctrl and Alt SHALL be modifiers: a tap latches the modifier for the next key only, a long-press locks it until tapped again, and the next key from the key bar or the soft keyboard SHALL be sent with the latched or locked modifiers. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error. Tapping the reply field SHALL focus it and open the soft keyboard, and the field SHALL keep focus while the controls rearrange around the keyboard. Keys and keystrokes SHALL reach the agent in the order the user pressed them.
 
 #### Scenario: Answer a menu with arrows
 - **WHEN** the agent shows an approval menu and the user taps Down then Enter
@@ -296,6 +296,59 @@ With the `control` scope the terminal screen SHALL show a key bar with Esc, Tab,
 #### Scenario: Keyboard stays open in the reply field
 - **WHEN** the user taps "Reply to agent…" in portrait
 - **THEN** the soft keyboard opens, the reply field moves above the key bar, the field keeps focus, and typed text appears in it
+
+#### Scenario: One-shot Ctrl
+- **WHEN** the user taps Ctrl and then Left
+- **THEN** the app sends `ctrl+left`, and Ctrl returns to its normal state
+
+#### Scenario: Locked Ctrl
+- **WHEN** the user long-presses Ctrl and then taps Up twice
+- **THEN** the app sends `ctrl+up` twice, and Ctrl stays locked until tapped again
+
+### Requirement: Direct keyboard mode sends keystrokes to the agent
+With the `control` scope and input enabled, the keyboard toggle SHALL open the soft keyboard in direct mode. In direct mode the reply field SHALL be replaced by a "Typing to agent" strip with the toggle, and every key the soft keyboard or a hardware keyboard produces SHALL be sent to the agent at once as `terminal.input` `keys`: printable characters as character keys, and Enter, Backspace, Tab, Escape, the arrows, and the other supported named keys as named keys. Text the keyboard commits as a word (swipe typing, suggestions) SHALL be sent as its characters in order. The keyboard SHALL use no autocorrect and no suggestions. A latched or locked Ctrl or Alt SHALL apply to the next keystroke, and the strip SHALL show the active modifiers and briefly show a sent combination (for example "Sent Ctrl+R"). Tapping the toggle again, or hiding the keyboard, SHALL leave direct mode and show the reply field again. The toggle SHALL be disabled when input is paused or the device has only `watch`.
+
+#### Scenario: Vim motion
+- **WHEN** direct mode is on and the user types `w`, `i`, `x`, then taps Esc on the key bar
+- **THEN** the app sends `w`, `i`, `x`, `escape` in that order and the reply field stays hidden
+
+#### Scenario: Ctrl from the key bar with a typed letter
+- **WHEN** direct mode is on, the user taps Ctrl, then types `r` on the soft keyboard
+- **THEN** the app sends `ctrl+r` and the strip briefly reads "Sent Ctrl+R"
+
+#### Scenario: Leave direct mode
+- **WHEN** the user taps the toggle while direct mode is on
+- **THEN** the keyboard closes, the reply field returns, and nothing more is sent
+
+#### Scenario: Input paused
+- **WHEN** the agent is not in front of its pane
+- **THEN** the keyboard toggle is disabled like the keys
+
+### Requirement: Key layout is editable and global
+The app SHALL let the user edit the key bar layout from "Edit keys" in the terminal top bar menu or from the popover that a long-press on any key opens. The editor SHALL show the rows with a live preview. It SHALL let the user drag keys to reorder them within and across rows, tap a key to replace or remove it, add a key from a picker (the named keys, Ctrl+C, Paste, Ctrl, Alt, and "Character…" for any single printable character), add a row, and delete a row. It SHALL allow at most 7 keys per row, at most 4 rows, and at least 1 row. "Reset to default" SHALL restore the default layout after confirmation. The layout SHALL be stored on the device, SHALL survive restarts, and SHALL apply to every agent and hub. The key bar SHALL grow upward when it has more rows.
+
+#### Scenario: Add a character key
+- **WHEN** the user adds a third row with the characters `/`, `-`, `$`, `:` and keys Home, End, PgUp
+- **THEN** every terminal shows a three-row key bar with those keys on top, and tapping `$` sends `$`
+
+#### Scenario: Reorder across rows
+- **WHEN** the user drags Space from row 2 to the start of row 1
+- **THEN** the preview and the terminal key bar show Space first in row 1
+
+#### Scenario: Row limit
+- **WHEN** the layout has 4 rows
+- **THEN** "Add row" is disabled
+
+#### Scenario: Reset
+- **WHEN** the user taps "Reset to default" and confirms
+- **THEN** the layout returns to the default two rows
+
+### Requirement: Terminal top bar menu
+The terminal top bar SHALL offer a ⋮ menu with Fit to width (the same toggle as the size chip), Copy visible screen (copies the pane's visible text to the clipboard), and Edit keys. Edit keys SHALL be shown only with the `control` scope.
+
+#### Scenario: Copy visible screen
+- **WHEN** the user picks Copy visible screen
+- **THEN** the clipboard holds the visible pane text with trailing blanks trimmed
 
 ### Requirement: Agent questions get answer helpers
 When the agent's effective status is blocked on approval, the device has `control`, and the agent's `terminal` descriptor has quick-pick `digits`, the terminal screen SHALL show an "Agent is asking" banner with digit chips 1 to 4 that each send that digit as a one-character key; the chips SHALL carry no option labels. When the agent waits for input, the banner SHALL say to reply below and SHALL show no chips. When the descriptor's quick-pick is `none`, no chips SHALL show. The banner SHALL include the hint "Space toggles · Enter confirms" for multi-select menus.

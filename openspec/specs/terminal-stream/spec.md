@@ -89,7 +89,7 @@ While a pane is watched, the daemon SHALL push an input-state message whenever i
 - **THEN** the consumer receives an input-state message with reason `not_foreground` and keeps receiving the pane's output
 
 ### Requirement: Input supports named keys, typed characters, and pasted text
-An input request SHALL carry exactly one of: a sequence of keys, or a text paste. A key SHALL be either one of the named keys `up`, `down`, `left`, `right`, `escape`, `tab`, `back_tab`, `enter`, `space`, `backspace`, `ctrl_c`, or exactly one printable character typed as a keystroke. Named keys SHALL be encoded for the pane's current keyboard modes. A text paste SHALL be delivered literally, as a bracketed paste when the application enabled bracketed paste, and SHALL be followed by an Enter key only when the request asks for it. A request with an unknown key name, an empty key sequence, or empty text SHALL fail with `bad_request` without writing to the pane.
+An input request SHALL carry exactly one of: a sequence of keys, or a text paste. A key SHALL be either one of the named keys `up`, `down`, `left`, `right`, `escape`, `tab`, `back_tab`, `enter`, `space`, `backspace`, `ctrl_c`, `home`, `end`, `page_up`, `page_down`, `delete`, `f1` through `f12`, or exactly one printable character typed as a keystroke. A named key or a character MAY carry the modifier prefixes `ctrl+` and `alt+`, each at most once and in that order (for example `ctrl+r`, `alt+b`, `ctrl+left`, `ctrl+alt+x`). The pane SHALL receive the key with those modifiers held. Named keys SHALL be encoded for the pane's current keyboard modes. Keys in one request SHALL be delivered in request order. A text paste SHALL be delivered literally, as a bracketed paste when the application enabled bracketed paste, and SHALL be followed by an Enter key only when the request asks for it. A request with an unknown key name, an unknown or repeated modifier, a modifier with no key, an empty key sequence, or empty text SHALL fail with `bad_request` without writing to the pane.
 
 #### Scenario: Answer an approval menu by digit
 - **WHEN** a consumer sends the key `1` while the agent shows a numbered approval menu
@@ -102,6 +102,22 @@ An input request SHALL carry exactly one of: a sequence of keys, or a text paste
 #### Scenario: Reply with Enter
 - **WHEN** a consumer pastes multi-line text and asks for Enter
 - **THEN** the agent receives the text literally, followed by one Enter key
+
+#### Scenario: Ctrl combination
+- **WHEN** a consumer sends the key `ctrl+r`
+- **THEN** the agent receives Ctrl+R (byte 0x12)
+
+#### Scenario: Alt combination
+- **WHEN** a consumer sends the key `alt+b`
+- **THEN** the agent receives Escape followed by `b`
+
+#### Scenario: Navigation keys
+- **WHEN** a consumer sends `home`, `page_down`, and `f5` in one request
+- **THEN** the pane receives the Home, Page Down, and F5 encodings in that order
+
+#### Scenario: Malformed modifier
+- **WHEN** a consumer sends the key `ctrl+` or `shift+a`
+- **THEN** the daemon answers `bad_request` and writes nothing to the pane
 
 ### Requirement: Streams end with a reason
 A stream SHALL end with exactly one ended message, after which the daemon closes it and forwards no further output. The reason SHALL be `agent_exited` when the tracked agent's process exits, `pane_closed` when the pane no longer exists, `session_closed` when the pane's multiplexer session is destroyed or the connection is moved to another session, `multiplexer_stopped` when the multiplexer server goes away, or `identity_changed` when revalidation finds the pane no longer belongs to the tracked agent. After the agent exits, no output the pane produces later SHALL be forwarded.
