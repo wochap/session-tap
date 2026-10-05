@@ -2,6 +2,7 @@ package dev.sessiontap.android
 
 import android.app.Application
 import dev.sessiontap.android.data.HubRepository
+import dev.sessiontap.android.data.KeyLayoutStore
 import dev.sessiontap.android.data.SessionTapDb
 import dev.sessiontap.android.data.SettingsStore
 import dev.sessiontap.android.notify.Channels
@@ -17,6 +18,8 @@ class SessionTapApp : Application() {
         private set
     lateinit var settings: SettingsStore
         private set
+    lateinit var keyLayout: KeyLayoutStore
+        private set
     lateinit var notifier: NotificationPoster
         private set
     lateinit var repository: HubRepository
@@ -27,6 +30,7 @@ class SessionTapApp : Application() {
         Channels.create(this)
         db = SessionTapDb.open(this)
         settings = SettingsStore(this)
+        keyLayout = KeyLayoutStore(this)
         notifier = NotificationPoster(this)
         repository = HubRepository(db.hubs(), settings, notifier, scope)
     }

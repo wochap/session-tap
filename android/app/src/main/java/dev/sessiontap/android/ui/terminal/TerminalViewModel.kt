@@ -14,6 +14,7 @@ import dev.sessiontap.android.net.TerminalStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,8 +30,9 @@ data class PaneTick(val version: Long = 0, val scrolled: Long = 0)
 /**
  * One open terminal screen: opens the agent's stream on the hub's current
  * connection, feeds frames to the emulator, re-opens with a fresh snapshot
- * after a reconnect, and closes the stream on leave. Input is never queued or
- * replayed; a kept reply waits for the user to tap Send.
+ * after a reconnect, and closes the stream on leave. Input goes through one
+ * ordered queue; a failure drops what is still queued, and nothing is replayed.
+ * A kept reply waits for the user to tap Send.
  */
 class TerminalViewModel(
     private val key: AgentKey,
@@ -54,7 +56,14 @@ class TerminalViewModel(
     val error: StateFlow<String?> = _error
     private val _ctrlArmed = MutableStateFlow(false)
     val ctrlArmed: StateFlow<Boolean> = _ctrlArmed
+    private val _mods = MutableStateFlow(Modifiers())
+    val mods: StateFlow<Modifiers> = _mods
+    /** Label of the last modified key sent ("Ctrl+R"), shown briefly. */
+    private val _sentCombo = MutableStateFlow<String?>(null)
+    val sentCombo: StateFlow<String?> = _sentCombo
     val emulator = PaneEmulator()
+    private val queue = Channel<Queued>(Channel.UNLIMITED)
+    private var comboJob: Job? = null
 
     @Volatile private var stream: TerminalStream? = null
     private var client: TerminalHub? = null
@@ -64,6 +73,7 @@ class TerminalViewModel(
     fun start() {
         if (loop != null) return
         loop = scope.launch { run() }
+        scope.launch { drain() }
     }
 
     private fun dispatch(event: TerminalEvent) = _state.update { reduce(it, event) }
@@ -166,11 +176,45 @@ class TerminalViewModel(
     private val inputEnabled: Boolean
         get() = (_state.value.phase as? TerminalPhase.Live)?.input == InputMode.Enabled
 
-    /** Sends one named key (or a single character such as a quick-pick digit). */
-    fun key(name: String) {
+    /**
+     * Sends one named key or character with the active modifiers, plus [ctrl]/[alt]
+     * held on a hardware keyboard; latched modifiers are then cleared.
+     */
+    fun key(name: String, ctrl: Boolean = false, alt: Boolean = false) {
         if (name == TerminalKeys.CTRL_C) return ctrlC()
-        send(TerminalInput.Keys(listOf(name)))
+        if (!inputEnabled) return
+        val m = _mods.value
+        if (!m.any && !ctrl && !alt) return send(TerminalInput.Keys(listOf(name)))
+        val combo = TerminalKeys.withMods(name, m.ctrl.on || ctrl, m.alt.on || alt)
+        _mods.value = m.used()
+        send(TerminalInput.Keys(listOf(combo)))
+        _sentCombo.value = TerminalKeys.label(combo)
+        comboJob?.cancel()
+        comboJob = scope.launch {
+            delay(SENT_COMBO_MS)
+            _sentCombo.value = null
+        }
     }
+
+    /** Text the soft keyboard committed: each character is one keystroke, in order. */
+    fun type(text: String) {
+        text.codePoints().forEach { cp ->
+            key(
+                when (cp) {
+                    '\n'.code, '\r'.code -> TerminalKeys.ENTER
+                    '\t'.code -> TerminalKeys.TAB
+                    ' '.code -> TerminalKeys.SPACE
+                    else -> String(Character.toChars(cp))
+                },
+            )
+        }
+    }
+
+    /** A tap latches [mod] for the next key, or turns it off when already on. */
+    fun tapModifier(mod: ModKey) = _mods.update { it.set(mod, if (it[mod] == ModState.Off) ModState.Latched else ModState.Off) }
+
+    /** A long-press locks [mod] until it is tapped again. */
+    fun lockModifier(mod: ModKey) = _mods.update { it.set(mod, ModState.Locked) }
 
     /** First tap arms, a second tap within 2.5 s sends Ctrl+C. */
     fun ctrlC() {
@@ -207,17 +251,36 @@ class TerminalViewModel(
 
     private fun send(input: TerminalInput, onSent: () -> Unit = {}) {
         if (!inputEnabled) return
-        val s = stream
-        val h = client
-        scope.launch {
+        queue.trySend(Queued(input, onSent))
+    }
+
+    /** Sends queued input one request at a time, merging queued character keys. */
+    private suspend fun drain() {
+        var held: Queued? = null
+        while (true) {
+            var item = held ?: queue.receive()
+            held = null
+            while (item.chars) {
+                val more = queue.tryReceive().getOrNull() ?: break
+                if (!more.chars) {
+                    held = more
+                    break
+                }
+                item = item.merge(more)
+            }
             try {
+                val s = stream
+                val h = client
                 if (s == null || h == null) throw RpcException("offline", "hub is not connected")
-                h.sendInput(s, input)
+                h.sendInput(s, item.input)
                 _error.value = null
-                onSent()
+                item.onSent()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: RpcException) {
+                // Later keys must not run ahead of a failed one.
+                held = null
+                while (queue.tryReceive().isSuccess) Unit
                 dispatch(TerminalEvent.InputFailed(e.code))
                 _error.value = inputError(e)
             }
@@ -239,6 +302,7 @@ class TerminalViewModel(
 
     companion object {
         const val CTRL_C_CONFIRM_MS = 2_500L
+        const val SENT_COMBO_MS = 1_500L
 
         fun inputError(e: RpcException): String = when (e.code) {
             TerminalErrors.FORBIDDEN -> "This phone can no longer type into agents on this hub."
@@ -254,3 +318,38 @@ class TerminalViewModel(
 
 /** The connection can carry requests. */
 val ConnState.connected: Boolean get() = this is ConnState.Live || this is ConnState.NoAccess
+
+private class Queued(val input: TerminalInput, val onSent: () -> Unit) {
+    /** Plain character keys, which may share one request with neighbours. */
+    val chars: Boolean get() = input is TerminalInput.Keys && input.keys.all(TerminalKeys::isChar)
+
+    fun merge(other: Queued) = Queued(
+        TerminalInput.Keys((input as TerminalInput.Keys).keys + (other.input as TerminalInput.Keys).keys),
+    ) {
+        onSent()
+        other.onSent()
+    }
+}
+
+enum class ModKey { Ctrl, Alt }
+
+enum class ModState {
+    Off, Latched, Locked;
+
+    val on: Boolean get() = this != Off
+}
+
+/** Ctrl and Alt for the next key: latched for one key, locked until tapped again. */
+data class Modifiers(val ctrl: ModState = ModState.Off, val alt: ModState = ModState.Off) {
+    val any: Boolean get() = ctrl.on || alt.on
+
+    operator fun get(mod: ModKey): ModState = if (mod == ModKey.Ctrl) ctrl else alt
+
+    fun set(mod: ModKey, state: ModState) = if (mod == ModKey.Ctrl) copy(ctrl = state) else copy(alt = state)
+
+    /** After one key: latched modifiers clear, locked ones stay. */
+    fun used() = Modifiers(
+        ctrl = if (ctrl == ModState.Locked) ModState.Locked else ModState.Off,
+        alt = if (alt == ModState.Locked) ModState.Locked else ModState.Off,
+    )
+}

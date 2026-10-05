@@ -259,7 +259,7 @@ mod tests {
             &RelayRequest::Input {
                 req: 2,
                 stream: 7,
-                input: TerminalInput::Keys(vec![Key::Named(NamedKey::Enter), Key::Char('1')]),
+                input: TerminalInput::Keys(vec![Key::named(NamedKey::Enter), Key::char('1')]),
             },
             json!({"type": "input", "req": 2, "stream": 7, "input": {"keys": ["enter", "1"]}}),
         );

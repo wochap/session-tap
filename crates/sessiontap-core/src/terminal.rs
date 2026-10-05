@@ -119,6 +119,13 @@ pub enum NamedKey {
     Space,
     Backspace,
     CtrlC,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Delete,
+    /// Function key `F1`..=`F12`.
+    F(u8),
 }
 
 impl NamedKey {
@@ -134,10 +141,30 @@ impl NamedKey {
         Self::Space,
         Self::Backspace,
         Self::CtrlC,
+        Self::Home,
+        Self::End,
+        Self::PageUp,
+        Self::PageDown,
+        Self::Delete,
+        Self::F(1),
+        Self::F(2),
+        Self::F(3),
+        Self::F(4),
+        Self::F(5),
+        Self::F(6),
+        Self::F(7),
+        Self::F(8),
+        Self::F(9),
+        Self::F(10),
+        Self::F(11),
+        Self::F(12),
     ];
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
+        const F: [&str; 12] = [
+            "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+        ];
         match self {
             Self::Up => "up",
             Self::Down => "down",
@@ -150,37 +177,115 @@ impl NamedKey {
             Self::Space => "space",
             Self::Backspace => "backspace",
             Self::CtrlC => "ctrl_c",
+            Self::Home => "home",
+            Self::End => "end",
+            Self::PageUp => "page_up",
+            Self::PageDown => "page_down",
+            Self::Delete => "delete",
+            Self::F(n) => F[(n as usize).saturating_sub(1) % 12],
         }
     }
 }
 
-/// A named key or exactly one printable character typed as a keystroke.
+/// Modifiers held while a key is pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Mods {
+    pub ctrl: bool,
+    pub alt: bool,
+}
+
+/// The unmodified part of a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Key {
+pub enum KeyBase {
     Named(NamedKey),
     Char(char),
+}
+
+/// A named key or exactly one printable character typed as a keystroke,
+/// optionally with Ctrl and/or Alt held. Written as `[ctrl+][alt+]<base>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Key {
+    pub mods: Mods,
+    pub base: KeyBase,
+}
+
+impl Key {
+    #[must_use]
+    pub const fn named(key: NamedKey) -> Self {
+        Self {
+            mods: Mods {
+                ctrl: false,
+                alt: false,
+            },
+            base: KeyBase::Named(key),
+        }
+    }
+
+    #[must_use]
+    pub const fn char(c: char) -> Self {
+        Self {
+            mods: Mods {
+                ctrl: false,
+                alt: false,
+            },
+            base: KeyBase::Char(c),
+        }
+    }
+
+    #[must_use]
+    pub const fn with(self, mods: Mods) -> Self {
+        Self { mods, ..self }
+    }
+}
+
+fn parse_base(value: &str) -> Option<KeyBase> {
+    if let Some(named) = NamedKey::ALL.iter().find(|key| key.as_str() == value) {
+        return Some(KeyBase::Named(*named));
+    }
+    let mut chars = value.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) if !c.is_control() => Some(KeyBase::Char(c)),
+        _ => None,
+    }
 }
 
 impl std::str::FromStr for Key {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if let Some(named) = NamedKey::ALL.iter().find(|key| key.as_str() == value) {
-            return Ok(Self::Named(*named));
+        let unknown = || format!("unknown key '{value}'");
+        let mut mods = Mods::default();
+        let mut rest = value;
+        if let Some(base) = rest.strip_prefix("ctrl+").and_then(parse_nonempty) {
+            mods.ctrl = true;
+            rest = base;
         }
-        let mut chars = value.chars();
-        match (chars.next(), chars.next()) {
-            (Some(c), None) if !c.is_control() => Ok(Self::Char(c)),
-            _ => Err(format!("unknown key '{value}'")),
+        if let Some(base) = rest.strip_prefix("alt+").and_then(parse_nonempty) {
+            mods.alt = true;
+            rest = base;
         }
+        let base = parse_base(rest).ok_or_else(unknown)?;
+        // `ctrl+ctrl+x`, `alt+ctrl+x`, `shift+a`: whatever remains must be a plain key.
+        Ok(Self { mods, base })
     }
+}
+
+/// The text after a modifier prefix, when there is one.
+fn parse_nonempty(rest: &str) -> Option<&str> {
+    (!rest.is_empty()).then_some(rest)
 }
 
 impl std::fmt::Display for Key {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Named(key) => f.write_str(key.as_str()),
-            Self::Char(c) => write!(f, "{c}"),
+        if self.mods.ctrl {
+            f.write_str("ctrl+")?;
+        }
+        if self.mods.alt {
+            f.write_str("alt+")?;
+        }
+        match self.base {
+            KeyBase::Named(key) => f.write_str(key.as_str()),
+            KeyBase::Char(c) => write!(f, "{c}"),
         }
     }
 }
@@ -359,12 +464,49 @@ mod tests {
     #[test]
     fn keys_round_trip_by_name_and_character() {
         for key in NamedKey::ALL {
-            round_trip(&Key::Named(*key), json!(key.as_str()));
+            round_trip(&Key::named(*key), json!(key.as_str()));
         }
-        round_trip(&Key::Char('1'), json!("1"));
-        round_trip(&Key::Char('E'), json!("E"));
-        round_trip(&Key::Char('é'), json!("é"));
-        for bad in ["pageup", "", "ab", "\u{7}", "Up"] {
+        let ctrl = Mods {
+            ctrl: true,
+            alt: false,
+        };
+        let alt = Mods {
+            ctrl: false,
+            alt: true,
+        };
+        let both = Mods {
+            ctrl: true,
+            alt: true,
+        };
+        round_trip(&Key::char('r').with(ctrl), json!("ctrl+r"));
+        round_trip(&Key::char('b').with(alt), json!("alt+b"));
+        round_trip(&Key::char('x').with(both), json!("ctrl+alt+x"));
+        round_trip(&Key::named(NamedKey::Left).with(ctrl), json!("ctrl+left"));
+        round_trip(&Key::named(NamedKey::F(12)).with(alt), json!("alt+f12"));
+        round_trip(&Key::char('+'), json!("+"));
+        round_trip(&Key::char('+').with(ctrl), json!("ctrl++"));
+        round_trip(&Key::named(NamedKey::PageDown), json!("page_down"));
+        round_trip(&Key::char('1'), json!("1"));
+        round_trip(&Key::char('E'), json!("E"));
+        round_trip(&Key::char('é'), json!("é"));
+        for bad in [
+            "pageup",
+            "",
+            "ab",
+            "\u{7}",
+            "Up",
+            "f13",
+            "f0",
+            "ctrl+",
+            "alt+",
+            "ctrl+alt+",
+            "shift+a",
+            "ctrl+ctrl+a",
+            "alt+alt+a",
+            "alt+ctrl+a",
+            "meta+a",
+            "ctrl+nope",
+        ] {
             assert!(serde_json::from_value::<Key>(json!(bad)).is_err(), "{bad}");
         }
     }
@@ -372,7 +514,7 @@ mod tests {
     #[test]
     fn input_rejects_empty_and_unknown() {
         round_trip(
-            &TerminalInput::Keys(vec![Key::Named(NamedKey::Down), Key::Char('2')]),
+            &TerminalInput::Keys(vec![Key::named(NamedKey::Down), Key::char('2')]),
             json!({"keys": ["down", "2"]}),
         );
         round_trip(

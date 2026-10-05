@@ -12,6 +12,7 @@ import dev.sessiontap.android.SessionTapApp
 import dev.sessiontap.android.data.AgentItem
 import dev.sessiontap.android.data.AgentKey
 import dev.sessiontap.android.data.HubEntity
+import dev.sessiontap.android.domain.KeyLayout
 import dev.sessiontap.android.domain.TerminalAccess
 import dev.sessiontap.android.domain.blockCause
 import dev.sessiontap.android.domain.parseInstant
@@ -44,6 +45,7 @@ fun TerminalRoute(
     hub: HubEntity?,
     conn: ConnState?,
     onBack: () -> Unit,
+    onEditKeys: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val context = LocalContext.current
@@ -63,6 +65,9 @@ fun TerminalRoute(
     val reply by vm.reply.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val armed by vm.ctrlArmed.collectAsStateWithLifecycle()
+    val mods by vm.mods.collectAsStateWithLifecycle()
+    val sentCombo by vm.sentCombo.collectAsStateWithLifecycle()
+    val layout by app.keyLayout.layout.collectAsStateWithLifecycle(KeyLayout.DEFAULT)
     val hubName = hub?.name ?: "hub"
     val access = TerminalAccess.of(hub?.canWatch == true, state.control, item?.view)
     val cause = item?.takeIf { it.effective == Status.Blocked }?.let { blockCause(it.view) }
@@ -84,6 +89,9 @@ fun TerminalRoute(
         rows = vm.emulator.rows,
         startedAt = item?.view?.createdAt?.let(::parseInstant),
         unreachableDetail = (conn as? ConnState.Reconnecting)?.lastError,
+        layout = layout,
+        mods = mods,
+        sentCombo = sentCombo,
     )
     TerminalScreen(
         ui = ui,
@@ -101,6 +109,11 @@ fun TerminalRoute(
             onSend = vm::sendReply,
             onRetry = { repo.terminalHub(key.hubId)?.kick() ?: repo.reconnectAll() },
             onCopyScreen = { copyText(context, vm.emulator.screenText()) },
+            onType = vm::type,
+            onHardKey = vm::key,
+            onModTap = vm::tapModifier,
+            onModLock = vm::lockModifier,
+            onEditKeys = onEditKeys,
         ),
         contentPadding = contentPadding,
     )

@@ -76,6 +76,7 @@ import dev.sessiontap.android.ui.pairing.ScanScreen
 import dev.sessiontap.android.ui.pairing.openTailscale
 import dev.sessiontap.android.ui.sessions.isAttention
 import dev.sessiontap.android.ui.terminal.TerminalRoute
+import dev.sessiontap.android.ui.keys.KeyEditorRoute
 import dev.sessiontap.android.ui.theme.Mono
 import dev.sessiontap.android.ui.theme.St
 import kotlinx.coroutines.delay
@@ -94,6 +95,7 @@ object Routes {
     const val ALERTS = "alerts"
     const val DETAIL = "detail/{hub}/{source}/{inv}"
     const val TERMINAL = "terminal/{hub}/{source}/{inv}"
+    const val KEYS = "keys"
 
     fun detail(key: AgentKey) = "detail/${enc(key.hubId)}/${enc(key.sourceId)}/${enc(key.invocationId)}"
     fun terminal(key: AgentKey) = "terminal/${enc(key.hubId)}/${enc(key.sourceId)}/${enc(key.invocationId)}"
@@ -323,8 +325,12 @@ fun SessionTapRoot(app: SessionTapApp, pairVm: PairViewModel, nav: NavHostContro
                     hub = hubs.firstOrNull { it.hubId == key.hubId },
                     conn = conn[key.hubId],
                     onBack = { if (!nav.popBackStack()) nav.navigate(Routes.detail(key)) },
+                    onEditKeys = { nav.navigate(Routes.KEYS) { launchSingleTop = true } },
                     contentPadding = pad,
                 )
+            }
+            composable(Routes.KEYS) {
+                KeyEditorRoute(app.keyLayout, onBack = { nav.popBackStack() }, contentPadding = pad)
             }
             composable(Routes.HUBS) {
                 HubsScreen(

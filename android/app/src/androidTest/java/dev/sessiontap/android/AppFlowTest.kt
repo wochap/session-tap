@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
@@ -456,6 +458,29 @@ class AppFlowTest {
         }
     }
 
+    private fun textOf(tag: String): String =
+        compose.onNodeWithTag(tag).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text }
+
+    /** Turns direct mode back on; reading the screen through the menu hides the keyboard, which leaves it. */
+    private fun directMode() {
+        if (compose.onAllNodesWithTag("direct-strip").fetchSemanticsNodes().isEmpty()) compose.onNodeWithTag("keyboard-toggle").performClick()
+        compose.waitTag("direct-input")
+    }
+
+    /** The pane's visible text, through the top bar's "Copy visible screen". */
+    private fun visibleScreen(): String {
+        compose.onNodeWithTag("terminal-menu").performClick()
+        compose.onNodeWithTag("menu:copy").performClick()
+        compose.waitForIdle()
+        var text = ""
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val clip = instrumentation.targetContext.getSystemService(android.content.ClipboardManager::class.java).primaryClip
+            text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString().orEmpty()
+        }
+        return text
+    }
+
     // Terminal: pair with control, open the fixture agent's terminal, answer its approval, see it end.
     @Test
     fun a13_terminal() {
@@ -480,14 +505,67 @@ class AppFlowTest {
             compose.onNodeWithTag("terminal-status").assertTextContainsAny("waiting for you")
             screenshot("9a-terminal-approval")
 
-            compose.onNodeWithTag("digit:1").performClick()
-            compose.waitUntil(30_000) {
-                val status = compose.onNodeWithTag("terminal-status").fetchSemanticsNode()
-                    .config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text }
-                status != "waiting for you"
+            // The emulator has a hardware keyboard; force the soft keyboard so direct mode keeps it up.
+            val directIme = shell("settings get secure show_ime_with_hard_keyboard").trim()
+            shell("settings put secure show_ime_with_hard_keyboard 1")
+            try {
+                // Direct mode: keystrokes go straight to the pane. Answer the menu with `2`.
+                compose.onNodeWithTag("keyboard-toggle").performClick()
+                compose.waitTag("direct-strip")
+                compose.onAllNodesWithTag("reply").assertCountEquals(0)
+                compose.onNodeWithTag("direct-input").performTextInput("2")
+                compose.waitUntil(30_000) {
+                    val status = compose.onNodeWithTag("terminal-status").fetchSemanticsNode()
+                        .config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString { it.text }
+                    status != "waiting for you"
+                }
+                compose.onNodeWithTag("digit:1").assertDoesNotExist()
+                compose.waitUntil(15_000) { "You chose option 2" in visibleScreen() }
+                screenshot("9b-terminal-answered")
+
+                // The fake agent reads a line: type it key by key, then Enter from the key bar.
+                directMode()
+                compose.onNodeWithTag("direct-input").performTextInput("hi")
+                compose.onNodeWithTag("key:enter").performClick()
+                compose.waitUntil(15_000) { "Agent got: hi" in visibleScreen() }
+
+                // A latched Ctrl applies to the next typed key and the strip names the combination.
+                directMode()
+                compose.onNodeWithTag("key:mod:ctrl").performClick()
+                compose.onNodeWithTag("mod-chip").assertTextContains("Ctrl · next")
+                compose.onNodeWithTag("direct-input").performTextInput("x")
+                compose.waitUntil(5_000) { textOf("direct-sub") == "Sent Ctrl+X" }
+                compose.onAllNodesWithTag("mod-chip").assertCountEquals(0)
+                screenshot("9b1-terminal-direct")
+                compose.onNodeWithTag("keyboard-toggle").performClick()
+                compose.waitTag("reply")
+
+            } finally {
+                shell("settings put secure show_ime_with_hard_keyboard ${directIme.toIntOrNull() ?: 0}")
             }
-            compose.onNodeWithTag("digit:1").assertDoesNotExist()
-            screenshot("9b-terminal-answered")
+
+            // Edit keys: a third row with `$` shows on the terminal key bar.
+            compose.onNodeWithTag("terminal-menu").performClick()
+            compose.onNodeWithTag("menu:edit-keys").performClick()
+            compose.waitTag("key-editor")
+            compose.onNodeWithTag("add-row").performClick()
+            compose.onNodeWithTag("add-key").performClick()
+            compose.onNodeWithTag("quick:$").performScrollTo().performClick()
+            screenshot("9d-key-editor")
+            compose.onNodeWithTag("keys-back").performClick()
+            compose.waitTag("terminal")
+            compose.waitTag("key:char:$")
+            val top = { tag: String -> compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.top }
+            assertTrue("three rows", top("key:char:$") < top("key:escape") && top("key:escape") < top("key:mod:ctrl"))
+            screenshot("9d2-terminal-three-rows")
+            compose.onNodeWithTag("terminal-menu").performClick()
+            compose.onNodeWithTag("menu:edit-keys").performClick()
+            compose.waitTag("key-editor")
+            compose.onNodeWithTag("reset-keys").performClick()
+            compose.onNodeWithTag("confirm-reset").performClick()
+            compose.onNodeWithTag("keys-back").performClick()
+            compose.waitTag("terminal")
+            compose.waitGone("key:char:$")
 
             // The emulator has a hardware keyboard; force the soft keyboard so the layout swap happens.
             val imeSetting = shell("settings get secure show_ime_with_hard_keyboard").trim()

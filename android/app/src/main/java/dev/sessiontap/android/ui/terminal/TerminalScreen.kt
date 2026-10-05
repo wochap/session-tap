@@ -33,14 +33,20 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +62,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.semantics.insertTextAtCursor
+import androidx.compose.ui.semantics.requestFocus
+import androidx.compose.ui.semantics.setText
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -69,6 +80,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.adamglin.PhosphorIcons
 import com.adamglin.phosphoricons.Bold
+import com.adamglin.phosphoricons.Fill
+import com.adamglin.phosphoricons.bold.ArrowLineDown
+import com.adamglin.phosphoricons.bold.DotsThreeVertical
+import com.adamglin.phosphoricons.fill.Keyboard as KeyboardFill
+import com.adamglin.phosphoricons.fill.LockSimple as LockSimpleFill
+import com.adamglin.phosphoricons.regular.ArrowsOutLineHorizontal
+import com.adamglin.phosphoricons.regular.Keyboard
 import com.adamglin.phosphoricons.Regular
 import com.adamglin.phosphoricons.bold.ArrowDown as ArrowDownBold
 import com.adamglin.phosphoricons.bold.ArrowLeft as ArrowLeftBold
@@ -93,6 +111,8 @@ import com.adamglin.phosphoricons.regular.Power
 import com.adamglin.phosphoricons.regular.ShieldWarning
 import com.adamglin.phosphoricons.regular.TerminalWindow
 import com.adamglin.phosphoricons.regular.XSquare
+import dev.sessiontap.android.domain.KeyLayout
+import dev.sessiontap.android.domain.KeySpec
 import dev.sessiontap.android.net.InputUnavailable
 import dev.sessiontap.android.net.ReasonKind
 import dev.sessiontap.android.net.TerminalKeys
@@ -102,6 +122,7 @@ import dev.sessiontap.android.ui.components.SecondaryButton
 import dev.sessiontap.android.ui.theme.Mono
 import dev.sessiontap.android.ui.theme.St
 import java.time.Instant
+import kotlinx.coroutines.delay
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -133,6 +154,10 @@ data class TerminalUi(
     /** When the agent started, for the end card's duration. */
     val startedAt: Instant?,
     val unreachableDetail: String? = null,
+    val layout: KeyLayout = KeyLayout.DEFAULT,
+    val mods: Modifiers = Modifiers(),
+    /** "Ctrl+R" right after a modified key was sent. */
+    val sentCombo: String? = null,
 )
 
 /** Callbacks from the screen; all default to no-ops for previews and tests. */
@@ -144,6 +169,13 @@ data class TerminalActions(
     val onSend: (enter: Boolean) -> Unit = {},
     val onRetry: () -> Unit = {},
     val onCopyScreen: () -> Unit = {},
+    /** Text the soft keyboard committed in direct mode. */
+    val onType: (String) -> Unit = {},
+    /** A key from a hardware keyboard or the IME, with Ctrl/Alt held. */
+    val onHardKey: (key: String, ctrl: Boolean, alt: Boolean) -> Unit = { _, _, _ -> },
+    val onModTap: (ModKey) -> Unit = {},
+    val onModLock: (ModKey) -> Unit = {},
+    val onEditKeys: () -> Unit = {},
 )
 
 private val CLOCK = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
@@ -177,9 +209,11 @@ fun TerminalScreen(
     val sending = actions.copy(
         onSend = { enter -> view.jumpToLive(); actions.onSend(enter) },
         onKey = { key -> view.jumpToLive(); actions.onKey(key) },
+        onType = { text -> view.jumpToLive(); actions.onType(text) },
+        onHardKey = { key, ctrl, alt -> view.jumpToLive(); actions.onHardKey(key, ctrl, alt) },
     )
     Column(Modifier.fillMaxSize().background(c.bg).padding(contentPadding).consumeWindowInsets(contentPadding).imePadding().testTag("terminal")) {
-        TopBar(ui, phase, actions.onBack)
+        TopBar(ui, phase, view, actions)
         val surface = Color(TerminalPalette.BACKGROUND)
         Box(Modifier.weight(1f).fillMaxWidth().background(surface).semantics { this[SurfaceColor] = surface }.testTag("terminal-surface")) {
             when {
@@ -197,7 +231,8 @@ fun TerminalScreen(
 }
 
 @Composable
-private fun TopBar(ui: TerminalUi, phase: TerminalPhase, onBack: () -> Unit) {
+private fun TopBar(ui: TerminalUi, phase: TerminalPhase, view: PaneViewState, actions: TerminalActions) {
+    val onBack = actions.onBack
     val c = St.colors
     val ended = phase is TerminalPhase.Ended
     val word = if (ended) AgentWord.Exited else ui.word
@@ -231,8 +266,35 @@ private fun TopBar(ui: TerminalUi, phase: TerminalPhase, onBack: () -> Unit) {
                 }
             }
             ConnChip(phase)
+            TopMenu(ui.state.control, view, actions)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+    }
+}
+
+@Composable
+private fun TopMenu(control: Boolean, view: PaneViewState, actions: TerminalActions) {
+    val c = St.colors
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(40.dp).testTag("terminal-menu")) {
+            Icon(PhosphorIcons.Bold.DotsThreeVertical, "More", tint = c.text, modifier = Modifier.size(20.dp))
+        }
+        DropdownMenu(open, onDismissRequest = { open = false }, modifier = Modifier.widthIn(min = 212.dp).background(c.surf2)) {
+            @Composable
+            fun item(label: String, icon: ImageVector, tag: String, onClick: () -> Unit) = DropdownMenuItem(
+                text = { Text(label, fontSize = 14.sp, color = c.text) },
+                leadingIcon = { Icon(icon, null, tint = c.mute, modifier = Modifier.size(18.dp)) },
+                onClick = {
+                    open = false
+                    onClick()
+                },
+                modifier = Modifier.height(48.dp).testTag(tag),
+            )
+            item(if (view.fit) "Readable size" else "Fit to width", PhosphorIcons.Regular.ArrowsOutLineHorizontal, "menu:fit") { view.toggleFit() }
+            item("Copy visible screen", PhosphorIcons.Regular.Copy, "menu:copy", actions.onCopyScreen)
+            if (control) item("Edit keys", PhosphorIcons.Regular.Keyboard, "menu:edit-keys", actions.onEditKeys)
+        }
     }
 }
 
@@ -360,10 +422,12 @@ private fun ErrorPane(kind: ErrorKind, ui: TerminalUi, actions: TerminalActions)
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Controls(ui: TerminalUi, actions: TerminalActions, ime: Boolean, landscape: Boolean) {
     val c = St.colors
     val phase = ui.state.phase
+    var direct by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(c.surf).semantics { this[SurfaceColor] = c.surf }.testTag("controls")) {
         CompositionLocalProvider(LocalKey provides actions.onKey) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
@@ -373,21 +437,121 @@ private fun Controls(ui: TerminalUi, actions: TerminalActions, ime: Boolean, lan
                 else -> {
                     val live = phase as? TerminalPhase.Live
                     val enabled = live?.input == InputMode.Enabled
+                    LaunchedEffect(enabled) { if (!enabled) direct = false }
+                    // Hiding the keyboard (back gesture) leaves direct mode; a hardware keyboard never shows it.
+                    var imeSeen by remember { mutableStateOf(false) }
+                    LaunchedEffect(direct, ime) {
+                        when {
+                            !direct -> imeSeen = false
+                            ime -> {
+                                // Only a keyboard that stayed up counts; a hardware keyboard may flash it.
+                                delay(IME_SETTLE_MS)
+                                imeSeen = true
+                            }
+                            imeSeen -> direct = false
+                        }
+                    }
                     Banner(ui, live)
                     val note = if (phase == TerminalPhase.Reconnecting) "Reconnecting — your reply stays here and sends only when you tap Send" else null
+                    val gridActions = KeyGridActions(
+                        onKey = { key ->
+                            when (key) {
+                                is KeySpec.Named -> actions.onKey(key.key)
+                                is KeySpec.Char -> actions.onKey(key.char)
+                                KeySpec.CtrlC -> actions.onKey(TerminalKeys.CTRL_C)
+                                KeySpec.Paste -> actions.onPaste()
+                                KeySpec.Ctrl, KeySpec.Alt -> {}
+                            }
+                        },
+                        onModTap = actions.onModTap,
+                        onModLock = actions.onModLock,
+                        onEditKeys = actions.onEditKeys,
+                    )
+                    val grid = @Composable { m: Modifier -> KeyGrid(ui.layout, enabled, ui.mods, ui.ctrlArmed, gridActions, m) }
+                    val strip = @Composable { m: Modifier -> DirectStrip(ui, actions, onLeave = { direct = false }, m) }
+                    val toggle = { direct = true }
                     if (landscape) {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            KeyBar(enabled, ui.ctrlArmed, actions, Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 6.dp))
-                            ReplyRow(ui, enabled, note, actions, ime, Modifier.width(360.dp).padding(top = 6.dp, bottom = 6.dp, end = 8.dp))
+                            grid(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 6.dp))
+                            if (direct) {
+                                strip(Modifier.width(330.dp).padding(top = 6.dp, bottom = 6.dp, end = 8.dp))
+                            } else {
+                                ReplyRow(ui, enabled, note, actions, ime, toggle, Modifier.width(360.dp).padding(top = 6.dp, bottom = 6.dp, end = 8.dp))
+                            }
                         }
+                    } else if (direct) {
+                        strip(Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp))
+                        grid(Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 6.dp))
                     } else {
                         // One ReplyRow call site keeps the field's focus while the key bar swaps sides around the keyboard.
-                        if (!ime) KeyBar(enabled, ui.ctrlArmed, actions, Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 6.dp))
-                        ReplyRow(ui, enabled, note, actions, ime, if (ime) Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp) else Modifier.padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 8.dp))
-                        if (ime) KeyBar(enabled, ui.ctrlArmed, actions, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp))
+                        if (!ime) grid(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp))
+                        ReplyRow(ui, enabled, note, actions, ime, toggle, if (ime) Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp) else Modifier.padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 8.dp))
+                        if (ime) grid(Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 6.dp))
                     }
                     ui.error?.let { Text(it, fontSize = 12.sp, color = c.block, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).testTag("input-error")) }
                 }
+            }
+        }
+    }
+}
+
+private const val IME_SETTLE_MS = 500L
+
+/** Direct mode: the soft keyboard types straight into the pane; replaces the reply field. */
+@Composable
+private fun DirectStrip(ui: TerminalUi, actions: TerminalActions, onLeave: () -> Unit, modifier: Modifier) {
+    val c = St.colors
+    val context = LocalContext.current
+    val input = remember { DirectInputView(context) }
+    input.onKey = actions.onHardKey
+    input.onText = actions.onType
+    LaunchedEffect(input) { input.post { input.showKeyboard() } }
+    DisposableEffect(input) { onDispose { input.hideKeyboard() } }
+    val m = ui.mods
+    val locked = when {
+        m.ctrl == ModState.Locked -> "Ctrl"
+        m.alt == ModState.Locked -> "Alt"
+        else -> null
+    }
+    val sub = when {
+        ui.sentCombo != null -> "Sent ${ui.sentCombo}"
+        locked != null -> "Every key gets $locked until you tap it again"
+        m.any -> "Applies to the next key, then releases"
+        else -> "Every key goes straight to the pane"
+    }
+    Row(modifier.fillMaxWidth().testTag("direct-strip"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(c.accTint).border(1.5.dp, c.acc, CircleShape)
+                .clickable(role = Role.Button, onClickLabel = "Leave direct keyboard") { onLeave() }.testTag("keyboard-toggle"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(PhosphorIcons.Fill.KeyboardFill, "Direct keyboard on", tint = c.acc, modifier = Modifier.size(20.dp))
+            AndroidView(
+                factory = { input },
+                modifier = Modifier.size(1.dp).alpha(0f).semantics {
+                    setText { actions.onType(it.text); true }
+                    insertTextAtCursor { actions.onType(it.text); true }
+                    requestFocus { input.requestFocus() }
+                }.testTag("direct-input"),
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Box(Modifier.size(13.dp).background(c.accTint, CircleShape), contentAlignment = Alignment.Center) { Box(Modifier.size(7.dp).background(c.acc, CircleShape)) }
+                Text("Typing to agent", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+            Text(sub, fontSize = 12.sp, color = c.mute, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("direct-sub"))
+        }
+        if (m.any) {
+            val label = listOfNotNull("Ctrl".takeIf { m.ctrl.on }, "Alt".takeIf { m.alt.on }).joinToString("+") + if (locked != null) " locked" else " · next"
+            val shape = RoundedCornerShape(14.dp)
+            Row(
+                Modifier.height(28.dp).clip(shape).background(c.accTint).border(1.dp, c.acc, shape).padding(horizontal = 10.dp).semantics(mergeDescendants = true) {}.testTag("mod-chip"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(if (locked != null) PhosphorIcons.Fill.LockSimpleFill else PhosphorIcons.Bold.ArrowLineDown, null, tint = c.accInk, modifier = Modifier.size(11.dp))
+                Text(label, fontFamily = Mono, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = c.accInk)
             }
         }
     }
@@ -470,68 +634,9 @@ private fun CalmBanner(icon: ImageVector, title: String, sub: String, tag: Strin
     }
 }
 
-private data class KeyDef(val id: String, val label: String, val icon: ImageVector?, val width: Dp, val arrow: Boolean = false)
-
-private val KEYS = listOf(
-    KeyDef(TerminalKeys.ESCAPE, "Esc", null, 44.dp),
-    KeyDef(TerminalKeys.TAB, "Tab", null, 44.dp),
-    KeyDef(TerminalKeys.BACK_TAB, "⇧Tab", null, 54.dp),
-    KeyDef(TerminalKeys.UP, "", PhosphorIcons.Bold.ArrowUpBold, 50.dp, arrow = true),
-    KeyDef(TerminalKeys.DOWN, "", PhosphorIcons.Bold.ArrowDownBold, 50.dp, arrow = true),
-    KeyDef(TerminalKeys.LEFT, "", PhosphorIcons.Bold.ArrowLeftBold, 50.dp, arrow = true),
-    KeyDef(TerminalKeys.RIGHT, "", PhosphorIcons.Bold.ArrowRightBold, 50.dp, arrow = true),
-    KeyDef(TerminalKeys.ENTER, "Enter", PhosphorIcons.Regular.ArrowElbowDownLeft, 76.dp),
-    KeyDef(TerminalKeys.SPACE, "Space", null, 64.dp),
-    KeyDef(TerminalKeys.BACKSPACE, "", PhosphorIcons.Regular.Backspace, 50.dp),
-    KeyDef(TerminalKeys.CTRL_C, "Ctrl+C", null, 68.dp),
-    KeyDef(PASTE, "Paste", PhosphorIcons.Regular.ClipboardText, 76.dp),
-)
-
-/** Key-bar id of the Paste key; it never reaches the agent. */
-const val PASTE = "paste"
-
-private val KEY_NAMES = mapOf(
-    TerminalKeys.ESCAPE to "Esc", TerminalKeys.TAB to "Tab", TerminalKeys.BACK_TAB to "Shift+Tab",
-    TerminalKeys.UP to "Up", TerminalKeys.DOWN to "Down", TerminalKeys.LEFT to "Left", TerminalKeys.RIGHT to "Right",
-    TerminalKeys.BACKSPACE to "Backspace",
-)
-
-@Composable
-private fun KeyBar(enabled: Boolean, ctrlArmed: Boolean, actions: TerminalActions, modifier: Modifier) {
-    val c = St.colors
-    val raised = androidx.compose.ui.graphics.lerp(c.surf2, c.text, 0.18f)
-    Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("key-bar"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        KEYS.forEach { k ->
-            val armed = k.id == TerminalKeys.CTRL_C && ctrlArmed
-            val shape = RoundedCornerShape(10.dp)
-            val bg = when {
-                armed -> c.blockTint
-                k.arrow -> raised
-                else -> c.surf2
-            }
-            val color = if (k.id == TerminalKeys.CTRL_C) c.block else c.text
-            Row(
-                Modifier.height(44.dp).defaultMinSize(minWidth = if (armed) 108.dp else k.width).clip(shape).background(bg)
-                    .border(1.dp, if (armed) c.block else c.line, shape)
-                    .alpha(if (enabled) 1f else 0.38f)
-                    .clickable(enabled = enabled, role = Role.Button) { if (k.id == PASTE) actions.onPaste() else actions.onKey(k.id) }
-                    .padding(horizontal = 10.dp)
-                    .testTag("key:${k.id}"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-            ) {
-                val icon = if (armed) PhosphorIcons.Bold.Warning else k.icon
-                val label = if (armed) "Tap again" else k.label
-                if (icon != null) Icon(icon, KEY_NAMES[k.id].takeIf { label.isEmpty() }, tint = color, modifier = Modifier.size(17.dp))
-                if (label.isNotEmpty()) Text(label, fontFamily = Mono, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = color)
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ReplyRow(ui: TerminalUi, enabled: Boolean, note: String?, actions: TerminalActions, focused: Boolean, modifier: Modifier) {
+private fun ReplyRow(ui: TerminalUi, enabled: Boolean, note: String?, actions: TerminalActions, focused: Boolean, onDirect: () -> Unit, modifier: Modifier) {
     val c = St.colors
     val haptic = LocalHapticFeedback.current
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -542,6 +647,11 @@ private fun ReplyRow(ui: TerminalUi, enabled: Boolean, note: String?, actions: T
             }
         }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).border(1.dp, c.line, CircleShape).alpha(if (enabled) 1f else 0.45f)
+                    .clickable(enabled = enabled, role = Role.Button, onClickLabel = "Type directly to the agent", onClick = onDirect).testTag("keyboard-toggle"),
+                contentAlignment = Alignment.Center,
+            ) { Icon(PhosphorIcons.Regular.Keyboard, "Direct keyboard", tint = c.text, modifier = Modifier.size(20.dp)) }
             val shape = RoundedCornerShape(22.dp)
             Box(
                 Modifier.weight(1f).clip(shape).background(c.surf2).border(if (focused) 1.5.dp else 1.dp, if (focused) c.acc else c.line, shape)

@@ -100,7 +100,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
     }
 }
 
-const TERMINAL_USAGE: &str = "usage: sessiontap terminal watch <id> | terminal send <id> (--key <key>)... | --text <text> [--enter]";
+const TERMINAL_USAGE: &str = "usage: sessiontap terminal watch <id> | terminal send <id> (--key <key>)... | --text <text> [--enter]\n  <key>: [ctrl+][alt+](up|down|left|right|escape|tab|back_tab|enter|space|backspace|ctrl_c|home|end|page_up|page_down|delete|f1..f12|<char>)";
 
 fn parse_terminal(mut args: impl Iterator<Item = String>) -> Result<Cli> {
     let command = args.next();
@@ -981,8 +981,8 @@ mod tests {
             Cli::TerminalSend {
                 invocation: "7f3c".into(),
                 input: TerminalInput::Keys(vec![
-                    Key::Named(sessiontap_core::terminal::NamedKey::Down),
-                    Key::Char('1'),
+                    Key::named(sessiontap_core::terminal::NamedKey::Down),
+                    Key::char('1'),
                 ]),
             }
         );

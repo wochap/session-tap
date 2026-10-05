@@ -235,6 +235,54 @@ object TerminalKeys {
     const val SPACE = "space"
     const val BACKSPACE = "backspace"
     const val CTRL_C = "ctrl_c"
+    const val HOME = "home"
+    const val END = "end"
+    const val PAGE_UP = "page_up"
+    const val PAGE_DOWN = "page_down"
+    const val DELETE = "delete"
+    val FUNCTION = (1..12).map { "f$it" }
+
+    /** Every named key the hub accepts, in picker order. */
+    val NAMED = listOf(
+        ESCAPE, TAB, BACK_TAB, ENTER, SPACE, BACKSPACE, DELETE,
+        UP, DOWN, LEFT, RIGHT, HOME, END, PAGE_UP, PAGE_DOWN,
+    ) + FUNCTION
+
+    /** [key] with the `ctrl+`/`alt+` prefixes the hub expects. */
+    fun withMods(key: String, ctrl: Boolean, alt: Boolean): String =
+        (if (ctrl) "ctrl+" else "") + (if (alt) "alt+" else "") + key
+
+    /** Short human label: "Ctrl+R", "Alt+Left", "PgUp". */
+    fun label(key: String): String {
+        var rest = key
+        val parts = mutableListOf<String>()
+        if (rest.length > 5 && rest.startsWith("ctrl+")) { parts += "Ctrl"; rest = rest.removePrefix("ctrl+") }
+        if (rest.length > 4 && rest.startsWith("alt+")) { parts += "Alt"; rest = rest.removePrefix("alt+") }
+        parts += when (rest) {
+            ESCAPE -> "Esc"
+            TAB -> "Tab"
+            BACK_TAB -> "Shift+Tab"
+            ENTER -> "Enter"
+            SPACE -> "Space"
+            BACKSPACE -> "Backspace"
+            DELETE -> "Del"
+            UP -> "Up"
+            DOWN -> "Down"
+            LEFT -> "Left"
+            RIGHT -> "Right"
+            HOME -> "Home"
+            END -> "End"
+            PAGE_UP -> "PgUp"
+            PAGE_DOWN -> "PgDn"
+            CTRL_C -> "Ctrl+C"
+            in FUNCTION -> rest.uppercase()
+            else -> if (parts.isNotEmpty()) rest.uppercase() else rest
+        }
+        return parts.joinToString("+")
+    }
+
+    /** A single printable character, sent as a keystroke. */
+    fun isChar(key: String): Boolean = key.codePointCount(0, key.length) == 1 && !Character.isISOControl(key.codePointAt(0))
 }
 
 @Serializable

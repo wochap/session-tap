@@ -761,7 +761,7 @@ mod tests {
             serde_json::json!({"type": "ended", "reason": "source_unavailable"})
         );
         let error = relay
-            .input(1, stream, TerminalInput::Keys(vec![Key::Char('1')]))
+            .input(1, stream, TerminalInput::Keys(vec![Key::char('1')]))
             .err()
             .unwrap();
         assert_eq!(error.code, error_code::TERMINAL_ENDED);
@@ -778,7 +778,7 @@ mod tests {
         let stream = opened(&relay, channel, &phone).await;
         requests(&mut source);
         let error = relay
-            .input(2, stream, TerminalInput::Keys(vec![Key::Char('1')]))
+            .input(2, stream, TerminalInput::Keys(vec![Key::char('1')]))
             .err()
             .unwrap();
         assert_eq!(error.code, "forbidden");
@@ -821,7 +821,7 @@ mod tests {
         );
         assert_eq!(relay.stream_count(), 1);
         relay
-            .input(2, theirs, TerminalInput::Keys(vec![Key::Char('1')]))
+            .input(2, theirs, TerminalInput::Keys(vec![Key::char('1')]))
             .unwrap();
     }
 

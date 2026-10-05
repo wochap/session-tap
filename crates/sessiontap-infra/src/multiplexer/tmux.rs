@@ -5,7 +5,7 @@ use crate::process::{parent_pid, terminal_foreground_pgid};
 use anyhow::{Context, Result, bail};
 use sessiontap_core::{
     domain::{MultiplexerBackend, MultiplexerMetadata},
-    terminal::{Key, NamedKey},
+    terminal::{Key, KeyBase, Mods, NamedKey},
 };
 use std::{
     env,
@@ -123,19 +123,11 @@ impl MultiplexerAdapter for TmuxAdapter {
         self.validate(expected, process_pid)?;
         for key in keys {
             let mut args = vec!["send-keys"];
-            let literal;
-            match key {
-                Key::Named(named) => args.extend(["-t", &expected.pane_id, key_name(*named)]),
-                Key::Char(c) => {
-                    // A lone `;` separates tmux commands; `\;` is the escape.
-                    literal = if *c == ';' {
-                        "\\;".to_owned()
-                    } else {
-                        c.to_string()
-                    };
-                    args.extend(["-l", "-t", &expected.pane_id, "--", &literal]);
-                }
+            let encoded = tmux_key(*key);
+            if key.mods == Mods::default() && matches!(key.base, KeyBase::Char(_)) {
+                args.push("-l");
             }
+            args.extend(["-t", &expected.pane_id, "--", &encoded]);
             Self::run(&expected.socket, &args)?;
         }
         Ok(())
@@ -206,20 +198,45 @@ impl MultiplexerAdapter for TmuxAdapter {
 }
 
 /// tmux key names; tmux encodes them for the pane's current key modes.
-const fn key_name(key: NamedKey) -> &'static str {
+fn key_name(key: NamedKey) -> String {
     match key {
-        NamedKey::Up => "Up",
-        NamedKey::Down => "Down",
-        NamedKey::Left => "Left",
-        NamedKey::Right => "Right",
-        NamedKey::Escape => "Escape",
-        NamedKey::Tab => "Tab",
-        NamedKey::BackTab => "BTab",
-        NamedKey::Enter => "Enter",
-        NamedKey::Space => "Space",
-        NamedKey::Backspace => "BSpace",
-        NamedKey::CtrlC => "C-c",
+        NamedKey::Up => "Up".into(),
+        NamedKey::Down => "Down".into(),
+        NamedKey::Left => "Left".into(),
+        NamedKey::Right => "Right".into(),
+        NamedKey::Escape => "Escape".into(),
+        NamedKey::Tab => "Tab".into(),
+        NamedKey::BackTab => "BTab".into(),
+        NamedKey::Enter => "Enter".into(),
+        NamedKey::Space => "Space".into(),
+        NamedKey::Backspace => "BSpace".into(),
+        NamedKey::CtrlC => "C-c".into(),
+        NamedKey::Home => "Home".into(),
+        NamedKey::End => "End".into(),
+        NamedKey::PageUp => "PPage".into(),
+        NamedKey::PageDown => "NPage".into(),
+        NamedKey::Delete => "DC".into(),
+        NamedKey::F(n) => format!("F{n}"),
     }
+}
+
+/// The `send-keys` argument for a key: a tmux key name with `C-`/`M-`
+/// prefixes, or the character itself (sent with `-l` when unmodified).
+fn tmux_key(key: Key) -> String {
+    let mut out = String::new();
+    if key.mods.ctrl {
+        out.push_str("C-");
+    }
+    if key.mods.alt {
+        out.push_str("M-");
+    }
+    match key.base {
+        KeyBase::Named(named) => out.push_str(&key_name(named)),
+        // A lone `;` separates tmux commands; `\;` is the escape.
+        KeyBase::Char(';') => out.push_str("\\;"),
+        KeyBase::Char(c) => out.push(c),
+    }
+    out
 }
 
 /// Streaming needs control-client flags added in tmux 3.2.
@@ -372,16 +389,50 @@ mod tests {
                 &metadata,
                 pid,
                 &[
-                    Key::Char('E'),
-                    Key::Char(';'),
-                    Key::Char('-'),
-                    Key::Named(NamedKey::Up),
-                    Key::Named(NamedKey::Enter),
+                    Key::char('E'),
+                    Key::char(';'),
+                    Key::char('-'),
+                    Key::named(NamedKey::Up),
+                    Key::named(NamedKey::Enter),
                 ],
             )
             .unwrap();
         // Application cursor mode encodes Up as ESC O A.
         server.wait_for(&metadata.pane_id, "E;-^[OA^M");
+    }
+
+    #[test]
+    fn modified_and_navigation_keys_reach_the_pane() {
+        let Some(server) = Server::start("mod_keys", 80, 24, ECHO_INPUT) else {
+            return;
+        };
+        let (metadata, pid) = server.metadata("sessiontap-test:0.0");
+        server.wait_for(&metadata.pane_id, "ready");
+        let ctrl = Mods {
+            ctrl: true,
+            alt: false,
+        };
+        let alt = Mods {
+            ctrl: false,
+            alt: true,
+        };
+        TmuxAdapter
+            .send_keys(
+                &metadata,
+                pid,
+                &[
+                    Key::char('<'),
+                    Key::char('r').with(ctrl),
+                    Key::char('b').with(alt),
+                    Key::named(NamedKey::Home),
+                    Key::named(NamedKey::F(5)),
+                    Key::char(';').with(alt),
+                    Key::char('>'),
+                ],
+            )
+            .unwrap();
+        // Ctrl+R is 0x12; Alt prefixes ESC; Home and F5 use their xterm encodings.
+        server.wait_for(&metadata.pane_id, "<^R^[b^[[1~^[[15~^[;>");
     }
 
     #[test]

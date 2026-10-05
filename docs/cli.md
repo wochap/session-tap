@@ -152,6 +152,7 @@ launches outside a multiplexer have no `terminal` key. Streaming needs tmux
 sessiontap terminal watch 7f3c
 sessiontap terminal send 7f3c --key 1
 sessiontap terminal send 7f3c --key down --key enter
+sessiontap terminal send 7f3c --key ctrl+r
 sessiontap terminal send 7f3c --text 'run the tests' --enter
 ```
 
@@ -173,8 +174,11 @@ answered with a fresh snapshot. Watching never resizes the pane or writes to
 it.
 
 `send` takes repeatable `--key` (`up`, `down`, `left`, `right`, `escape`,
-`tab`, `back_tab`, `enter`, `space`, `backspace`, `ctrl_c`, or one printable
-character typed as a keystroke) or `--text` with optional `--enter`. Text is
+`tab`, `back_tab`, `enter`, `space`, `backspace`, `ctrl_c`, `home`, `end`,
+`page_up`, `page_down`, `delete`, `f1` through `f12`, or one printable
+character typed as a keystroke) or `--text` with optional `--enter`. A key may
+carry the prefixes `ctrl+` and `alt+`, each at most once and in that order:
+`--key ctrl+r`, `--key alt+b`, `--key ctrl+left`, `--key ctrl+alt+x`. Text is
 pasted literally, bracketed when the application enabled bracketed paste. A
 refused request prints its error code and exits non-zero: `not_found`,
 `terminal_unavailable`, `not_foreground`, `pane_in_mode`, `terminal_ended`,

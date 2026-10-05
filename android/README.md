@@ -54,12 +54,27 @@ terminal" action with `control`.
 The terminal screen shows only the agent's tmux pane, at the desktop pane size;
 it never resizes it. Portrait opens at 9sp and follows the cursor sideways; tap
 the size chip or double-tap to fit the width, pinch up to 200%. The key bar
-sends Esc, Tab, Shift+Tab, arrows, Enter, Space, Backspace, and Ctrl+C (tap
-twice within 2.5 s). Paste fills the reply field; Send pastes the reply and
-presses Enter, long-press Send pastes without Enter. When the agent waits for
+is a grid, two rows of seven keys by default: Esc, Tab, Shift+Tab, Up, Ctrl+C
+(tap twice within 2.5 s), Paste, Backspace, then Ctrl, Alt, Left, Down, Right,
+Space, Enter. Tap Ctrl or Alt to apply it to the next key, long-press to lock it
+until tapped again. Paste fills the reply field; Send pastes the reply and
+presses Enter, long-press Send pastes without Enter. The keyboard toggle left of
+the reply field turns on direct mode: every key typed on the soft or hardware
+keyboard goes straight to the agent, in order, for vim-style input such as
+Claude vim mode (`w`, `i`, Esc, `$`) and Ctrl combinations such as Ctrl+R.
+Tap the toggle again or hide the keyboard to leave. When the agent waits for
 approval and answers digits, chips 1-4 send that digit. Input pauses while the
 agent is not in front or the desktop scrolls the pane, and nothing typed is
 sent after a reconnect until you tap Send.
+
+The top bar ⋮ menu offers Fit to width, Copy visible screen, and Edit keys.
+Edit keys (also from long-pressing any key) rearranges the key bar: up to 4 rows
+of 7 keys, named keys including Home, End, PgUp, PgDn, Del, and F1-F12, any
+single character, Ctrl, Alt, Ctrl+C, and Paste. The layout is stored on the
+phone and applies to every agent and hub; Reset restores the default.
+
+Phone check for direct mode: see "Direct keyboard with Claude vim mode" in
+`docs/smoke-tests.md` (drive vim mode with `w`, `i`, Esc, `$`, and Ctrl+R).
 
 ## Tailscale
 
@@ -87,7 +102,9 @@ android/scripts/test-hub.sh install-link   # pair manually via the debug deep li
 Instrumented tests skip when `test-control.py` is not reachable. The terminal
 flow (`a13_terminal`) pairs with `test-hub.sh link control`, starts the terminal
 fixture with `test-hub.sh terminal start` (needs `tmux`), answers the fake
-agent's approval with digit chip 1, ends it with `test-hub.sh terminal exit`,
+agent's approval by typing `2` in direct mode, types a reply line key by key,
+sends a latched Ctrl combination, adds a third key row in Edit keys and resets
+it, ends it with `test-hub.sh terminal exit`,
 and stops the fixture afterwards.
 
 `android/scripts/emulator.sh run <cmd>` boots the emulator, runs a command, and

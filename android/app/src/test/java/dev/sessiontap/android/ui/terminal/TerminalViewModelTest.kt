@@ -34,6 +34,7 @@ class FakeTerminalHub : TerminalHub {
     val closes = mutableListOf<Long>()
     var openError: String? = null
     var inputError: String? = null
+    var inputAttempts = 0
     var kicks = 0
     lateinit var frames: Channel<TerminalFrame>
     private var nextId = 1L
@@ -46,6 +47,7 @@ class FakeTerminalHub : TerminalHub {
     }
 
     override suspend fun sendInput(stream: TerminalStream, input: TerminalInput) {
+        inputAttempts++
         inputError?.let { throw RpcException(it, it) }
         inputs += input
     }
@@ -317,5 +319,85 @@ class TerminalViewModelTest {
         vm.sendReply(true)
         runCurrent()
         assertTrue(hub.inputs.isEmpty())
+    }
+
+    @Test
+    fun queuedKeysKeepOrderAndMergeCharacters() = runTest {
+        val vm = live()
+        vm.type("wi")
+        vm.key(TerminalKeys.ESCAPE)
+        vm.type("x\n")
+        runCurrent()
+        assertEquals(
+            listOf(
+                TerminalInput.Keys(listOf("w", "i")),
+                TerminalInput.Keys(listOf("escape")),
+                TerminalInput.Keys(listOf("x")),
+                TerminalInput.Keys(listOf("enter")),
+            ),
+            hub.inputs,
+        )
+    }
+
+    @Test
+    fun failedKeyDropsTheRestOfTheQueue() = runTest {
+        val vm = live()
+        hub.inputError = "pane_in_mode"
+        vm.key(TerminalKeys.DOWN)
+        vm.key(TerminalKeys.ENTER)
+        runCurrent()
+        assertEquals(1, hub.inputAttempts)
+        assertNotNull(vm.error.value)
+    }
+
+    @Test
+    fun latchedCtrlAppliesToOneKey() = runTest {
+        val vm = live()
+        vm.tapModifier(ModKey.Ctrl)
+        assertEquals(ModState.Latched, vm.mods.value.ctrl)
+        vm.key(TerminalKeys.LEFT)
+        vm.key(TerminalKeys.LEFT)
+        runCurrent()
+        assertEquals(
+            listOf(TerminalInput.Keys(listOf("ctrl+left")), TerminalInput.Keys(listOf("left"))),
+            hub.inputs,
+        )
+        assertEquals(ModState.Off, vm.mods.value.ctrl)
+        assertEquals("Ctrl+Left", vm.sentCombo.value)
+        advanceTimeBy(2_000)
+        assertEquals(null, vm.sentCombo.value)
+    }
+
+    @Test
+    fun lockedCtrlStaysUntilTapped() = runTest {
+        val vm = live()
+        vm.lockModifier(ModKey.Ctrl)
+        vm.tapModifier(ModKey.Alt)
+        vm.key(TerminalKeys.UP)
+        vm.type("r")
+        vm.tapModifier(ModKey.Ctrl)
+        vm.key(TerminalKeys.UP)
+        runCurrent()
+        assertEquals(
+            listOf(
+                TerminalInput.Keys(listOf("ctrl+alt+up")),
+                TerminalInput.Keys(listOf("ctrl+r")),
+                TerminalInput.Keys(listOf("up")),
+            ),
+            hub.inputs,
+        )
+        assertEquals(Modifiers(), vm.mods.value)
+        assertEquals("Ctrl+R", vm.sentCombo.value)
+    }
+
+    @Test
+    fun ctrlCDoubleTapIgnoresModifiers() = runTest {
+        val vm = live()
+        vm.tapModifier(ModKey.Alt)
+        vm.key(TerminalKeys.CTRL_C)
+        vm.key(TerminalKeys.CTRL_C)
+        runCurrent()
+        assertEquals(listOf(TerminalInput.Keys(listOf("ctrl_c"))), hub.inputs)
+        assertEquals(ModState.Latched, vm.mods.value.alt)
     }
 }

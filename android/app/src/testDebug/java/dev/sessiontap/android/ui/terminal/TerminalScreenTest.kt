@@ -14,7 +14,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertIsNotEnabled
+import dev.sessiontap.android.domain.KeyLayout
+import dev.sessiontap.android.domain.KeySpec
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.doubleClick
@@ -53,6 +56,9 @@ class TerminalScreenTest {
         digits: Boolean = true,
         reply: String = "",
         ctrlArmed: Boolean = false,
+        layout: KeyLayout = KeyLayout.DEFAULT,
+        mods: Modifiers = Modifiers(),
+        sentCombo: String? = null,
     ) = TerminalUi(
         title = "Fix flaky auth tests",
         where = "api · feat/auth-retry · MacBook",
@@ -69,6 +75,9 @@ class TerminalScreenTest {
         cols = 120,
         rows = 40,
         startedAt = null,
+        layout = layout,
+        mods = mods,
+        sentCombo = sentCombo,
     )
 
     private fun pane(text: String = "Do you want to proceed?") = PaneEmulator().apply { reset(snapshotFrame(text)) }
@@ -128,15 +137,15 @@ class TerminalScreenTest {
         show(ui(), TerminalActions(onKey = { keys += it }))
         rule.onNodeWithTag("key:down").performClick()
         rule.onNodeWithTag("key:enter").performClick()
-        rule.onNodeWithTag("key:ctrl_c").performScrollTo().performClick()
+        rule.onNodeWithTag("key:ctrl_c").performClick()
         assertEquals(listOf("down", "enter", "ctrl_c"), keys)
     }
 
     @Test
     fun ctrlCArmedAsksForSecondTap() {
         show(ui(ctrlArmed = true))
-        rule.onNodeWithTag("key:ctrl_c", useUnmergedTree = false).performScrollTo()
-        rule.onNodeWithText("Tap again").assertExists()
+        rule.onNodeWithTag("ctrl-c-armed").assertExists()
+        rule.onNodeWithText("Tap again within 2.5s to interrupt").assertExists()
     }
 
     @Test
@@ -144,9 +153,102 @@ class TerminalScreenTest {
         var pasted = 0
         val keys = mutableListOf<String>()
         show(ui(), TerminalActions(onPaste = { pasted++ }, onKey = { keys += it }))
-        rule.onNodeWithTag("key:paste").performScrollTo().performClick()
+        rule.onNodeWithTag("key:paste").performClick()
         assertEquals(1, pasted)
         assertTrue(keys.isEmpty())
+    }
+
+    @Test
+    fun defaultGridHasTwoRowsOfSeven() {
+        show(ui())
+        listOf("escape", "tab", "back_tab", "up", "ctrl_c", "paste", "backspace", "mod:ctrl", "mod:alt", "left", "down", "right", "space", "enter")
+            .forEach { rule.onNodeWithTag("key:$it").assertExists() }
+    }
+
+    @Test
+    fun modifiersLatchOnTapAndLockOnLongPress() {
+        val taps = mutableListOf<ModKey>()
+        val locks = mutableListOf<ModKey>()
+        show(ui(), TerminalActions(onModTap = { taps += it }, onModLock = { locks += it }))
+        rule.onNodeWithTag("key:mod:ctrl").performClick()
+        rule.onNodeWithTag("key:mod:alt").performTouchInput { longClick() }
+        assertEquals(listOf(ModKey.Ctrl), taps)
+        assertEquals(listOf(ModKey.Alt), locks)
+    }
+
+    @Test
+    fun longPressKeyOffersEditKeys() {
+        var edits = 0
+        show(ui(), TerminalActions(onEditKeys = { edits++ }))
+        rule.onNodeWithTag("key:escape").performTouchInput { longClick() }
+        rule.onNodeWithText("sends Esc").assertExists()
+        rule.onNodeWithTag("edit-keys-popover").performClick()
+        assertEquals(1, edits)
+    }
+
+    @Test
+    fun extraRowsGrowTheBar() {
+        val keys = mutableListOf<String>()
+        val three = KeyLayout.DEFAULT.addRow().add(0, KeySpec.Char("$")).add(0, KeySpec.Named("home"))
+        show(ui(layout = three), TerminalActions(onKey = { keys += it }))
+        rule.onNodeWithTag("key:char:$").performClick()
+        rule.onNodeWithTag("key:home").performClick()
+        assertEquals(listOf("$", "home"), keys)
+    }
+
+    @Test
+    fun directModeReplacesReplyAndTypes() {
+        val typed = mutableListOf<String>()
+        show(ui(mods = Modifiers(ctrl = ModState.Latched)), TerminalActions(onType = { typed += it }))
+        rule.onNodeWithTag("keyboard-toggle").performClick()
+        rule.onNodeWithTag("direct-strip").assertExists()
+        rule.onAllNodesWithTag("reply").assertCountEquals(0)
+        rule.onNodeWithTag("mod-chip").assertTextContains("Ctrl · next")
+        rule.onNodeWithTag("direct-input").performTextInput("w")
+        assertEquals(listOf("w"), typed)
+        rule.onNodeWithTag("keyboard-toggle").performClick()
+        rule.onNodeWithTag("reply").assertExists()
+    }
+
+    @Test
+    fun directStripShowsSentCombo() {
+        var state by mutableStateOf(ui())
+        rule.setContent { SessionTapTheme(dark = true) { TerminalScreen(state, pane(), PaneTick(), TerminalActions(), PaddingValues()) } }
+        rule.onNodeWithTag("keyboard-toggle").performClick()
+        rule.onNodeWithTag("direct-sub").assertTextContains("Every key goes straight to the pane")
+        state = ui(sentCombo = "Ctrl+R")
+        rule.onNodeWithTag("direct-sub").assertTextContains("Sent Ctrl+R")
+        state = ui(mods = Modifiers(ctrl = ModState.Locked))
+        rule.onNodeWithTag("direct-sub").assertTextContains("Every key gets Ctrl until you tap it again")
+    }
+
+    @Test
+    fun pausedDisablesKeyboardToggle() {
+        show(ui(state = reduce(live, TerminalEvent.Input(InputState(false, InputUnavailable.NotForeground)))))
+        rule.onNodeWithTag("keyboard-toggle").assertIsNotEnabled()
+    }
+
+    @Test
+    fun topMenuOffersFitCopyAndEditKeys() {
+        var copies = 0
+        var edits = 0
+        show(ui(), TerminalActions(onCopyScreen = { copies++ }, onEditKeys = { edits++ }))
+        rule.onNodeWithTag("terminal-menu").performClick()
+        rule.onNodeWithText("Fit to width").assertExists()
+        rule.onNodeWithTag("menu:copy").performClick()
+        rule.onNodeWithTag("terminal-menu").performClick()
+        rule.onNodeWithTag("menu:edit-keys").performClick()
+        assertEquals(1, copies)
+        assertEquals(1, edits)
+    }
+
+    @Test
+    fun watchOnlyMenuHasNoEditKeys() {
+        val watch = reduce(reduce(TerminalState(control = false), TerminalEvent.Opening), TerminalEvent.Snapshot(InputState(true)))
+        show(ui(state = watch))
+        rule.onNodeWithTag("terminal-menu").performClick()
+        rule.onNodeWithTag("menu:copy").assertExists()
+        rule.onAllNodesWithTag("menu:edit-keys").assertCountEquals(0)
     }
 
     @Test

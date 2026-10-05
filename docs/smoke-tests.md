@@ -77,6 +77,16 @@ need a real phone and a hub with a `remote` section:
    Verify the keyboard opens and stays open, the field keeps focus, and typed
    text appears. Clear the field, type `i`, long-press Send, and record whether
    Claude enters INSERT mode.
+9. Direct keyboard with Claude vim mode: with vim mode on, open the agent's
+   terminal from the phone and tap the keyboard toggle left of the reply
+   field. Verify the soft keyboard opens with no suggestions and the strip
+   reads "Typing to agent". Type `w` and verify the cursor moves one word,
+   type `i` and verify INSERT mode, tap Esc on the key bar and verify NORMAL
+   mode, then type `$` and verify the cursor jumps to the line end. Tap Ctrl,
+   type `r`, and verify the strip briefly reads "Sent Ctrl+R" and Claude opens
+   its history search. Hide the keyboard with the back gesture and verify the
+   reply field returns. Record the keyboard app (for example Gboard or Samsung
+   Keyboard).
 8. Nerd Font prompt: with a shell prompt that uses Powerline separators and
    Nerd Font icons (for example starship), open its terminal and verify the
    icons render as glyphs, not boxes, and the text after them stays aligned.

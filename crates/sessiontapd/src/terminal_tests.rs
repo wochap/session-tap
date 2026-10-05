@@ -208,7 +208,7 @@ fn code(error: &anyhow::Error) -> &'static str {
 }
 
 fn keys(text: &str) -> TerminalInput {
-    TerminalInput::Keys(text.chars().map(Key::Char).collect())
+    TerminalInput::Keys(text.chars().map(Key::char).collect())
 }
 
 #[tokio::test]

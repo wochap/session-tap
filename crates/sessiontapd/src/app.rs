@@ -758,7 +758,7 @@ pub(crate) mod tests {
             Some(&UnsupportedBackend(MultiplexerBackend::Tmux))
         );
         let input = sessiontap_core::terminal::TerminalInput::Keys(vec![
-            sessiontap_core::terminal::Key::Char('x'),
+            sessiontap_core::terminal::Key::char('x'),
         ]);
         for error in [
             app.terminal_input(&initial.invocation_id, &input)
