@@ -47,6 +47,31 @@ a{color:var(--color-accent-300)}a:hover{color:var(--color-accent-200)}
 </div>
 </section>
 
+<section class="dv-turn" id="t12">
+<div class="dv-thd"><a class="dv-tid" href="#t12">12</a><span class="dv-tname">Terminal · direct keyboard &amp; custom keys</span><span class="dv-tsub">Key bar becomes a 7-column sticky grid (arrows as an inverted T, Ctrl and Alt added as sticky modifiers). The keyboard toggle sends every keystroke straight to the pane. The layout is editable and applies to all agents. Phones are live: tap a key, hold Ctrl/Alt to lock, hold any key for its popover, toggle direct mode, ⋮ menu.</span></div>
+<div class="dv-opts">
+<div class="dv-opt" id="12a"><div class="dv-olabel"><a class="dv-oid" href="#12a">12a</a>Default controls · keyboard closed, toggle left of reply</div><dc-import name="STTerminal" state="input" bar="grid" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12a-l"><div class="dv-olabel"><a class="dv-oid" href="#12a-l">12a</a>Light</div><dc-import name="STTerminal" state="input" bar="grid" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12b"><div class="dv-olabel"><a class="dv-oid" href="#12b">12b</a>Direct mode · IME open, every key to the pane</div><dc-import name="STTerminal" state="live" bar="grid" direct="{{ yes }}" typed="/compact" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12b-l"><div class="dv-olabel"><a class="dv-oid" href="#12b-l">12b</a>Light</div><dc-import name="STTerminal" state="live" bar="grid" direct="{{ yes }}" typed="/compact" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12c"><div class="dv-olabel"><a class="dv-oid" href="#12c">12c</a>Ctrl latched · one-shot, next key gets it</div><dc-import name="STTerminal" state="live" bar="grid" direct="{{ yes }}" mod="ctrl1" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12c-2"><div class="dv-olabel"><a class="dv-oid" href="#12c-2">12c</a>Ctrl locked (long-press) · Alt latched</div><dc-import name="STTerminal" state="live" bar="grid" direct="{{ yes }}" mod="ctrlL alt1" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12c-3"><div class="dv-olabel"><a class="dv-oid" href="#12c-3">12c</a>Ctrl+C armed · tap again to send</div><dc-import name="STTerminal" state="live" bar="grid" mod="ctrlc" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12d"><div class="dv-olabel"><a class="dv-oid" href="#12d">12d</a>Long-press a key → Edit keys…</div><dc-import name="STTerminal" state="input" bar="grid" lpkey="esc" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12d-2"><div class="dv-olabel"><a class="dv-oid" href="#12d-2">12d</a>Top bar ⋮ → Edit keys</div><dc-import name="STTerminal" state="live" bar="grid" menu="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12e"><div class="dv-olabel"><a class="dv-oid" href="#12e">12e</a>Key layout editor · global, live preview</div><dc-import name="STKeyEditor" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12e-2"><div class="dv-olabel"><a class="dv-oid" href="#12e-2">12e</a>Dragging Space to row 1</div><dc-import name="STKeyEditor" drag="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12e-3"><div class="dv-olabel"><a class="dv-oid" href="#12e-3">12e</a>Tap a key · replace or remove</div><dc-import name="STKeyEditor" sheet="replace" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12e-4"><div class="dv-olabel"><a class="dv-oid" href="#12e-4">12e</a>Reset to default · confirm</div><dc-import name="STKeyEditor" confirm="{{ yes }}" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12e-l"><div class="dv-olabel"><a class="dv-oid" href="#12e-l">12e</a>Light</div><dc-import name="STKeyEditor" theme="light" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12f"><div class="dv-olabel"><a class="dv-oid" href="#12f">12f</a>Landscape · rows beside reply</div><dc-import name="STTerminal" state="waiting" bar="grid" orient="landscape" theme="dark" hint-size="935px,432px"></dc-import></div>
+<div class="dv-opt" id="12f-2"><div class="dv-olabel"><a class="dv-oid" href="#12f-2">12f</a>Landscape · rows beside direct strip (IME hidden / hardware keyboard)</div><dc-import name="STTerminal" state="live" bar="grid" direct="{{ yes }}" orient="landscape" theme="dark" hint-size="935px,432px"></dc-import></div>
+<div class="dv-opt" id="12g"><div class="dv-olabel"><a class="dv-oid" href="#12g">12g</a>Watch only · strip replaces keys (as today)</div><dc-import name="STTerminal" state="watch" bar="grid" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12g-2"><div class="dv-olabel"><a class="dv-oid" href="#12g-2">12g</a>Input paused · keys and toggle disabled</div><dc-import name="STTerminal" state="paused" bar="grid" theme="dark" hint-size="432px,935px"></dc-import></div>
+<div class="dv-opt" id="12g-3"><div class="dv-olabel"><a class="dv-oid" href="#12g-3">12g</a>3-row layout · bar grows upward</div><dc-import name="STTerminal" state="live" bar="grid" layout="three" theme="dark" hint-size="432px,935px"></dc-import></div>
+</div>
+</section>
+
 <section class="dv-turn" id="t11">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <symbol id="gB" viewBox="0 0 108 108"><path d="M33 39l16 15-16 15" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path><rect x="57" y="62" width="20" height="7" rx="2.5" fill="var(--ic-acc)"></rect></symbol>

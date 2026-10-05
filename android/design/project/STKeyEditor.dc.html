@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/styles.css">
+<script src="_ds/nocturne-53929d40-05df-499c-bc14-17884e999fc5/_ds_bundle.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+[data-ke]{--st-bg:color-mix(in oklab,var(--color-bg) 72%,#000);--st-surf:color-mix(in oklab,var(--color-bg) 92%,var(--color-surface));--st-surf2:var(--color-surface);--st-line:color-mix(in srgb,var(--color-text) 9%,transparent);--st-text:var(--color-text);--st-mute:var(--color-neutral-500);--st-acc:var(--color-accent);--st-acc-ink:var(--color-accent-300);--st-acc-tint:color-mix(in oklab,var(--color-accent) 14%,transparent);--st-block:oklch(0.69 0.19 25);--st-mono:"JetBrains Mono",ui-monospace,monospace}
+[data-ke="light"]{--st-bg:var(--color-neutral-100);--st-surf:color-mix(in oklab,var(--color-neutral-100) 45%,var(--color-neutral-200));--st-surf2:var(--color-neutral-200);--st-line:color-mix(in srgb,var(--color-neutral-900) 11%,transparent);--st-text:var(--color-neutral-900);--st-mute:var(--color-neutral-600);--st-acc:var(--color-accent-600);--st-acc-ink:var(--color-accent-700);--st-acc-tint:color-mix(in oklab,var(--color-accent-500) 14%,transparent);--st-block:oklch(0.56 0.2 25)}
+</style>
+</helmet>
+<div data-ke="{{ theme }}" style="position:relative;width:432px;height:935px;padding:10px;border-radius:52px;background:color-mix(in oklab,var(--color-neutral-900) 55%,#000);box-sizing:border-box;font-family:var(--font-body);flex:none">
+<div style="position:relative;width:100%;height:100%;border-radius:42px;overflow:hidden;background:var(--st-bg);color:var(--st-text);display:flex;flex-direction:column;font-size:14px;line-height:1.4">
+
+<div style="height:36px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:12px;font-weight:500">
+<span>14:33</span>
+<span style="display:flex;gap:6px;align-items:center;font-size:14px"><i class="ph-fill ph-wifi-high"></i><i class="ph-fill ph-cell-signal-full"></i><i class="ph-fill ph-battery-high"></i></span>
+</div>
+<div style="display:flex;align-items:center;gap:4px;padding:2px 8px 6px 4px;flex:none">
+<button class="btn btn-ghost btn-icon" style="color:var(--st-text);font-size:22px;width:44px;height:44px;border-radius:22px;flex:none"><i class="ph ph-arrow-left"></i></button>
+<div style="flex:1;min-width:0;font-size:18px;font-weight:500">Terminal keys</div>
+<button onClick="{{ askReset }}" disabled="{{ isDefault }}" style="height:40px;padding:0 12px;border:none;border-radius:20px;background:transparent;color:var(--st-acc-ink);font:500 14px var(--font-body);cursor:pointer;opacity:{{ resetOp }}">Reset</button>
+</div>
+
+<div style="flex:1;min-height:0;overflow:auto;scrollbar-width:none;padding:0 12px 16px;display:flex;flex-direction:column;gap:8px">
+<div style="font-size:13px;color:var(--st-mute);padding:0 4px 4px;text-wrap:pretty">One layout for every agent on every hub. Row 1 sits on top; the bottom row is closest to the reply field.</div>
+<sc-for list="{{ rows }}" as="r" hint-placeholder-count="3">
+<div onDragOver="{{ r.onOver }}" onDrop="{{ r.onDrop }}" style="display:flex;flex-direction:column;gap:8px;padding:8px 8px 10px;border-radius:14px;background:var(--st-surf);box-shadow:inset 0 0 0 {{ r.ringW }} {{ r.ring }}">
+<div style="display:flex;align-items:center;gap:6px;padding-left:4px">
+<span style="font-size:13px;font-weight:500">Row {{ r.n }}</span><span style="font-size:12px;color:var(--st-mute)">{{ r.count }}</span>
+<span style="flex:1"></span>
+<button onClick="{{ r.onDelete }}" disabled="{{ r.lastOne }}" class="btn btn-ghost btn-icon" style="width:40px;height:40px;border-radius:20px;font-size:18px;color:var(--st-mute);opacity:{{ r.delOp }}"><i class="ph ph-trash"></i></button>
+</div>
+<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">
+<sc-for list="{{ r.keys }}" as="k" hint-placeholder-count="7">
+<div draggable="true" onDragStart="{{ k.onStart }}" onDragOver="{{ k.onOver }}" onDrop="{{ k.onDrop }}" onDragEnd="{{ k.onEnd }}" onClick="{{ k.onClick }}" style="position:relative;height:48px;min-width:0;border-radius:8px;background:{{ k.bg }};box-shadow:inset 0 0 0 {{ k.ringW }} {{ k.ring }}{{ k.shadow }};transform:{{ k.tf }};opacity:{{ k.op }};color:{{ k.color }};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:grab;user-select:none">
+<i class="ph-bold ph-dots-six" style="font-size:12px;color:var(--st-mute);line-height:1"></i>
+<span style="font:500 12px var(--st-mono);display:flex;align-items:center;height:16px;white-space:nowrap"><sc-if value="{{ k.icon }}"><i class="{{ k.icon }}" style="font-size:15px"></i></sc-if>{{ k.label }}</span>
+<sc-if value="{{ k.insert }}"><span style="position:absolute;left:-4px;top:4px;bottom:4px;width:3px;border-radius:2px;background:var(--st-acc)"></span></sc-if>
+</div>
+</sc-for>
+<sc-if value="{{ r.canAdd }}">
+<button onClick="{{ r.onAdd }}" onDragOver="{{ r.onOver }}" onDrop="{{ r.onDrop }}" style="position:relative;height:48px;min-width:0;border-radius:8px;border:none;background:transparent;box-shadow:inset 0 0 0 1px var(--st-line);outline:1px dashed color-mix(in srgb,var(--st-text) 22%,transparent);outline-offset:-4px;color:var(--st-mute);font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ph ph-plus"></i><sc-if value="{{ r.insertEnd }}"><span style="position:absolute;left:-4px;top:4px;bottom:4px;width:3px;border-radius:2px;background:var(--st-acc)"></span></sc-if></button>
+</sc-if>
+</div>
+</div>
+</sc-for>
+<button onClick="{{ addRow }}" disabled="{{ rowsFull }}" class="btn btn-secondary" style="height:44px;border-radius:22px;gap:8px;color:var(--st-text);opacity:{{ addRowOp }}"><i class="ph ph-plus"></i>{{ addRowLabel }}</button>
+<div style="display:flex;flex-direction:column;gap:4px;padding:6px 4px 0;font-size:12.5px;color:var(--st-mute);text-wrap:pretty">
+<span>Drag a key by its grip to move it within a row or to another row. Tap a key to replace or remove it.</span>
+<span>Up to 7 keys per row and 4 rows. Ctrl and Alt are sticky: tap for the next key, hold to lock.</span>
+</div>
+</div>
+
+<div style="flex:none;background:var(--st-surf);box-shadow:0 -1px 0 var(--st-line);display:flex;flex-direction:column">
+<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--st-mute);padding:10px 16px 2px">Preview</div>
+<div style="display:flex;flex-direction:column;gap:4px;padding:6px 8px 4px">
+<sc-for list="{{ preview }}" as="r">
+<div style="display:grid;grid-template-columns:{{ r.cols }};gap:4px">
+<sc-for list="{{ r.keys }}" as="k"><div style="height:42px;min-width:0;border-radius:8px;background:{{ k.bg }};box-shadow:inset 0 0 0 1px var(--st-line);color:{{ k.color }};font:500 12.5px var(--st-mono);display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden"><sc-if value="{{ k.icon }}"><i class="{{ k.icon }}" style="font-size:16px"></i></sc-if>{{ k.label }}</div></sc-for>
+</div>
+</sc-for>
+</div>
+<div style="display:flex;align-items:center;gap:6px;padding:4px 8px 8px;opacity:.5">
+<span style="width:44px;height:44px;border-radius:22px;flex:none;box-shadow:inset 0 0 0 1px var(--st-line);display:flex;align-items:center;justify-content:center;font-size:20px"><i class="ph ph-keyboard"></i></span>
+<span style="flex:1;height:44px;border-radius:22px;background:var(--st-surf2);display:flex;align-items:center;padding:0 16px;font-size:14px;color:var(--st-mute)">Reply to agent…</span>
+<span style="width:44px;height:44px;border-radius:22px;flex:none;box-shadow:inset 0 0 0 1.5px var(--st-acc);color:var(--st-acc);display:flex;align-items:center;justify-content:center;font-size:18px"><i class="ph-bold ph-arrow-up"></i></span>
+</div>
+<div style="height:22px;display:flex;align-items:center;justify-content:center"><span style="width:108px;height:4px;border-radius:2px;background:var(--st-text);opacity:.45"></span></div>
+</div>
+
+<sc-if value="{{ sheet }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeSheet }}" style="position:absolute;inset:0;background:color-mix(in oklab,var(--color-bg) 30%,transparent);backdrop-filter:brightness(.6)"></div>
+<div style="position:absolute;left:0;right:0;bottom:0;max-height:88%;overflow:auto;scrollbar-width:none;border-radius:28px 28px 0 0;background:var(--st-surf2);box-shadow:var(--shadow-lg);padding:8px 16px 30px;display:flex;flex-direction:column;gap:6px">
+<span style="align-self:center;width:32px;height:4px;border-radius:2px;background:var(--st-mute);opacity:.5;margin:6px 0 8px"></span>
+<div style="font-size:18px;font-weight:500;padding:0 4px">{{ sheet.title }}</div>
+<sc-for list="{{ groups }}" as="g">
+<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--st-mute);padding:12px 4px 4px">{{ g.label }}</div>
+<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px">
+<sc-for list="{{ g.items }}" as="k"><button onClick="{{ k.onClick }}" style="height:44px;min-width:0;border:none;border-radius:10px;background:{{ k.bg }};box-shadow:inset 0 0 0 {{ k.ringW }} {{ k.ring }};color:{{ k.color }};font:500 12.5px var(--st-mono);display:flex;align-items:center;justify-content:center;cursor:pointer;white-space:nowrap;padding:0"><sc-if value="{{ k.icon }}"><i class="{{ k.icon }}" style="font-size:16px"></i></sc-if>{{ k.label }}</button></sc-for>
+</div>
+<sc-if value="{{ g.note }}"><div style="font-size:12px;color:var(--st-mute);padding:4px 4px 0">{{ g.note }}</div></sc-if>
+</sc-for>
+<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--st-mute);padding:12px 4px 4px">Character…</div>
+<div style="display:flex;gap:6px;align-items:center">
+<input value="{{ charVal }}" onChange="{{ onChar }}" maxLength="1" placeholder="Any single character" style="flex:1;min-width:0;height:44px;border:none;border-radius:22px;background:var(--st-bg);box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-text);font:500 15px var(--st-mono);padding:0 16px;outline:none;box-sizing:border-box">
+<button onClick="{{ useChar }}" disabled="{{ charEmpty }}" class="btn btn-primary" style="height:44px;border-radius:22px;padding:0 18px;opacity:{{ charOp }}">Use</button>
+</div>
+<div style="display:flex;gap:6px;padding-top:6px">
+<sc-for list="{{ quickChars }}" as="c"><button onClick="{{ c.onClick }}" style="width:44px;height:44px;border:none;border-radius:10px;background:var(--st-bg);box-shadow:inset 0 0 0 1px var(--st-line);color:var(--st-text);font:500 15px var(--st-mono);cursor:pointer">{{ c.ch }}</button></sc-for>
+</div>
+<div style="display:flex;align-items:center;gap:8px;padding-top:16px">
+<sc-if value="{{ sheet.replace }}"><button onClick="{{ removeKey }}" style="height:44px;padding:0 14px;border:none;border-radius:22px;background:transparent;color:var(--st-block);font:500 14px var(--font-body);display:flex;align-items:center;gap:8px;cursor:pointer"><i class="ph ph-trash"></i>Remove {{ sheet.name }}</button></sc-if>
+<span style="flex:1"></span>
+<button onClick="{{ closeSheet }}" class="btn btn-ghost" style="height:44px;border-radius:22px;padding:0 16px;color:var(--st-text)">Cancel</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ confirm }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:color-mix(in oklab,var(--color-bg) 30%,transparent);backdrop-filter:brightness(.55);display:flex;align-items:center;justify-content:center;padding:28px">
+<div style="width:100%;max-width:320px;border-radius:28px;background:var(--st-surf2);box-shadow:var(--shadow-lg);padding:24px;display:flex;flex-direction:column;gap:12px">
+<i class="ph ph-arrow-counter-clockwise" style="font-size:24px;color:var(--st-acc-ink);align-self:center"></i>
+<div style="font-size:20px;font-weight:500;text-align:center">Reset to default keys?</div>
+<div style="font-size:14px;color:var(--st-mute);text-wrap:pretty">Your {{ rowWord }} go back to the 2-row default for every agent and hub. Custom keys are removed.</div>
+<div style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px">
+<button onClick="{{ cancelReset }}" class="btn btn-ghost" style="height:40px;border-radius:20px;padding:0 14px;color:var(--st-acc-ink)">Cancel</button>
+<button onClick="{{ doReset }}" class="btn btn-ghost" style="height:40px;border-radius:20px;padding:0 14px;color:var(--st-acc-ink)">Reset</button>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;custom&quot;,&quot;default&quot;],&quot;default&quot;:&quot;custom&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;sheet&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;replace&quot;,&quot;add&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;drag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;confirm&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { rows: null, sheet: null, confirm: null, drag: null, over: null, char: '' };
+  KN = { esc: 'Esc', tab: 'Tab', stab: 'S-Tab', up: 'Up', down: 'Down', left: 'Left', right: 'Right', enter: 'Enter', space: 'Space', bksp: 'Bksp', del: 'Del', ctrlc: 'Ctrl+C', paste: 'Paste', ctrl: 'Ctrl', alt: 'Alt', home: 'Home', end: 'End', pgup: 'PgUp', pgdn: 'PgDn' };
+  KI = { up: 'ph-bold ph-arrow-up', down: 'ph-bold ph-arrow-down', left: 'ph-bold ph-arrow-left', right: 'ph-bold ph-arrow-right', bksp: 'ph ph-backspace' };
+  DEF = [['esc', 'tab', 'stab', 'up', 'ctrlc', 'paste', 'bksp'], ['ctrl', 'alt', 'left', 'down', 'right', 'space', 'enter']];
+  CUSTOM = [['ch:/', 'ch:-', 'ch:$', 'ch::', 'home', 'end'], ...this.DEF];
+  NAMED = ['esc', 'tab', 'stab', 'up', 'down', 'left', 'right', 'home', 'end', 'pgup', 'pgdn', 'enter', 'space', 'bksp', 'del', 'ctrlc', 'paste'];
+
+  rowsNow() { return this.state.rows ?? (this.props.layout === 'default' ? this.DEF : this.CUSTOM); }
+  sheetNow() { if (this.state.sheet !== null) return this.state.sheet || null; const s = this.props.sheet; return s === 'replace' ? { mode: 'replace', r: 1, c: 0 } : s === 'add' ? { mode: 'add', r: 0 } : null; }
+  dragNow() { return this.state.drag ?? (this.props.drag ? { from: [2, 5], over: [0, 6] } : null); }
+  label(id) { return id.startsWith('ch:') ? id.slice(3) : (this.KN[id] || id.toUpperCase()); }
+  setRows(fn) { const r = this.rowsNow().map(x => [...x]); fn(r); this.setState({ rows: r.filter((x, i) => x.length || r.length === 1) }); }
+  pick(id) {
+    const sh = this.sheetNow(); if (!sh) return;
+    this.setRows(r => { if (sh.mode === 'replace') r[sh.r][sh.c] = id; else if (r[sh.r].length < 7) r[sh.r].push(id); });
+    this.setState({ sheet: false, char: '' });
+  }
+  move(from, to) {
+    if (!from || !to) return;
+    this.setRows(r => {
+      const [fr, fc] = from; let [tr, tc] = to;
+      if (fr !== tr && r[tr].length >= 7) return;
+      const [id] = r[fr].splice(fc, 1);
+      if (fr === tr && fc < tc) tc--;
+      r[tr].splice(tc, 0, id);
+    });
+    this.setState({ drag: false, over: null });
+  }
+
+  renderVals() {
+    const p = this.props, s = this.state, theme = p.theme ?? 'dark';
+    const rows = this.rowsNow(), sh = this.sheetNow(), dr = this.dragNow() || null;
+    const confirm = s.confirm ?? !!p.confirm;
+    const used = new Set(rows.flat());
+    const isDefault = JSON.stringify(rows) === JSON.stringify(this.DEF);
+    const over = s.over ?? (dr && dr.over) ?? null;
+    const raised = 'color-mix(in oklab,var(--st-surf2) 82%,var(--st-text))';
+    const keyLook = id => ({ label: this.KI[id] ? '' : this.label(id), icon: this.KI[id] || '', bg: this.KI[id] && id !== 'bksp' ? raised : 'var(--st-surf2)', color: id === 'ctrlc' ? 'var(--st-block)' : 'var(--st-text)' });
+    const dragging = !!dr;
+    const rowsV = rows.map((row, ri) => {
+      const isOver = over && over[0] === ri;
+      return {
+        n: ri + 1, count: `· ${row.length} of 7`, lastOne: rows.length === 1, delOp: rows.length === 1 ? '.35' : '1',
+        ring: isOver && dragging ? 'var(--st-acc)' : 'transparent', ringW: isOver && dragging ? '1.5px' : '0',
+        canAdd: row.length < 7, insertEnd: dragging && isOver && over[1] === row.length,
+        onAdd: () => this.setState({ sheet: { mode: 'add', r: ri } }),
+        onDelete: () => this.setRows(r => r.splice(ri, 1)),
+        onOver: e => { e.preventDefault(); if (!over || over[0] !== ri || over[1] !== row.length) this.setState({ over: [ri, row.length] }); },
+        onDrop: e => { e.preventDefault(); this.move(dr && dr.from, [ri, row.length]); },
+        keys: row.map((id, ci) => {
+          const lifted = dr && dr.from[0] === ri && dr.from[1] === ci, sel = sh && sh.mode === 'replace' && sh.r === ri && sh.c === ci;
+          return { ...keyLook(id), ring: lifted || sel ? 'var(--st-acc)' : 'var(--st-line)', ringW: lifted || sel ? '1.5px' : '1px',
+            shadow: lifted ? ',var(--shadow-lg)' : '', tf: lifted ? 'translateY(-6px) scale(1.06)' : 'none', op: '1',
+            insert: dragging && !lifted && over && over[0] === ri && over[1] === ci,
+            onClick: () => this.setState({ sheet: { mode: 'replace', r: ri, c: ci } }),
+            onStart: e => { e.dataTransfer.effectAllowed = 'move'; this.setState({ drag: { from: [ri, ci] }, over: null }); },
+            onOver: e => { e.preventDefault(); e.stopPropagation(); if (!over || over[0] !== ri || over[1] !== ci) this.setState({ over: [ri, ci] }); },
+            onDrop: e => { e.preventDefault(); e.stopPropagation(); this.move(dr && dr.from, [ri, ci]); },
+            onEnd: () => this.setState({ drag: false, over: null }) };
+        })
+      };
+    });
+    const item = id => { const cur = sh && sh.mode === 'replace' && rows[sh.r] && rows[sh.r][sh.c] === id, u = used.has(id);
+      return { label: this.KI[id] ? '' : this.label(id), icon: this.KI[id] || '', bg: cur ? 'var(--st-acc-tint)' : 'var(--st-bg)', ring: cur || u ? 'var(--st-acc)' : 'var(--st-line)', ringW: cur ? '1.5px' : '1px', color: cur || u ? 'var(--st-acc-ink)' : (id === 'ctrlc' ? 'var(--st-block)' : 'var(--st-text)'), onClick: () => this.pick(id) }; };
+    const curName = sh && sh.mode === 'replace' && rows[sh.r] ? this.label(rows[sh.r][sh.c]) : '';
+    return {
+      theme, rows: rowsV, isDefault, resetOp: isDefault ? '.4' : '1',
+      rowsFull: rows.length >= 4, addRowOp: rows.length >= 4 ? '.45' : '1', addRowLabel: rows.length >= 4 ? 'Add row · max 4' : 'Add row',
+      addRow: () => this.setRows(r => r.unshift([])) ,
+      preview: rows.filter(r => r.length).map(r => ({ cols: `repeat(${r.length},minmax(0,1fr))`, keys: r.map(keyLook) })),
+      sheet: sh ? { title: sh.mode === 'replace' ? `Replace ${curName}` : `Add key to row ${sh.r + 1}`, replace: sh.mode === 'replace', name: curName } : null,
+      groups: [
+        { label: 'Keys', items: this.NAMED.map(item), note: 'Outlined keys are already in your bar.' },
+        { label: 'Function', items: Array.from({ length: 12 }, (_, i) => item('f' + (i + 1))) },
+        { label: 'Modifiers · sticky', items: ['ctrl', 'alt'].map(item), note: 'Tap once to apply to the next key; hold to lock.' }
+      ],
+      charVal: s.char, charEmpty: !s.char, charOp: s.char ? '1' : '.45',
+      onChar: e => this.setState({ char: e.target.value.slice(-1) }),
+      useChar: () => s.char && this.pick('ch:' + s.char),
+      quickChars: ['/', '-', '$', ':', '|', '~'].map(ch => ({ ch, onClick: () => this.pick('ch:' + ch) })),
+      removeKey: () => { const x = this.sheetNow(); this.setRows(r => r[x.r].splice(x.c, 1)); this.setState({ sheet: false }); },
+      closeSheet: () => this.setState({ sheet: false, char: '' }),
+      confirm, rowWord: `${rows.length} row${rows.length === 1 ? '' : 's'}`,
+      askReset: () => this.setState({ confirm: true }), cancelReset: () => this.setState({ confirm: false }),
+      doReset: () => this.setState({ confirm: false, rows: this.DEF.map(r => [...r]) })
+    };
+  }
+}
+</script>
+</body>
+</html>

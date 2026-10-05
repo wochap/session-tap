@@ -49,6 +49,7 @@
 <sc-if value="{{ conn.cReco }}">{{ pulse }}</sc-if>
 <sc-if value="{{ conn.cOff }}"><span style="width:6px;height:6px;border-radius:50%;border:1.25px solid var(--st-mute);box-sizing:border-box"></span></sc-if>
 {{ conn.text }}</div>
+<sc-if value="{{ moreBtn }}" hint-placeholder-val="{{ false }}"><button onClick="{{ onMore }}" class="btn btn-ghost btn-icon" style="color:var(--st-text);font-size:20px;width:40px;height:44px;border-radius:22px;flex:none;margin-right:-6px"><i class="ph-bold ph-dots-three-vertical"></i></button></sc-if>
 </div>
 
 <div style="flex:1;min-height:0;position:relative;background:var(--a-bg)">
@@ -87,6 +88,11 @@
 <sc-if value="{{ c.spin }}">{{ arc }}</sc-if><sc-if value="{{ c.icon }}"><i class="{{ c.icon }}" style="font-size:12px"></i></sc-if>{{ c.label }}</div>
 </sc-for>
 </div>
+<sc-if value="{{ menu }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;top:4px;right:8px;z-index:5;min-width:212px;padding:6px 0;border-radius:12px;background:var(--st-surf2);box-shadow:inset 0 0 0 1px var(--st-line),var(--shadow-lg);display:flex;flex-direction:column">
+<sc-for list="{{ menu }}" as="m"><div onClick="{{ m.onClick }}" style="display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;font-size:14px;color:var(--st-text);background:{{ m.bg }};cursor:pointer"><i class="{{ m.icon }}" style="font-size:18px;color:var(--st-mute)"></i>{{ m.label }}</div></sc-for>
+</div>
+</sc-if>
 <sc-if value="{{ jump }}" hint-placeholder-val="{{ false }}">
 <div onClick="{{ jump.onClick }}" style="position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:17px;background:var(--color-accent-900);box-shadow:inset 0 0 0 1px var(--color-accent),var(--shadow-md);color:var(--color-accent-100);font:500 13px var(--font-body);cursor:pointer;white-space:nowrap;user-select:none"><i class="ph-bold ph-arrow-down" style="font-size:14px"></i>Jump to live<sc-if value="{{ jump.n }}"><span style="font:500 11.5px var(--st-mono);color:var(--color-accent-200)">{{ jump.n }}</span></sc-if></div>
 </sc-if>
@@ -123,10 +129,38 @@
 </sc-for>
 </div>
 </sc-if>
+<sc-if value="{{ b.isGrid }}">
+<div style="position:relative;display:flex;flex-direction:column;gap:4px;padding:{{ b.pad }};flex:{{ b.flex }};min-width:0;box-sizing:border-box">
+<sc-for list="{{ b.rows }}" as="r">
+<div style="display:grid;grid-template-columns:{{ r.cols }};gap:4px">
+<sc-for list="{{ r.keys }}" as="k" hint-placeholder-count="7">
+<button onClick="{{ k.onClick }}" onPointerDown="{{ k.onDown }}" onPointerUp="{{ k.onUp }}" onPointerLeave="{{ k.onUp }}" disabled="{{ k.disabled }}" style="position:relative;min-width:0;height:42px;padding:0 2px;border-radius:8px;border:none;box-shadow:inset 0 0 0 {{ k.ringW }} {{ k.ring }};background:{{ k.bg }};color:{{ k.color }};opacity:{{ k.op }};font:500 12.5px var(--st-mono);display:flex;align-items:center;justify-content:center;cursor:pointer;white-space:nowrap;overflow:hidden;user-select:none;-webkit-user-select:none;transition:background .12s,box-shadow .12s"><sc-if value="{{ k.icon }}"><i class="{{ k.icon }}" style="font-size:16px"></i></sc-if>{{ k.label }}<sc-if value="{{ k.lock }}"><i class="ph-fill ph-lock-simple" style="position:absolute;top:4px;right:4px;font-size:9px"></i></sc-if><sc-if value="{{ k.bar }}"><span style="position:absolute;left:32%;right:32%;bottom:4px;height:2px;border-radius:1px;background:var(--st-acc)"></span></sc-if></button>
+</sc-for>
+</div>
+</sc-for>
+<sc-if value="{{ b.pop }}">
+<div style="position:absolute;z-index:4;bottom:calc(100% + 4px);left:{{ b.pop.left }};transform:translateX({{ b.pop.tx }});width:max-content;max-width:280px;padding:10px 12px;border-radius:12px;background:var(--st-surf2);box-shadow:inset 0 0 0 1px {{ b.pop.ring }},var(--shadow-md);display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 15px var(--st-mono);color:{{ b.pop.color }}">{{ b.pop.key }}</span><span style="font-size:12px;color:var(--st-mute)">{{ b.pop.desc }}</span></div>
+<sc-if value="{{ b.pop.edit }}"><button onClick="{{ b.pop.onEdit }}" class="btn btn-secondary" style="height:40px;border-radius:20px;gap:8px;color:var(--st-text);justify-content:flex-start;padding:0 14px"><i class="ph ph-pencil-simple"></i>Edit keys…</button></sc-if>
+</div>
+</sc-if>
+</div>
+</sc-if>
+<sc-if value="{{ b.isDirect }}">
+<div style="display:flex;align-items:center;gap:10px;padding:{{ b.pad }};flex:{{ b.flex }};min-width:0;box-sizing:border-box">
+<button onClick="{{ b.onToggle }}" style="width:44px;height:44px;border-radius:22px;flex:none;border:none;background:var(--st-acc-tint);box-shadow:inset 0 0 0 1.5px var(--st-acc);color:var(--st-acc);font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ph-fill ph-keyboard"></i></button>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+<div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500"><span style="width:7px;height:7px;border-radius:50%;flex:none;background:var(--st-acc);box-shadow:0 0 0 3px var(--st-acc-tint)"></span>{{ b.title }}</div>
+<div style="font-size:12px;color:var(--st-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ b.sub }}</div>
+</div>
+<sc-if value="{{ b.chip }}"><span style="flex:none;height:28px;padding:0 10px;border-radius:14px;display:flex;align-items:center;gap:5px;font:500 12px var(--st-mono);color:var(--st-acc-ink);background:var(--st-acc-tint);box-shadow:inset 0 0 0 1px var(--st-acc)"><i class="{{ b.chip.icon }}" style="font-size:11px"></i>{{ b.chip.label }}</span></sc-if>
+</div>
+</sc-if>
 <sc-if value="{{ b.isInput }}">
 <div style="display:flex;flex-direction:column;gap:4px;padding:{{ b.pad }};flex:{{ b.flex }};min-width:0;box-sizing:border-box">
 <sc-if value="{{ b.note }}"><div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--st-mute);padding:0 6px">{{ pulse }}{{ b.note }}</div></sc-if>
 <div style="display:flex;align-items:flex-end;gap:6px">
+<sc-if value="{{ b.toggle }}"><button onClick="{{ b.toggle.onClick }}" disabled="{{ b.disabled }}" class="btn btn-ghost btn-icon" style="width:44px;height:44px;border-radius:22px;font-size:20px;color:var(--st-text);flex:none;opacity:{{ b.op }};box-shadow:inset 0 0 0 1px var(--st-line)"><i class="ph ph-keyboard"></i></button></sc-if>
 <div style="flex:1;min-width:0;display:flex;border-radius:22px;background:var(--st-surf2);box-shadow:inset 0 0 0 {{ b.ringW }} {{ b.ring }};opacity:{{ b.op }}">
 <textarea value="{{ b.text }}" onChange="{{ b.onText }}" disabled="{{ b.disabled }}" placeholder="Reply to agent…" rows="{{ b.rows }}" style="flex:1;min-width:0;resize:none;border:none;outline:none;background:transparent;color:var(--st-text);font:14px/20px var(--font-body);padding:12px 16px;box-sizing:border-box;caret-color:var(--st-acc)"></textarea>
 </div>
@@ -205,18 +239,22 @@
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;input&quot;,&quot;multi&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;read&quot;,&quot;fit&quot;],&quot;default&quot;:&quot;read&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;kb&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;scrolled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;cols&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:120,&quot;min&quot;:60,&quot;max&quot;:220,&quot;tsType&quot;:&quot;number&quot;},&quot;rows&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:40,&quot;min&quot;:10,&quot;max&quot;:80,&quot;tsType&quot;:&quot;number&quot;},&quot;draft&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;input&quot;,&quot;multi&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;read&quot;,&quot;fit&quot;],&quot;default&quot;:&quot;read&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;kb&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;scrolled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;cols&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:120,&quot;min&quot;:60,&quot;max&quot;:220,&quot;tsType&quot;:&quot;number&quot;},&quot;rows&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:40,&quot;min&quot;:10,&quot;max&quot;:80,&quot;tsType&quot;:&quot;number&quot;},&quot;draft&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;bar&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;strip&quot;,&quot;grid&quot;],&quot;default&quot;:&quot;strip&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;two&quot;,&quot;three&quot;],&quot;default&quot;:&quot;two&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;direct&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;mod&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;ctrl1&quot;,&quot;ctrlL&quot;,&quot;alt1&quot;,&quot;ctrlc&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;menu&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;lpkey&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;typed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
 class Component extends DCLogic {
-  state = { phase: null, extra: null, sel: 0, msel: 0, checked: null, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false, away: null, awayN: null };
+  state = { phase: null, extra: null, sel: 0, msel: 0, checked: null, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false, away: null, awayN: null, direct: null, mod: null, lp: null, menu: null, sent: null };
+  KN = { esc: 'Esc', tab: 'Tab', stab: 'S-Tab', up: 'Up', down: 'Down', left: 'Left', right: 'Right', enter: 'Enter', space: 'Space', bksp: 'Bksp', del: 'Del', ctrlc: 'Ctrl+C', paste: 'Paste', ctrl: 'Ctrl', alt: 'Alt', home: 'Home', end: 'End', pgup: 'PgUp', pgdn: 'PgDn' };
+  KI = { up: 'ph-bold ph-arrow-up', down: 'ph-bold ph-arrow-down', left: 'ph-bold ph-arrow-left', right: 'ph-bold ph-arrow-right', bksp: 'ph ph-backspace' };
+  KDESC = { esc: 'sends Esc', tab: 'sends Tab', stab: 'Shift+Tab · cycles mode', up: 'arrow key', down: 'arrow key', left: 'arrow key', right: 'arrow key', enter: 'sends Enter', space: 'sends a space', bksp: 'deletes left', del: 'deletes right', ctrlc: 'interrupt · tap twice', paste: 'clipboard → reply field', ctrl: 'tap: next key · hold: lock', alt: 'tap: next key · hold: lock', home: 'line start', end: 'line end', pgup: 'page up', pgdn: 'page down' };
+  LAY = { two: [['esc', 'tab', 'stab', 'up', 'ctrlc', 'paste', 'bksp'], ['ctrl', 'alt', 'left', 'down', 'right', 'space', 'enter']] };
   OPTS = ['Yes', "Yes, and don't ask again for sudo apt install commands in ~/code/api", 'No, and tell Claude what to do differently (esc)'];
   MOPTS = ['Unit · src/auth', 'Integration · needs Postgres', 'E2E · slow, about 6 min', 'Lint + typecheck'];
   MODES = ['accept edits on', 'plan mode on', 'default mode'];
   CLIP = 'see CI run 4821: session.spec.ts flaked 3/20 before the fix';
   PAL = [['k','black','0.34 0.02 275'],['r','red','0.68 0.16 22'],['g','green','0.76 0.13 150'],['y','yellow','0.83 0.12 85'],['b','blue','0.72 0.11 255'],['m','magenta','0.72 0.12 288'],['c','cyan','0.78 0.09 205'],['w','white','0.84 0.01 275'],['K','br black','0.52 0.02 275'],['R','br red','0.76 0.15 22'],['G','br green','0.84 0.12 150'],['Y','br yellow','0.90 0.11 90'],['B','br blue','0.80 0.10 255'],['M','br magenta','0.80 0.11 288'],['C','br cyan','0.86 0.08 205'],['W','br white','0.97 0.005 275']];
 
-  componentDidMount() { setTimeout(() => { const el = this.termEl; if (!el) return; if (this.isAway()) { el.scrollTop = el.scrollHeight * 0.3; this.lastKey = this.key; } else this.toBottom(); }, 80); }
+  componentDidMount() { const p0 = this.props; if (p0.typed) this.setState({ paste: p0.typed }); if ((p0.mod || '').includes('ctrlc')) this.setState({ ctrlArm: true }); setTimeout(() => { const el = this.termEl; if (!el) return; if (this.isAway()) { el.scrollTop = el.scrollHeight * 0.3; this.lastKey = this.key; } else this.toBottom(); }, 80); }
   componentDidUpdate() { if (this.key !== this.lastKey && !this.isAway()) this.toBottom(); }
-  componentWillUnmount() { clearTimeout(this.tf); clearTimeout(this.tc); clearTimeout(this.lpT); }
+  componentWillUnmount() { clearTimeout(this.kT); clearTimeout(this.sT); clearTimeout(this.tf); clearTimeout(this.tc); clearTimeout(this.lpT); }
   isAway() { return this.state.away ?? !!this.props.scrolled; }
   toBottom() { const el = this.termEl; if (!el) return; el.scrollTop = el.scrollHeight; el.scrollLeft = Math.max(0, this.curCol * this.fsPx * 0.6 + 8 - el.clientWidth * 0.75); this.lastKey = this.key; }
 
@@ -358,10 +396,52 @@ class Component extends DCLogic {
     else this.setState(s => ({ paste: s.paste + t, text: '' }));
   }
 
+  flash(id) { clearTimeout(this.tf); this.setState({ pressed: id }); this.tf = setTimeout(() => this.setState({ pressed: null }), 160); }
+  modNow() { const m = this.props.mod || ''; return this.state.mod ?? { ctrl: m.includes('ctrlL') ? 2 : m.includes('ctrl1') ? 1 : 0, alt: m.includes('altL') ? 2 : m.includes('alt1') ? 1 : 0 }; }
+  flashSent(t) { clearTimeout(this.sT); this.setState({ sent: t }); this.sT = setTimeout(() => this.setState({ sent: null }), 1800); }
+  sendMod(label) { const m = this.modNow(); const pre = [m.ctrl && 'Ctrl', m.alt && 'Alt'].filter(Boolean); if (!pre.length) return false; this.setState({ mod: { ctrl: m.ctrl === 2 ? 2 : 0, alt: m.alt === 2 ? 2 : 0 } }); this.flashSent(pre.join('+') + '+' + label); return true; }
+  gridKey(id) {
+    this.setState({ lp: null, menu: false });
+    if (id === 'ctrl' || id === 'alt') { const m = this.modNow(); this.setState({ mod: { ...m, [id]: m[id] ? 0 : 1 } }); return; }
+    const ch = id.startsWith('ch:') ? id.slice(3) : null, nm = ch ?? this.KN[id];
+    if (id !== 'ctrlc' && id !== 'paste' && this.sendMod(nm)) { this.flash(id); return; }
+    if (ch) { this.flash(id); this.setState(s => ({ paste: s.paste + ch })); return; }
+    if (['home', 'end', 'pgup', 'pgdn', 'del', 'tab'].includes(id)) { this.flash(id); return; }
+    this.onKey(id);
+  }
+  cell(id, o) {
+    const ch = id.startsWith('ch:') ? id.slice(3) : null, arrow = !!this.KI[id] && id !== 'bksp';
+    const mv = (id === 'ctrl' || id === 'alt') ? o.m[id] : 0, pr = this.state.pressed === id, arm = id === 'ctrlc' && this.state.ctrlArm;
+    let bg = arrow ? 'color-mix(in oklab,var(--st-surf2) 82%,var(--st-text))' : 'var(--st-surf2)', ring = 'var(--st-line)', ringW = '1px', color = id === 'ctrlc' ? 'var(--st-block)' : 'var(--st-text)';
+    if (mv === 1) { bg = 'var(--st-acc-tint)'; ring = 'var(--st-acc)'; color = 'var(--st-acc-ink)'; }
+    if (mv === 2) { bg = 'color-mix(in oklab,var(--st-acc) 34%,var(--st-surf2))'; ring = 'var(--st-acc)'; ringW = '1.5px'; }
+    if (pr) { bg = 'var(--st-acc-tint)'; ring = 'var(--st-acc)'; }
+    if (arm) { bg = 'var(--st-block-tint)'; ring = 'var(--st-block)'; ringW = '1.5px'; }
+    if (o.lp === id && !o.disabled) { ring = 'var(--st-acc)'; ringW = '1.5px'; }
+    const lv = !o.disabled;
+    return { label: ch ?? (this.KI[id] ? '' : this.KN[id]), icon: this.KI[id] || '', bg, ring, ringW, color, op: o.disabled ? '.38' : '1', disabled: !!o.disabled, lock: mv === 2, bar: mv === 1,
+      onClick: lv ? () => { if (this.lpFired) { this.lpFired = false; return; } this.gridKey(id); } : () => {},
+      onDown: lv ? () => { this.lpFired = false; clearTimeout(this.kT); this.kT = setTimeout(() => { this.lpFired = true; if (id === 'ctrl' || id === 'alt') { const m = this.modNow(); this.setState({ mod: { ...m, [id]: 2 } }); } else this.setState({ lp: id }); }, 500); } : () => {},
+      onUp: lv ? () => clearTimeout(this.kT) : () => {} };
+  }
+  grid(o) {
+    const s = this.state, p = this.props, m = this.modNow(), lp = s.lp ?? p.lpkey ?? null;
+    const L = o.layout === 'three' ? [['ch:/', 'ch:-', 'ch:$', 'ch::', 'home', 'end', 'pgup'], ...this.LAY.two] : this.LAY.two;
+    let pop = null;
+    const rows = L.map(r => ({ cols: `repeat(${r.length},minmax(0,1fr))`, keys: r.map((id, ci) => {
+      const conf = id === 'ctrlc' && s.ctrlArm;
+      if (!o.disabled && (conf || (id === lp && !pop))) {
+        const n = r.length, X = ci === 0 ? 0 : ci === n - 1 ? 1 : (ci + .5) / n, tx = ci === 0 ? '0' : ci === n - 1 ? '-100%' : '-50%', isCh = id.startsWith('ch:');
+        pop = { left: `calc(8px + (100% - 16px) * ${X})`, tx, key: conf ? 'Ctrl+C' : isCh ? id.slice(3) : this.KN[id], desc: conf ? 'Tap again within 2.5s to interrupt' : isCh ? 'types the character' : this.KDESC[id], color: conf ? 'var(--st-block)' : 'var(--st-text)', ring: conf ? 'color-mix(in oklab,var(--st-block) 50%,transparent)' : 'var(--st-line)', edit: !conf, onEdit: () => this.setState({ lp: null }) };
+      }
+      return this.cell(id, { m, lp, disabled: o.disabled }); }) }));
+    return { isGrid: true, pad: o.pad, flex: o.flex, rows, pop };
+  }
+
   renderVals() {
     const p = this.props, s = this.state;
     const theme = p.theme ?? 'dark', sheet = p.screen === 'sheet', land = (p.orient ?? 'portrait') === 'landscape';
-    const S0 = p.state ?? 'waiting', hub = p.hub ?? 'MacBook', kb = !!p.kb && !land && !sheet;
+    const S0 = p.state ?? 'waiting', hub = p.hub ?? 'MacBook', kb0 = !!p.kb && !land && !sheet;
     this.cols = p.cols ?? 120; const rows = p.rows ?? 40;
     const arc = React.createElement('span', { style: { display: 'block', width: 12, height: 12, boxSizing: 'border-box', borderRadius: '50%', border: '1.75px solid color-mix(in oklab, var(--st-run) 22%, transparent)', borderTopColor: 'var(--st-run)', animation: 'st-spin .9s linear infinite' } });
     const pulse = React.createElement('span', { style: { display: 'block', flex: 'none', width: 6, height: 6, borderRadius: '50%', background: 'var(--st-run)', animation: 'st-pulse 1.2s ease-in-out infinite' } });
@@ -376,6 +456,8 @@ class Component extends DCLogic {
     const isErr = ['revoked', 'unreachable', 'mismatch'].includes(S0);
     const ctl = ['live', 'waiting', 'input', 'multi', 'paused', 'scrolling', 'reconnecting', 'catching', 'opening'].includes(S0);
     const dis = ['paused', 'scrolling', 'reconnecting', 'opening'].includes(S0);
+    const grid = p.bar === 'grid' && !sheet, direct = grid && ctl && !dis && (s.direct ?? !!p.direct), kb = (kb0 || direct) && !land && !sheet;
+    const menuOpen = grid && (s.menu ?? !!p.menu);
     const away = s.away ?? !!p.scrolled, awayN = s.awayN ?? (this.initN - 12);
     const newN = away ? Math.max(0, lines.length - awayN) : 0;
 
@@ -412,7 +494,7 @@ class Component extends DCLogic {
     })[k]();
     const input = (o) => {
       const t = o.text ?? '';
-      return { isInput: true, pad: sheet ? '0' : row ? '6px 8px 6px 0' : kb ? '8px 8px 2px' : '2px 8px 8px', flex: row ? '0 0 360px' : 'none', text: t, rows: String(Math.min(4, Math.max(1, Math.ceil(t.length / 34)))), disabled: !!o.disabled, op: o.disabled ? '.45' : '1', note: o.note || '', sendBg: o.disabled ? 'transparent' : 'var(--st-acc-tint)',
+      return { isInput: true, pad: sheet ? '0' : row ? '6px 8px 6px 0' : kb ? '8px 8px 2px' : '2px 8px 8px', flex: row ? '0 0 360px' : 'none', text: t, rows: String(Math.min(4, Math.max(1, Math.ceil(t.length / 34)))), disabled: !!o.disabled, op: o.disabled ? '.45' : '1', note: o.note || '', toggle: o.toggle || null, sendBg: o.disabled ? 'transparent' : 'var(--st-acc-tint)',
         ring: o.focus ? 'var(--st-acc)' : 'var(--st-line)', ringW: o.focus ? '1.5px' : '1px',
         onText: o.live ? e => this.setState({ text: e.target.value }) : () => {},
         onSend: o.live ? () => { if (this.lp) { this.lp = false; return; } this.send(true); } : () => {},
@@ -432,10 +514,25 @@ class Component extends DCLogic {
       if (S0 === 'paused') blocks.push(banner('paused'));
       if (S0 === 'scrolling') blocks.push(banner('scrolling'));
       if (ctl) {
+        if (grid) {
+          const md = this.modNow(), lk = md.ctrl === 2 ? 'Ctrl' : md.alt === 2 ? 'Alt' : null, any = md.ctrl || md.alt;
+          const chip = any ? { icon: lk ? 'ph-fill ph-lock-simple' : 'ph-bold ph-arrow-line-down', label: [md.ctrl && 'Ctrl', md.alt && 'Alt'].filter(Boolean).join('+') + (lk ? ' locked' : ' · next') } : null;
+          const gB = this.grid({ layout: p.layout, disabled: dis, pad: row ? '6px 8px' : kb ? '4px 8px 6px' : '8px 8px 4px', flex: row ? '1 1 0' : 'none' });
+          if (direct) {
+            const dB = { isDirect: true, pad: row ? '6px 8px 6px 0' : '6px 8px 0', flex: row ? '0 0 330px' : 'none', title: 'Typing to agent', chip, onToggle: () => this.setState({ direct: false }),
+              sub: s.sent ? `Sent ${s.sent}` : lk ? `Every key gets ${lk} until you tap it again` : any ? 'Applies to the next key, then releases' : 'Every key goes straight to the pane' };
+            if (row) blocks.push(gB, dB); else blocks.push(dB, gB);
+          } else {
+            const iT = S0 === 'reconnecting' ? 'use the backoff helper, not a fixed sleep' : (p.draft ?? '');
+            const inB = input({ live: !dis, disabled: dis, focus: kb, text: s.text ?? iT, note: S0 === 'reconnecting' ? reconNote : '', toggle: { onClick: () => this.setState({ direct: true }) } });
+            if (kb) blocks.push(inB, gB); else blocks.push(gB, inB);
+          }
+        } else {
         const keyBlk = { isKeys: true, wrap: 'nowrap', pad: row ? '6px 8px' : kb ? '4px 8px 8px' : '8px 8px 6px', flex: row ? '1 1 0' : 'none', bg: 'transparent', radius: '0', keys: this.keys({ disabled: dis, pressed: s.pressed, ctrlArm: s.ctrlArm, onKey: id => this.onKey(id) }) };
         const initText = S0 === 'reconnecting' ? 'use the backoff helper, not a fixed sleep' : (p.draft ?? '');
         const inBlk = input({ live: !dis, disabled: dis, focus: kb, text: s.text ?? initText, note: S0 === 'reconnecting' ? reconNote : '' });
         if (kb) blocks.push(inBlk, keyBlk); else blocks.push(keyBlk, inBlk);
+        }
       }
       if (S0 === 'watch') blocks.push(strip('watch'));
       if (S0 === 'nocontrol') blocks.push(strip('nocontrol'));
@@ -492,7 +589,12 @@ class Component extends DCLogic {
     }
 
     const kbKey = (label, o = {}) => ({ label, icon: o.icon || '', flex: o.flex || '1', bg: o.fn ? 'var(--st-surf)' : o.acc ? 'var(--st-acc-tint)' : 'color-mix(in oklab,var(--st-text) 9%,var(--st-surf2))', color: o.acc ? 'var(--st-acc)' : 'var(--st-text)', font: o.fn ? '500 13px var(--font-body)' : '400 19px var(--font-body)',
-      onClick: () => { if (o.ch != null) this.setState(st => ({ text: (st.text ?? (p.draft ?? '')) + o.ch })); if (o.del) this.setState(st => ({ text: (st.text ?? (p.draft ?? '')).slice(0, -1) })); if (o.enter) this.send(true); } });
+      onClick: () => {
+        if (direct) {
+          if (o.ch != null) { const md = this.modNow(); if (md.ctrl && o.ch === 'c') { this.setState({ mod: { ctrl: md.ctrl === 2 ? 2 : 0, alt: md.alt === 2 ? 2 : 0 } }); this.push([this.L(this.S('  └  ', 'K'), this.S('Interrupted by user', 'r'))], 'idle'); } else if (!this.sendMod(o.ch === ' ' ? 'Space' : o.ch.toUpperCase())) this.setState(st => ({ paste: st.paste + o.ch })); }
+          if (o.del) this.gridKey('bksp'); if (o.enter) this.gridKey('enter'); return;
+        }
+        if (o.ch != null) this.setState(st => ({ text: (st.text ?? (p.draft ?? '')) + o.ch })); if (o.del) this.setState(st => ({ text: (st.text ?? (p.draft ?? '')).slice(0, -1) })); if (o.enter) this.send(true); } });
     const kbRows = kb ? [
       { inset: '0', keys: 'qwertyuiop'.split('').map(c => kbKey(c, { ch: c })) },
       { inset: '18px', keys: 'asdfghjkl'.split('').map(c => kbKey(c, { ch: c })) },
@@ -513,7 +615,13 @@ class Component extends DCLogic {
       jump: away && !isErr && S0 !== 'opening' ? { n: newN ? `· ${newN} new` : '', onClick: () => this.setState({ away: false, awayN: null }, () => this.toBottom()) } : null,
       fs: this.fsPx.toFixed(2) + 'px', lines, termOp: S0 === 'ended' ? '.5' : '1', termFilter: S0 === 'ended' ? 'saturate(.4)' : 'none', overlay,
       blocks, ctlDir: row ? 'row' : 'column', ctlWrap: row ? 'wrap' : 'nowrap', ctlAlign: row ? 'flex-end' : 'stretch', ctlBg: sheet ? 'transparent' : 'var(--st-surf)', ctlPad: sheet ? '0 28px 32px' : '0', ctlShadow: sheet ? 'none' : '0 -1px 0 var(--st-line)',
-      kbOpen: kb, kbRows, kbSugg: ['5s', 'match', 'gateway']
+      kbOpen: kb, kbRows, kbSugg: direct ? ['Suggestions off · keys go to the terminal'] : ['5s', 'match', 'gateway'],
+      moreBtn: grid, onMore: () => this.setState({ menu: !menuOpen }),
+      menu: menuOpen ? [
+        { icon: 'ph ph-arrows-out-line-horizontal', label: zoom === 'fit' ? 'Readable size · 9sp' : 'Fit to width', bg: 'transparent', onClick: () => this.setState({ menu: false, zoom: zoom === 'fit' ? 'read' : 'fit' }) },
+        { icon: 'ph ph-copy', label: 'Copy visible screen', bg: 'transparent', onClick: () => this.setState({ menu: false }) },
+        { icon: 'ph ph-keyboard', label: 'Edit keys', bg: s.menu == null && p.menu ? 'var(--st-acc-tint)' : 'transparent', onClick: () => this.setState({ menu: false }) }
+      ] : null
     };
   }
 }
