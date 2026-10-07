@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
+use sessiontap_core::paths::HubPaths;
 use sessiontap_hub::config::{HubConfig, Subscription};
 use sessiontap_hub::ingest::{self, HubPublication};
 use sessiontap_hub::listen::HubRequest;
-use sessiontap_hub::paths::HubPaths;
 use sessiontap_hub::remote::{self, RemoteGate, RemoteLimits};
 use sessiontap_hub::routing::CommandLimits;
 use sessiontap_hub::scope::Scope;

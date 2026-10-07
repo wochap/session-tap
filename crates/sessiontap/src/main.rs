@@ -10,7 +10,7 @@ use sessiontap_core::{
         Activity, ActivityConfirmation, Capabilities, EventEvidence, EvidenceChannel,
         EvidenceTrust, InvocationId, InvocationSnapshot, Lifecycle, ProcessMetadata, derive_status,
     },
-    paths::AppPaths,
+    paths::{AppPaths, HubPaths},
     protocol::{Request, Response},
     terminal::{Key, TerminalFrame, TerminalInput},
 };
@@ -19,11 +19,11 @@ use sessiontap_infra::{
     fs::prepare_private_dir,
     multiplexer::MultiplexerRegistry,
     process::process_start_identity,
-    socket::{bind_error, bind_private_unix_datagram},
+    socket::{acquire_exclusive_lock, bind_error, bind_private_unix_datagram},
 };
 use std::{
     env, fs,
-    io::{IsTerminal, Read, Write},
+    io::{BufRead, IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -62,6 +62,10 @@ enum Cli {
         invocation: String,
         input: TerminalInput,
     },
+    Nuke {
+        yes: bool,
+        dry_run: bool,
+    },
     Launch {
         provider: String,
         args: Vec<String>,
@@ -91,6 +95,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
             provider: args.next().context("missing provider")?,
         }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
+        "nuke" => parse_nuke(args),
         "terminal" => parse_terminal(args),
         "--help" | "-h" => bail!("{}", usage("provider arguments...")),
         provider => Ok(Cli::Launch {
@@ -98,6 +103,20 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
             args: args.collect(),
         }),
     }
+}
+
+const NUKE_USAGE: &str = "usage: sessiontap nuke [--yes] [--dry-run]";
+
+fn parse_nuke(args: impl Iterator<Item = String>) -> Result<Cli> {
+    let (mut yes, mut dry_run) = (false, false);
+    for arg in args {
+        match arg.as_str() {
+            "--yes" | "-y" => yes = true,
+            "--dry-run" => dry_run = true,
+            _ => bail!("unknown nuke argument '{arg}'; {NUKE_USAGE}"),
+        }
+    }
+    Ok(Cli::Nuke { yes, dry_run })
 }
 
 const TERMINAL_USAGE: &str = "usage: sessiontap terminal watch <id> | terminal send <id> (--key <key>)... | --text <text> [--enter]\n  <key>: [ctrl+][alt+](up|down|left|right|escape|tab|back_tab|enter|space|backspace|ctrl_c|home|end|page_up|page_down|delete|f1..f12|<char>)";
@@ -142,7 +161,7 @@ fn usage(provider_args: &str) -> String {
         .collect::<Vec<_>>()
         .join("|");
     format!(
-        "usage: sessiontap <{providers}> [{provider_args}] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | completions <shell>"
+        "usage: sessiontap <{providers}> [{provider_args}] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | nuke | completions <shell>"
     )
 }
 
@@ -160,6 +179,21 @@ async fn main() -> Result<()> {
         return completions(shell);
     }
     let paths = AppPaths::discover()?;
+    if let Cli::Nuke { yes, dry_run } = cli {
+        let stdin = std::io::stdin();
+        let interactive = stdin.is_terminal();
+        return nuke(
+            &paths,
+            &HubPaths::discover()?,
+            NukeOptions {
+                yes,
+                dry_run,
+                interactive,
+            },
+            &mut stdin.lock(),
+            &mut std::io::stdout(),
+        );
+    }
     match cli {
         Cli::Status => status(&paths).await,
         Cli::Listen => listen(&paths).await,
@@ -169,8 +203,106 @@ async fn main() -> Result<()> {
         Cli::TerminalWatch { invocation } => terminal_watch(&paths, &invocation).await,
         Cli::TerminalSend { invocation, input } => terminal_send(&paths, &invocation, input).await,
         Cli::Launch { provider, args } => launch(&paths, &provider, args).await,
-        Cli::Completions { .. } => unreachable!(),
+        Cli::Completions { .. } | Cli::Nuke { .. } => unreachable!(),
     }
+}
+
+struct NukeOptions {
+    yes: bool,
+    dry_run: bool,
+    interactive: bool,
+}
+
+/// Directories `nuke` removes: broker and hub state and runtime dirs.
+fn nuke_targets(app: &AppPaths, hub: &HubPaths) -> Vec<PathBuf> {
+    vec![
+        app.state_dir.clone(),
+        hub.state_dir.clone(),
+        app.runtime_dir.clone(),
+        hub.runtime_dir.clone(),
+    ]
+}
+
+/// Fails when any component holds its lock. Missing lock files are skipped so
+/// probing never creates one.
+fn nuke_probe_locks(app: &AppPaths, hub: &HubPaths) -> Result<()> {
+    for (component, lock) in [
+        ("sessiontapd", app.lock()),
+        ("hook-inspection listener", app.hook_inspection_lock()),
+        ("sessiontap-hub", hub.lock()),
+    ] {
+        if !lock.exists() {
+            continue;
+        }
+        match acquire_exclusive_lock(&lock) {
+            Ok(_probe) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => bail!(
+                "{component} is running (holds {}); stop it first",
+                lock.display()
+            ),
+            Err(error) => {
+                return Err(error).with_context(|| format!("probing {}", lock.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn nuke(
+    app: &AppPaths,
+    hub: &HubPaths,
+    options: NukeOptions,
+    input: &mut impl BufRead,
+    out: &mut impl Write,
+) -> Result<()> {
+    let targets: Vec<PathBuf> = nuke_targets(app, hub)
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect();
+    if targets.is_empty() {
+        writeln!(out, "nothing to remove")?;
+        return Ok(());
+    }
+    nuke_probe_locks(app, hub)?;
+    writeln!(out, "sessiontap nuke will remove:")?;
+    for target in &targets {
+        writeln!(out, "  {}", target.display())?;
+    }
+    writeln!(
+        out,
+        "warning: hub pairing (TLS identity and paired devices) will be lost; devices must pair again"
+    )?;
+    writeln!(
+        out,
+        "note: remote hubs keep their state; forget this source there or reset them too"
+    )?;
+    if options.dry_run {
+        return Ok(());
+    }
+    if !options.yes {
+        if !options.interactive {
+            bail!("stdin is not a terminal; pass --yes to confirm");
+        }
+        write!(out, "proceed? [y/N] ")?;
+        out.flush()?;
+        let mut answer = String::new();
+        input.read_line(&mut answer)?;
+        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            writeln!(out, "aborted; nothing removed")?;
+            return Ok(());
+        }
+    }
+    for target in &targets {
+        fs::remove_dir_all(target)
+            .with_context(|| format!("failed to remove {}", target.display()))?;
+    }
+    writeln!(
+        out,
+        "removed {} director{}",
+        targets.len(),
+        if targets.len() == 1 { "y" } else { "ies" }
+    )?;
+    Ok(())
 }
 
 fn completions(shell: Option<String>) -> Result<()> {
@@ -947,7 +1079,7 @@ mod tests {
         let help = parse(vec!["--help".into()].into_iter()).unwrap_err();
         assert_eq!(
             help.to_string(),
-            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | completions <shell>"
+            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | nuke | completions <shell>"
         );
         let empty = parse(std::iter::empty()).unwrap_err();
         assert!(
@@ -1230,6 +1362,9 @@ mod tests {
             "listen",
             "inspect-hooks",
             "completions",
+            "nuke",
+            "--yes",
+            "--dry-run",
             "terminal",
             "watch",
             "send",
@@ -1271,5 +1406,145 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    fn nuke_env(root: &Path, runtime: Option<&Path>) -> (AppPaths, HubPaths) {
+        let get = |k: &str| match k {
+            "HOME" => Some(root.join("home")),
+            "XDG_STATE_HOME" => Some(root.join("state")),
+            "XDG_CONFIG_HOME" => Some(root.join("config")),
+            "XDG_RUNTIME_DIR" => runtime.map(Path::to_path_buf),
+            _ => None,
+        };
+        (
+            AppPaths::from_env(get).unwrap(),
+            HubPaths::from_env(get).unwrap(),
+        )
+    }
+
+    fn nuke_fixture(root: &Path) -> (AppPaths, HubPaths) {
+        let (app, hub) = nuke_env(root, Some(&root.join("run")));
+        for dir in [
+            &app.state_dir,
+            &hub.state_dir,
+            &app.runtime_dir,
+            &hub.runtime_dir,
+            &app.config_dir,
+            &hub.config_dir,
+        ] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        (app, hub)
+    }
+
+    fn run_nuke(
+        app: &AppPaths,
+        hub: &HubPaths,
+        yes: bool,
+        dry_run: bool,
+        interactive: bool,
+        input: &str,
+    ) -> (Result<()>, String) {
+        let mut out = Vec::new();
+        let result = nuke(
+            app,
+            hub,
+            NukeOptions {
+                yes,
+                dry_run,
+                interactive,
+            },
+            &mut input.as_bytes(),
+            &mut out,
+        );
+        (result, String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn nuke_parse_cases() {
+        let p = |a: &[&str]| parse(a.iter().map(|s| (*s).to_string()));
+        assert_eq!(
+            p(&["nuke"]).unwrap(),
+            Cli::Nuke {
+                yes: false,
+                dry_run: false
+            }
+        );
+        assert_eq!(
+            p(&["nuke", "--yes", "--dry-run"]).unwrap(),
+            Cli::Nuke {
+                yes: true,
+                dry_run: true
+            }
+        );
+        assert!(p(&["nuke", "--force"]).is_err());
+    }
+
+    #[test]
+    fn nuke_dry_run_deletes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, hub) = nuke_fixture(tmp.path());
+        let (result, out) = run_nuke(&app, &hub, false, true, false, "");
+        result.unwrap();
+        assert!(out.contains(&app.state_dir.display().to_string()));
+        assert!(out.contains("hub pairing"));
+        for target in nuke_targets(&app, &hub) {
+            assert!(target.exists());
+        }
+    }
+
+    #[test]
+    fn nuke_yes_removes_targets_and_keeps_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, hub) = nuke_fixture(tmp.path());
+        fs::write(app.lock(), "").unwrap(); // stale lock proceeds
+        run_nuke(&app, &hub, true, false, false, "").0.unwrap();
+        for target in nuke_targets(&app, &hub) {
+            assert!(!target.exists(), "{}", target.display());
+        }
+        assert!(app.config_dir.exists() && hub.config_dir.exists());
+        let (result, out) = run_nuke(&app, &hub, true, false, false, "");
+        result.unwrap();
+        assert!(out.contains("nothing to remove"));
+    }
+
+    #[test]
+    fn nuke_confirmation_and_non_interactive_refusal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, hub) = nuke_fixture(tmp.path());
+        assert!(run_nuke(&app, &hub, false, false, false, "").0.is_err());
+        let (result, out) = run_nuke(&app, &hub, false, false, true, "n\n");
+        result.unwrap();
+        assert!(out.contains("aborted"));
+        assert!(app.state_dir.exists());
+        run_nuke(&app, &hub, false, false, true, "yes\n").0.unwrap();
+        assert!(!app.state_dir.exists());
+    }
+
+    #[test]
+    fn nuke_held_lock_aborts_without_deletion() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, hub) = nuke_fixture(tmp.path());
+        let _held = acquire_exclusive_lock(&hub.lock()).unwrap();
+        let error = run_nuke(&app, &hub, true, false, false, "").0.unwrap_err();
+        assert!(error.to_string().contains("sessiontap-hub"), "{error}");
+        for target in nuke_targets(&app, &hub) {
+            assert!(target.exists());
+        }
+        // probing must not create missing lock files
+        assert!(!app.lock().exists() && !app.hook_inspection_lock().exists());
+    }
+
+    #[test]
+    fn nuke_runtime_falls_back_under_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (app, hub) = nuke_env(tmp.path(), None);
+        let state = tmp.path().join("state");
+        assert_eq!(app.runtime_dir, state.join("runtime/sessiontap"));
+        assert_eq!(hub.runtime_dir, state.join("runtime/sessiontap-hub"));
+        fs::create_dir_all(&hub.runtime_dir).unwrap();
+        let (result, out) = run_nuke(&app, &hub, false, true, false, "");
+        result.unwrap();
+        assert!(out.contains(&hub.runtime_dir.display().to_string()));
     }
 }

@@ -228,14 +228,17 @@ stable extent, and default to 64 MiB per scan and 1 MiB per line.
 
 ## Delete previous Sessiontap data/database
 
-> WARNING: These commands permanently delete all local Sessiontap and Sessiontap Hub state, including their databases.
+> WARNING: This permanently deletes all local Sessiontap and Sessiontap Hub state, including their databases and hub pairing (TLS identity and paired devices).
 
 ```sh
-rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/sessiontap"
-rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/sessiontap-hub"
-rm -rf "${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/runtime}/sessiontap"
-rm -rf "${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/runtime}/sessiontap-hub"
+sessiontap nuke --dry-run   # list what would be removed
+sessiontap nuke             # confirm interactively; --yes skips the prompt
 ```
+
+`nuke` removes the `sessiontap` and `sessiontap-hub` directories under
+`$XDG_STATE_HOME` and `$XDG_RUNTIME_DIR`. It refuses while `sessiontapd`, the
+hook-inspection listener, or `sessiontap-hub` is running, and leaves
+configuration and provider hooks alone. Remote hubs keep their state.
 
 ## Provenance
 

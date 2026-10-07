@@ -10,6 +10,7 @@ _sessiontap() {
     'listen:stream invocation updates'
     'inspect-hooks:stream ephemeral raw managed-hook payloads'
     'terminal:watch or send input to a live agent terminal'
+    'nuke:remove local SessionTap and hub data'
     'completions:print shell completions'
   )
   providers=(claude codex pi qwen)
@@ -43,15 +44,22 @@ _sessiontap() {
         terminal)
           compadd watch send
           ;;
+        nuke)
+          compadd -- --yes --dry-run
+          ;;
       esac
       ;;
     4)
       if [[ ${words[2]} == hooks && ${words[3]} == remove ]]; then
         _describe 'provider' providers
+      elif [[ ${words[2]} == nuke ]]; then
+        compadd -- --yes --dry-run
       fi
       ;;
     *)
-      if [[ ${words[2]} == terminal && ${words[3]} == send ]]; then
+      if [[ ${words[2]} == nuke ]]; then
+        compadd -- --yes --dry-run
+      elif [[ ${words[2]} == terminal && ${words[3]} == send ]]; then
         case ${words[CURRENT-1]} in
           --key)
             compadd up down left right escape tab back_tab enter space backspace ctrl_c
