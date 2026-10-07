@@ -72,7 +72,7 @@ The broker SHALL send hub sinks canonical source snapshot and update envelopes c
 - **THEN** the public view leaves usage absent or partially populated rather than reporting estimated values
 
 ### Requirement: HTTP delivery is durable and deduplicable
-The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public-view transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped delivery ID that permits receiver idempotency. Registration, normalized hook changes, lifecycle exit, reconciliation, and future normalized enrichment SHALL be sink-visible only when they change projected public state. Each HTTP and hub delivery SHALL use that sink's configured `timeout_ms`. A hub conflict response SHALL be interpreted by its structured error code: `snapshot_required` resets the sink's baseline and retries the update after the snapshot; `401` and `403` are retried with backoff because they indicate a credential the operator must fix; any other conflict or client error is a permanent rejection subject to the bounded drop policy. The outbox poll interval, outbox batch size, artifact-collection worker limit, stale-working sweep interval, and update broadcast capacity SHALL be configurable in a `[daemon]` configuration section whose defaults are 250 ms, 100 records, 4 workers, 60 seconds, and 1024 updates.
+The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as each meaningful committed public-view transition, SHALL retry transient failures with bounded exponential backoff, and SHALL include a stable source-scoped delivery ID that permits receiver idempotency. Registration, normalized hook changes, lifecycle exit, reconciliation, and future normalized enrichment SHALL be sink-visible only when they change projected public state. Each HTTP and hub delivery SHALL use that sink's configured `timeout_ms`. A hub conflict response SHALL be interpreted by its structured error code: `snapshot_required` resets the sink's baseline and retries the update after the snapshot; `401` and `403` are retried with backoff because they indicate a credential the operator must fix; any other conflict or client error is a permanent rejection subject to the bounded drop policy. When the bounded drop policy discards a hub sink delivery, the broker SHALL also reset that sink's baseline so a complete source snapshot repairs the hub, and SHALL include the rejection `detail` from the response body in its drop diagnostic when one is present. The outbox poll interval, outbox batch size, artifact-collection worker limit, stale-working sweep interval, and update broadcast capacity SHALL be configurable in a `[daemon]` configuration section whose defaults are 250 ms, 100 records, 4 workers, 60 seconds, and 1024 updates.
 
 #### Scenario: Receiver is temporarily unavailable
 - **WHEN** HTTP or hub delivery fails with a transient network or server error
@@ -108,7 +108,19 @@ The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as
 
 #### Scenario: Hub responds with another conflict
 - **WHEN** the hub returns HTTP 409 whose error code is not `snapshot_required`, or a body that does not parse as the error envelope
-- **THEN** the broker treats the delivery as permanently rejected and applies the bounded drop policy without resetting the baseline
+- **THEN** the broker treats the delivery as permanently rejected and applies the bounded drop policy
+
+#### Scenario: Dropped hub delivery triggers repair
+- **WHEN** a hub sink delivery reaches the bounded drop policy after repeated permanent rejections
+- **THEN** the broker removes it from the outbox, marks that sink's baseline as due, and delivers a complete source snapshot before later updates
+
+#### Scenario: Dropped stop update no longer leaves a ghost
+- **WHEN** the hub rejected and the broker dropped the update that moved an invocation to `stopped`, and the hub later accepts envelopes again
+- **THEN** the repair snapshot shows the invocation as `stopped` on the hub
+
+#### Scenario: Repair snapshot is also rejected
+- **WHEN** the hub rejects the repair snapshot
+- **THEN** the broker retries the snapshot with backoff and holds later updates for that sink instead of dropping them
 
 #### Scenario: Daemon section is absent
 - **WHEN** the configuration file has no `[daemon]` section
@@ -119,7 +131,7 @@ The broker SHALL enqueue HTTP and hub sink deliveries in the same transaction as
 - **THEN** the broker logs a diagnostic naming the sink and status, keeps the delivery in the outbox, and retries it with backoff instead of dropping it
 
 ### Requirement: Hub sinks repair receiver state with source snapshots
-An enabled hub sink SHALL deliver a complete source snapshot at a consistent source revision when delivery is established or repair is required, and SHALL order subsequent updates after that revision.
+An enabled hub sink SHALL deliver a complete source snapshot at a consistent source revision when delivery is established, when repair is required, and once after every broker startup before any incremental update, and SHALL order subsequent updates after that revision.
 
 #### Scenario: Hub sink is newly enabled
 - **WHEN** the daemon already retains invocations when a hub sink begins delivery
@@ -128,6 +140,14 @@ An enabled hub sink SHALL deliver a complete source snapshot at a consistent sou
 #### Scenario: State changes during snapshot preparation
 - **WHEN** an invocation changes while a source snapshot is being established
 - **THEN** the receiver obtains either that change in the snapshot or as an ordered later update without a gap
+
+#### Scenario: Broker restarts with an established baseline
+- **WHEN** `sessiontapd` starts and a hub sink already recorded a delivered baseline in a previous run
+- **THEN** the broker marks that baseline as due and delivers a complete source snapshot before any held or new update
+
+#### Scenario: Restart heals a diverged hub
+- **WHEN** the hub shows an invocation as `running` that the broker has as `stopped`, and `sessiontapd` restarts
+- **THEN** after the startup snapshot, the hub shows that invocation as `stopped`
 
 ### Requirement: Source identity is stable and explicit
 SessionTap SHALL require a stable source ID for hub delivery, SHALL include it and the optional source display name in every hub envelope, and SHALL keep invocation IDs distinct from source identity.

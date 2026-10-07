@@ -7,7 +7,7 @@ Define canonical multi-source ingestion, persistence, repair, and live observati
 ## Requirements
 
 ### Requirement: Hub ingests only canonical SessionTap envelopes
-The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks. When per-source ingestion tokens are configured, the hub SHALL authenticate each ingestion request before interpreting its body and SHALL accept an envelope only when its source ID is bound to the presented token. The hub SHALL distinguish rejections by status code: 400 for a request line or headers it cannot parse, 401 for a missing or unrecognized bearer token, 403 for a valid token presented with an envelope whose source ID is not bound to it, 411 for a missing or non-numeric `content-length`, 431 for headers exceeding the header limit, and 413 only for a body exceeding the configured body limit. Every rejection body SHALL carry a structured error code, and a rejected request SHALL NOT change persisted state, publish to listeners or remote devices, or invoke subscriptions.
+The hub SHALL accept canonical source snapshot and update envelopes produced by SessionTap sinks. Each envelope SHALL contain complete `PublicAgentView` values and no internal invocation snapshot, internal normalized event, or raw provider payload. The hub SHALL validate the canonical schema and SHALL NOT perform provider-specific normalization or reinterpret provider hooks. When per-source ingestion tokens are configured, the hub SHALL authenticate each ingestion request before interpreting its body and SHALL accept an envelope only when its source ID is bound to the presented token. The hub SHALL distinguish rejections by status code: 400 for a request line or headers it cannot parse, 401 for a missing or unrecognized bearer token, 403 for a valid token presented with an envelope whose source ID is not bound to it, 411 for a missing or non-numeric `content-length`, 431 for headers exceeding the header limit, and 413 only for a body exceeding the configured body limit. Every rejection body SHALL carry a structured error code, and a rejected request SHALL NOT change persisted state, publish to listeners or remote devices, or invoke subscriptions. When the hub rejects an envelope as `malformed_envelope` or `unsupported_schema_version`, it SHALL log a diagnostic naming the source ID when known and the validation reason, and SHALL include that reason as a string `detail` field in the rejection body.
 
 #### Scenario: Canonical update arrives
 - **WHEN** a source sends a valid public update containing source identity, delivery identity, changed public field paths, and complete resulting public agent view
@@ -20,6 +20,10 @@ The hub SHALL accept canonical source snapshot and update envelopes produced by 
 #### Scenario: Unknown or malformed envelope arrives
 - **WHEN** an ingestion request omits or invalidates a required canonical public-envelope field
 - **THEN** the hub rejects it without changing persisted state or invoking subscriptions
+
+#### Scenario: Malformed envelope reason is reported
+- **WHEN** the hub rejects an update because it does not change the public view
+- **THEN** it responds 400 with error code `malformed_envelope` and a `detail` naming that reason, and writes a log line naming the source ID and the reason
 
 #### Scenario: Future source adds optional public metadata
 - **WHEN** a newer source includes an unrecognized optional public field while all required canonical fields remain valid
