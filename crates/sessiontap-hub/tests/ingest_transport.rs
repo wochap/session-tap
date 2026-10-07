@@ -569,3 +569,37 @@ fn rotated_token_takes_effect_on_next_request() {
         200
     );
 }
+
+#[test]
+fn no_op_update_is_rejected_with_detail_and_changes_nothing() {
+    let store = HubStore::memory().unwrap();
+    let idle = view(PublicStatus::Idle);
+    assert_eq!(
+        handle_ingest(
+            &store,
+            &open(),
+            &authed(None, &snapshot_for("sandbox", vec![idle.clone()]))
+        )
+        .status,
+        200
+    );
+    let before = serde_json::to_value(store.merged().unwrap().2).unwrap();
+    let unchanged = SourceEnvelope::Update {
+        schema_version: 1,
+        source_id: "sandbox".into(),
+        delivery_id: "noop".into(),
+        revision: 2,
+        changed: BTreeSet::from([PublicField::Status]),
+        view: Box::new(idle),
+    };
+    let outcome = handle_ingest(&store, &open(), &authed(None, &unchanged));
+    assert_eq!(outcome.status, 400);
+    assert_eq!(outcome.body["error"], "malformed_envelope");
+    let detail = outcome.body["detail"].as_str().unwrap();
+    assert!(!detail.is_empty());
+    assert!(outcome.publication.is_none());
+    assert_eq!(
+        serde_json::to_value(store.merged().unwrap().2).unwrap(),
+        before
+    );
+}

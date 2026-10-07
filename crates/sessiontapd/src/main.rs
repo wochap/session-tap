@@ -53,7 +53,9 @@ async fn main() -> Result<()> {
         },
     );
     app.reconcile(process_alive, config.retention_days)?;
-    tokio::spawn(SinkWorker::new(&app, sinks, &daemon).run(daemon.sink_poll()));
+    let worker = SinkWorker::new(&app, sinks, &daemon);
+    worker.reset_baselines()?;
+    tokio::spawn(worker.run(daemon.sink_poll()));
     tokio::spawn(stale_working_worker(app.clone(), daemon.stale_sweep()));
     for (name, sink) in &config.sinks {
         let SinkConfig::Hub {

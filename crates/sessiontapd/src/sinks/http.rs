@@ -22,7 +22,7 @@ impl Sink for HttpSink {
 
     async fn deliver(&self, payload: &[u8]) -> DeliveryOutcome {
         let Some(body) = project_fields(payload, &self.fields) else {
-            return DeliveryOutcome::Reject;
+            return DeliveryOutcome::Reject(None);
         };
         match post(&self.client, &self.url, &self.auth, self.timeout, body).await {
             Ok(response) if response.status().is_success() => DeliveryOutcome::Ack,

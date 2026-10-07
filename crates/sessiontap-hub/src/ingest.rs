@@ -159,7 +159,7 @@ pub fn handle_ingest(
     };
     let envelope: SourceEnvelope = match serde_json::from_slice(&request.body) {
         Ok(value) => value,
-        Err(_) => return outcome(400, serde_json::json!({"error":"malformed_envelope"}), None),
+        Err(error) => return reject_outcome(None, Reject::Malformed(error.to_string())),
     };
     let source_id = match &envelope {
         SourceEnvelope::Snapshot { source, .. } => source.id.as_str(),
@@ -180,7 +180,7 @@ pub fn handle_ingest(
                 Some(HubPublication::SnapshotApplied { hub_revision }),
             ),
             Ok(SnapshotAccept::Stale) => outcome(200, serde_json::json!({"status":"stale"}), None),
-            Err(reject) => reject_outcome(reject),
+            Err(reject) => reject_outcome(Some(source_id), reject),
         },
         SourceEnvelope::Update {
             source_id,
@@ -214,7 +214,7 @@ pub fn handle_ingest(
             Ok(UpdateAccept::Suppressed) => {
                 outcome(200, serde_json::json!({"status":"suppressed"}), None)
             }
-            Err(reject) => reject_outcome(reject),
+            Err(reject) => reject_outcome(Some(source_id), reject),
         },
     }
 }
@@ -229,18 +229,33 @@ fn outcome(
         publication,
     }
 }
-fn reject_outcome(reject: Reject) -> IngestOutcome {
+fn reject_outcome(source_id: Option<&str>, reject: Reject) -> IngestOutcome {
+    let log = |reason: &str| {
+        eprintln!(
+            "sessiontap-hub: rejected envelope from source '{}': {reason}",
+            source_id.unwrap_or("unknown")
+        );
+    };
     match reject {
         Reject::SnapshotRequired => {
             outcome(409, serde_json::json!({"error":"snapshot_required"}), None)
         }
-        Reject::UnsupportedVersion(version) => outcome(
-            400,
-            serde_json::json!({"error":"unsupported_schema_version","version":version}),
-            None,
-        ),
-        Reject::Malformed(_) => {
-            outcome(400, serde_json::json!({"error":"malformed_envelope"}), None)
+        Reject::UnsupportedVersion(version) => {
+            let detail = format!("unsupported schema version {version}");
+            log(&detail);
+            outcome(
+                400,
+                serde_json::json!({"error":"unsupported_schema_version","version":version,"detail":detail}),
+                None,
+            )
+        }
+        Reject::Malformed(reason) => {
+            log(&reason);
+            outcome(
+                400,
+                serde_json::json!({"error":"malformed_envelope","detail":reason}),
+                None,
+            )
         }
     }
 }

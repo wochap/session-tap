@@ -25,7 +25,7 @@ impl Sink for StdoutSink {
 
     async fn deliver(&self, payload: &[u8]) -> DeliveryOutcome {
         let Some(projected) = project_fields(payload, &self.fields) else {
-            return DeliveryOutcome::Reject;
+            return DeliveryOutcome::Reject(None);
         };
         println!("{}", String::from_utf8_lossy(&projected));
         DeliveryOutcome::Ack

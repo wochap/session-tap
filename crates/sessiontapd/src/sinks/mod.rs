@@ -22,7 +22,7 @@ use std::{
 };
 
 /// Result of one delivery attempt, mapped by the worker onto outbox actions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeliveryOutcome {
     /// Delivered; remove from the outbox.
     Ack,
@@ -30,8 +30,9 @@ pub enum DeliveryOutcome {
     Retry,
     /// The receiver has no baseline for this source; resend a snapshot first.
     SnapshotRequired,
-    /// Permanent rejection; subject to the bounded drop policy.
-    Reject,
+    /// Permanent rejection; subject to the bounded drop policy. Carries the
+    /// receiver's rejection `detail` when it reported one.
+    Reject(Option<String>),
 }
 
 #[async_trait]

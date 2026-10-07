@@ -13,10 +13,13 @@ pub struct HubSink {
     pub(super) client: reqwest::Client,
 }
 
-/// Hub error body, for example `{"error":"snapshot_required"}`.
+/// Hub error body, for example `{"error":"snapshot_required"}`, with an
+/// optional human-readable `detail`.
 #[derive(Deserialize)]
 struct HubError {
     error: String,
+    #[serde(default)]
+    detail: Option<String>,
 }
 
 impl HubSink {
@@ -43,15 +46,6 @@ impl HubSink {
         if status.is_success() {
             return DeliveryOutcome::Ack;
         }
-        if status == reqwest::StatusCode::CONFLICT {
-            let body = response.bytes().await.unwrap_or_default();
-            return match serde_json::from_slice::<HubError>(&body) {
-                Ok(error) if error.error == "snapshot_required" => {
-                    DeliveryOutcome::SnapshotRequired
-                }
-                _ => DeliveryOutcome::Reject,
-            };
-        }
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             // A wrong or rotated credential is an operator fix; keep the
             // delivery queued instead of dropping it.
@@ -62,7 +56,17 @@ impl HubSink {
             return DeliveryOutcome::Retry;
         }
         if status.is_client_error() {
-            return DeliveryOutcome::Reject;
+            let body = response.bytes().await.unwrap_or_default();
+            return match serde_json::from_slice::<HubError>(&body) {
+                Ok(error)
+                    if status == reqwest::StatusCode::CONFLICT
+                        && error.error == "snapshot_required" =>
+                {
+                    DeliveryOutcome::SnapshotRequired
+                }
+                Ok(error) => DeliveryOutcome::Reject(error.detail),
+                Err(_) => DeliveryOutcome::Reject(None),
+            };
         }
         DeliveryOutcome::Retry
     }
@@ -145,11 +149,11 @@ mod tests {
     async fn other_conflict_codes_and_unparsable_bodies_are_rejected() {
         assert_eq!(
             outcome_for(response("409 Conflict", r#"{"error":"stale_revision"}"#)).await,
-            DeliveryOutcome::Reject
+            DeliveryOutcome::Reject(None)
         );
         assert_eq!(
             outcome_for(response("409 Conflict", "snapshot_required, please")).await,
-            DeliveryOutcome::Reject
+            DeliveryOutcome::Reject(None)
         );
     }
 
@@ -161,7 +165,15 @@ mod tests {
                 r#"{"error":"malformed_envelope"}"#
             ))
             .await,
-            DeliveryOutcome::Reject
+            DeliveryOutcome::Reject(None)
+        );
+        assert_eq!(
+            outcome_for(response(
+                "400 Bad Request",
+                r#"{"error":"malformed_envelope","detail":"update does not change the public view"}"#
+            ))
+            .await,
+            DeliveryOutcome::Reject(Some("update does not change the public view".into()))
         );
         assert_eq!(
             outcome_for(response("503 Service Unavailable", "")).await,

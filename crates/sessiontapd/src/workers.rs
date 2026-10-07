@@ -58,6 +58,20 @@ impl SinkWorker {
         }
     }
 
+    /// Marks every baseline sink's snapshot as due, so each daemon start
+    /// (including an upgrade) repairs any receiver drift before updates.
+    pub fn reset_baselines(&self) -> Result<()> {
+        for name in self
+            .sinks
+            .iter()
+            .filter(|(_, sink)| sink.needs_baseline())
+            .map(|(name, _)| name)
+        {
+            self.storage.hub_reset_snapshot(name)?;
+        }
+        Ok(())
+    }
+
     /// Delivers the baseline source snapshot for every sink that needs one
     /// and has not yet established it, before any incremental updates.
     pub async fn deliver_snapshots(&mut self) -> Result<()> {
@@ -121,13 +135,21 @@ impl SinkWorker {
                     self.storage.hub_reset_snapshot(sink_name)?;
                     self.storage.retry(sink_name, event_id, record.attempts)?;
                 }
-                DeliveryOutcome::Reject => {
+                DeliveryOutcome::Reject(detail) => {
                     // Bounded drop policy: a permanently rejected record must
                     // not occupy the bounded outbox forever.
                     if record.attempts + 1 >= self.max_rejected_attempts {
+                        let detail = detail
+                            .map(|detail| format!(": {detail}"))
+                            .unwrap_or_default();
                         eprintln!(
-                            "sessiontapd: dropping undeliverable event '{event_id}' for sink '{sink_name}'"
+                            "sessiontapd: dropping undeliverable event '{event_id}' for sink '{sink_name}'{detail}"
                         );
+                        // The dropped update leaves the receiver diverged; a
+                        // fresh baseline snapshot repairs it.
+                        if sink.needs_baseline() {
+                            self.storage.hub_reset_snapshot(sink_name)?;
+                        }
                         self.storage.acknowledge(sink_name, event_id)?;
                     } else {
                         self.storage.retry(sink_name, event_id, record.attempts)?;
@@ -171,6 +193,8 @@ mod tests {
         name: String,
         baseline: bool,
         outcomes: Mutex<Vec<DeliveryOutcome>>,
+        /// Scripted snapshot outcomes; acknowledges once exhausted.
+        snapshot_outcomes: Mutex<Vec<DeliveryOutcome>>,
         delivered: Arc<Mutex<Vec<&'static str>>>,
     }
 
@@ -188,7 +212,12 @@ mod tests {
         }
         async fn deliver_snapshot(&self, _: &[u8]) -> DeliveryOutcome {
             self.delivered.lock().unwrap().push("snapshot");
-            DeliveryOutcome::Ack
+            let mut outcomes = self.snapshot_outcomes.lock().unwrap();
+            if outcomes.is_empty() {
+                DeliveryOutcome::Ack
+            } else {
+                outcomes.remove(0)
+            }
         }
     }
 
@@ -203,6 +232,7 @@ mod tests {
     fn setup(
         database: &std::path::Path,
         outcomes: Vec<DeliveryOutcome>,
+        snapshot_outcomes: Vec<DeliveryOutcome>,
         daemon: DaemonConfig,
     ) -> (App, SinkWorker, Arc<Mutex<Vec<&'static str>>>) {
         let app = App::new(
@@ -224,6 +254,7 @@ mod tests {
             name: "hub".into(),
             baseline: true,
             outcomes: Mutex::new(outcomes),
+            snapshot_outcomes: Mutex::new(snapshot_outcomes),
             delivered: delivered.clone(),
         });
         let worker = SinkWorker::new(&app, BTreeMap::from([("hub".into(), sink)]), &daemon);
@@ -261,10 +292,11 @@ mod tests {
             vec![
                 DeliveryOutcome::Retry,
                 DeliveryOutcome::SnapshotRequired,
-                DeliveryOutcome::Reject,
-                DeliveryOutcome::Reject,
+                DeliveryOutcome::Reject(None),
+                DeliveryOutcome::Reject(Some("schema skew".into())),
                 DeliveryOutcome::Ack,
             ],
+            Vec::new(),
             daemon,
         );
         let initial = snapshot();
@@ -323,5 +355,92 @@ mod tests {
             0,
             "second rejection reaches max_rejected_attempts and drops"
         );
+        assert!(
+            app.storage().hub_snapshot_due("hub").unwrap(),
+            "a dropped hub delivery resets the baseline"
+        );
+    }
+
+    #[tokio::test]
+    async fn held_update_waits_for_rejected_repair_snapshot() {
+        let daemon = DaemonConfig {
+            max_rejected_attempts: 1,
+            ..DaemonConfig::default()
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state.db");
+        let (app, mut worker, delivered) = setup(
+            &database,
+            vec![DeliveryOutcome::Reject(None)],
+            vec![DeliveryOutcome::Ack, DeliveryOutcome::Reject(None)],
+            daemon,
+        );
+        let initial = snapshot();
+        app.register(initial.clone(), "credential").unwrap();
+        app.bind_child(&initial.invocation_id, "credential", 42, None)
+            .unwrap();
+        worker.deliver_snapshots().await.unwrap();
+
+        let hook = |id: &str, kind| {
+            app.ingest_hook(
+                initial.provider.clone(),
+                initial.invocation_id.clone(),
+                "credential".into(),
+                event(&initial, id, kind),
+                None,
+                None,
+            )
+            .unwrap();
+        };
+        hook("turn", EventKind::NewTurn);
+        worker.process_outbox_once().await.unwrap();
+        assert_eq!(outbox_len(&database), 0, "rejected update is dropped");
+        assert!(app.storage().hub_snapshot_due("hub").unwrap());
+
+        // The repair snapshot is rejected: later updates are held, not dropped.
+        hook("stop", EventKind::Completed);
+        worker.deliver_snapshots().await.unwrap();
+        worker.process_outbox_once().await.unwrap();
+        assert_eq!(outbox_len(&database), 1);
+        assert_eq!(
+            *delivered.lock().unwrap(),
+            ["snapshot", "update", "snapshot"]
+        );
+
+        // Once the snapshot is acknowledged, it subsumes the held update.
+        worker.snapshot_backoff.clear();
+        worker.deliver_snapshots().await.unwrap();
+        assert!(!app.storage().hub_snapshot_due("hub").unwrap());
+        assert_eq!(outbox_len(&database), 0);
+    }
+
+    #[tokio::test]
+    async fn startup_reset_sends_snapshot_before_held_updates() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state.db");
+        let (app, mut worker, delivered) =
+            setup(&database, Vec::new(), Vec::new(), DaemonConfig::default());
+        let initial = snapshot();
+        app.register(initial.clone(), "credential").unwrap();
+        app.bind_child(&initial.invocation_id, "credential", 42, None)
+            .unwrap();
+        worker.deliver_snapshots().await.unwrap();
+        assert!(!app.storage().hub_snapshot_due("hub").unwrap());
+        app.ingest_hook(
+            initial.provider.clone(),
+            initial.invocation_id.clone(),
+            "credential".into(),
+            event(&initial, "turn", EventKind::NewTurn),
+            None,
+            None,
+        )
+        .unwrap();
+
+        worker.reset_baselines().unwrap();
+        assert!(app.storage().hub_snapshot_due("hub").unwrap());
+        worker.process_outbox_once().await.unwrap();
+        worker.deliver_snapshots().await.unwrap();
+        assert_eq!(*delivered.lock().unwrap(), ["snapshot", "snapshot"]);
+        assert_eq!(outbox_len(&database), 0);
     }
 }
