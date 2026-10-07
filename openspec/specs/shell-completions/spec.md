@@ -36,20 +36,26 @@ exit status.
 
 The `_sessiontap` completion function SHALL offer every user-facing
 subcommand as a candidate at the first argument position: `setup`, `doctor`,
-`hooks`, `status`, `listen`, and `completions`. After `hooks`, it SHALL offer
-`remove`. The internal `hook emit` entry point SHALL NOT appear as a
-candidate at any position.
+`hooks`, `status`, `listen`, `completions`, and `nuke`. After `hooks`, it SHALL
+offer `remove`. After `nuke`, it SHALL offer `--yes` and `--dry-run`. The
+internal `hook emit` entry point SHALL NOT appear as a candidate at any
+position.
 
 #### Scenario: First-position candidates
 
 - **WHEN** zsh completes the first argument of `sessiontap`
 - **THEN** the candidates include `setup`, `doctor`, `hooks`, `status`,
-  `listen`, and `completions`
+  `listen`, `completions`, and `nuke`
 
 #### Scenario: hooks subcommand chain
 
 - **WHEN** zsh completes the second argument of `sessiontap hooks`
 - **THEN** the candidates include `remove`
+
+#### Scenario: nuke flags
+
+- **WHEN** zsh completes an argument after `sessiontap nuke`
+- **THEN** the candidates include `--yes` and `--dry-run`
 
 #### Scenario: Internal entry point hidden
 
