@@ -412,6 +412,7 @@ then needs the tailnet address.
 sessiontap-hub pair                    # scopes read and manage
 sessiontap-hub pair --scope read       # read-only device
 sessiontap-hub pair --scope control    # read, watch, and control (needs remote.control)
+# sessiontap-hub pair --scope control --scope manage # full control
 ```
 
 Each device holds a subset of four scopes:
