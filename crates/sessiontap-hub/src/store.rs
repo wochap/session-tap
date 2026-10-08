@@ -224,7 +224,7 @@ impl HubStore {
             )
             .optional()
             .map_err(malformed)?;
-        if known.is_some_and(|current| *revision <= current) {
+        if known.is_some_and(|current| *revision < current) {
             return Ok(SnapshotAccept::Stale);
         }
         let now = Utc::now().to_rfc3339();
@@ -821,6 +821,46 @@ mod tests {
             changed: BTreeSet::from([PublicField::UpdatedAt]),
             view: Box::new(view),
         }
+    }
+
+    #[test]
+    fn equal_revision_snapshot_repairs_divergence() {
+        let store = HubStore::memory().unwrap();
+        store.ingest_snapshot(&snapshot("a", 1, vec![])).unwrap();
+        let mut running = view(ID);
+        running.status = PublicStatus::Running;
+        assert!(matches!(
+            store.ingest_update(&update("d1", 7, running)).unwrap(),
+            UpdateAccept::Applied { .. }
+        ));
+        let before = store.revision().unwrap();
+        let SnapshotAccept::Applied { hub_revision } = store
+            .ingest_snapshot(&snapshot("a", 7, vec![stopped(ID)]))
+            .unwrap()
+        else {
+            panic!("equal-revision snapshot should apply");
+        };
+        assert!(hub_revision > before);
+        let (_, _, agents) = store.merged().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].view.status, PublicStatus::Stopped);
+    }
+
+    #[test]
+    fn older_snapshot_is_stale() {
+        let store = HubStore::memory().unwrap();
+        store.ingest_snapshot(&snapshot("a", 1, vec![])).unwrap();
+        let mut running = view(ID);
+        running.status = PublicStatus::Running;
+        store.ingest_update(&update("d1", 7, running)).unwrap();
+        assert_eq!(
+            store
+                .ingest_snapshot(&snapshot("a", 6, vec![stopped(ID)]))
+                .unwrap(),
+            SnapshotAccept::Stale
+        );
+        let (_, _, agents) = store.merged().unwrap();
+        assert_eq!(agents[0].view.status, PublicStatus::Running);
     }
 
     #[test]
