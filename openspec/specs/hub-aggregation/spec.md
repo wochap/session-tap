@@ -79,7 +79,7 @@ The hub SHALL accept sink delivery with at-least-once semantics and SHALL apply 
 - **THEN** the hub does not replace newer state
 
 ### Requirement: Source snapshots repair hub state
-The hub SHALL transactionally replace the materialized invocation set for one source from a complete snapshot while preserving agents belonging to other sources.
+The hub SHALL transactionally replace the materialized invocation set for one source from a complete snapshot while preserving agents belonging to other sources. The hub SHALL apply a snapshot whose revision is greater than or equal to the source revision it has stored, and SHALL treat only a snapshot with a strictly lower revision as stale.
 
 #### Scenario: Newly deployed hub receives a snapshot
 - **WHEN** a source with already-running agents establishes delivery to an empty hub
@@ -88,6 +88,14 @@ The hub SHALL transactionally replace the materialized invocation set for one so
 #### Scenario: Snapshot omits a previously retained active agent
 - **WHEN** a newer complete snapshot for a source no longer contains an invocation previously retained as active for that source
 - **THEN** the hub removes or marks that stale materialized invocation according to the snapshot replacement semantics
+
+#### Scenario: Snapshot at the current source revision repairs divergence
+- **WHEN** the hub stores source revision R, retains an invocation as `running` for that source, and receives a complete snapshot at revision R that shows the invocation as `stopped`
+- **THEN** the hub replaces the source's agents from the snapshot, shows the invocation as `stopped`, increments the hub revision, and re-baselines live listeners
+
+#### Scenario: Older snapshot stays stale
+- **WHEN** the hub stores source revision R and receives a snapshot at revision R-1
+- **THEN** the hub answers stale and leaves the source's agents unchanged
 
 ### Requirement: Hub provides gap-free merged live observation
 The hub SHALL provide a local command that emits one persisted merged public snapshot followed by one JSON object per accepted public update after the snapshot revision without a subscription gap. The same stream SHALL be available to paired remote devices through the remote `listen` method. Agents SHALL be identified by source ID and invocation ID.
