@@ -256,7 +256,7 @@ The terminal screen SHALL show exactly one agent's pane, opened with `terminal.o
 - **THEN** the terminal re-renders at 132x38 and the size chip reads 132x38, and the app sends no resize
 
 ### Requirement: Terminal view is readable on a phone
-In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to keep the cursor in view when the pane is wider than the screen. Tapping the size chip or double-tapping the terminal SHALL toggle between that size and fit-to-width. Pinch SHALL zoom between fit-to-width and 200%. In landscape the terminal SHALL open at fit-to-width. The app SHALL keep the last 500 lines of scrollback; while the user is scrolled up, new output SHALL NOT move the view and a "Jump to live" pill with the count of new lines SHALL return to the live bottom. The terminal surface SHALL stay dark in both the light and dark app themes and SHALL map the 16 ANSI colors to the app's terminal palette, while 256-color and 24-bit colors render as sent. The terminal font SHALL include the Nerd Font glyph set (Powerline symbols and icons), and each such glyph SHALL render within one cell.
+In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to keep the cursor in view when the pane is wider than the screen. Tapping the size chip or double-tapping the terminal SHALL toggle between that size and fit-to-width. Pinch SHALL zoom between fit-to-width and 200%. In landscape the terminal SHALL open at fit-to-width. The app SHALL keep the last 500 lines of scrollback; while the user is scrolled up, new output SHALL NOT move the view and a "Jump to live" pill with the count of new lines SHALL return to the live bottom. The terminal surface SHALL stay dark in both the light and dark app themes and SHALL map the 16 ANSI colors to the app's terminal palette, while 256-color and 24-bit colors render as sent. The terminal font SHALL include the Nerd Font glyph set (Powerline symbols and icons), and each such glyph SHALL render within one cell. Pane content SHALL draw only inside the terminal surface and SHALL NOT draw over the top bar, banners, key bar, or input row at any zoom level, scroll position, or keyboard state.
 
 #### Scenario: Wide pane in portrait
 - **WHEN** a 160-column pane opens in portrait
@@ -273,6 +273,14 @@ In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to 
 #### Scenario: Nerd Font icons in a prompt
 - **WHEN** the pane shows a prompt with a Powerline separator and a Nerd Font folder icon
 - **THEN** both glyphs render as their icons, each one cell wide, and the following text stays aligned to the column grid
+
+#### Scenario: Pinch zoom on a tall pane
+- **WHEN** the user pinches the terminal up to 200% so the pane is taller than the terminal surface
+- **THEN** rows beyond the surface's top edge are hidden and the top bar stays fully visible
+
+#### Scenario: Keyboard opens over a full pane
+- **WHEN** the keyboard opens and the pane no longer fits the shortened terminal surface
+- **THEN** no pane text draws over the top bar or the input row
 
 ### Requirement: Control scope sends input to the agent
 With the `control` scope the terminal screen SHALL show a key bar laid out as rows of keys, a keyboard toggle, and a reply field with a Send button. The default key bar SHALL have two rows of seven keys: Esc, Tab, Shift+Tab, Up, Ctrl+C, Paste, Backspace, then Ctrl, Alt, Left, Down, Right, Space, Enter. Each named key SHALL send that key to the agent as `terminal.input` `keys`, and each character key SHALL send that character. Ctrl and Alt SHALL be modifiers: a tap latches the modifier for the next key only, a long-press locks it until tapped again, and the next key from the key bar or the soft keyboard SHALL be sent with the latched or locked modifiers. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error. Tapping the reply field SHALL focus it and open the soft keyboard, and the field SHALL keep focus while the controls rearrange around the keyboard. Keys and keystrokes SHALL reach the agent in the order the user pressed them.
