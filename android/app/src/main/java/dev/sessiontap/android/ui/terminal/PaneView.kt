@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -139,6 +140,7 @@ fun PaneView(
         Canvas(
             Modifier
                 .fillMaxSize()
+                .clipToBounds()
                 .alpha(if (dimmed) 0.5f else 1f)
                 .testTag("pane")
                 .semantics { stateDescription = sizeLabel(emulator.cols, emulator.rows, view.fit) }
