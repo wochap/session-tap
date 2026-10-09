@@ -474,7 +474,8 @@
       "provider": "claude",
       "provider_event_id": null,
       "provider_metadata": {
-        "model": "claude-opus-5-5"
+        "model": "claude-opus-5-5",
+        "model_label": "opus-5.5"
       },
       "provider_session_id": "s",
       "received_at": "<now>",

@@ -15,7 +15,8 @@
       "provider_event_id": null,
       "provider_metadata": {
         "effort": "high",
-        "model": "anthropic/claude-sonnet-4-5"
+        "model": "anthropic/claude-sonnet-4-5",
+        "model_label": "claude-sonnet-4-5"
       },
       "provider_session_id": "pi-session-1",
       "provider_session_name": "adapter work",

@@ -281,6 +281,7 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
             session_name: index_name.or(session_name),
             usage: latest,
             model: None,
+            model_label: None,
         },
         cursor: OpaqueCursor::new(cursor),
     })

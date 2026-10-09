@@ -158,6 +158,7 @@ data class ProviderSession(
 @Serializable
 data class ProviderMetadata(
     val model: String? = null,
+    @SerialName("model_label") val modelLabel: String? = null,
     val effort: String? = null,
     @SerialName("permission_mode") val permissionMode: String? = null,
     @SerialName("current_turn_id") val currentTurnId: String? = null,

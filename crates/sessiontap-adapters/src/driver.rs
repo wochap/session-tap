@@ -287,6 +287,7 @@ mod tests {
                         session_name: Some("n".into()),
                         usage: None,
                         model: None,
+                        model_label: None,
                     },
                     cursor: OpaqueCursor::new(1_u8),
                 }),

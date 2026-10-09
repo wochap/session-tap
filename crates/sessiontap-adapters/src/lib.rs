@@ -113,6 +113,7 @@ pub struct SessionEnrichment {
     pub session_name: Option<String>,
     pub usage: Option<Usage>,
     pub model: Option<String>,
+    pub model_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -476,6 +477,7 @@ pub(crate) fn provider_metadata(
         .and_then(|v| sanitize_bounded(v, 128));
     let metadata = ProviderMetadata {
         model,
+        model_label: None,
         effort,
         permission_mode,
         current_turn_id,

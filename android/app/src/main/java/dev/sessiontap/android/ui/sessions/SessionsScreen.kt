@@ -269,7 +269,7 @@ private fun SectionHeader(item: FeedItem.Section, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun SessionRow(row: RowModel, onOpen: () -> Unit, onToggleKids: () -> Unit, onForget: () -> Unit) {
+internal fun SessionRow(row: RowModel, onOpen: () -> Unit, onToggleKids: () -> Unit, onForget: () -> Unit) {
     val c = St.colors
     val content = @Composable {
         val bg = if (row.blocked) Brush.linearGradient(listOf(c.blockTint, c.blockTint)) else Brush.linearGradient(listOf(c.bg, c.bg))
@@ -285,16 +285,23 @@ private fun SessionRow(row: RowModel, onOpen: () -> Unit, onToggleKids: () -> Un
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(row.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    ProviderMark(row.mark)
-                    if (row.terminal) {
-                        Icon(PhosphorIcons.Regular.TerminalWindow, "Terminal available", tint = c.mute, modifier = Modifier.size(14.dp).testTag("term:${row.name}"))
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(row.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        ProviderMark(row.mark)
+                        if (row.terminal) {
+                            Icon(PhosphorIcons.Regular.TerminalWindow, "Terminal available", tint = c.mute, modifier = Modifier.size(14.dp).testTag("term:${row.name}"))
+                        }
+                        row.model?.let {
+                            Text(
+                                it, fontFamily = Mono, fontSize = 11.sp, color = c.mute, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 110.dp).clip(RoundedCornerShape(4.dp)).background(c.line).padding(horizontal = 6.dp).testTag("model:${row.name}"),
+                            )
+                        }
+                        row.hubTag?.let {
+                            Text(it, fontSize = 11.sp, color = c.mute, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.line).padding(horizontal = 6.dp))
+                        }
                     }
-                    row.hubTag?.let {
-                        Text(it, fontSize = 11.sp, color = c.mute, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.line).padding(horizontal = 6.dp))
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text(row.time, fontFamily = Mono, fontSize = 11.sp, color = c.mute)
+                    Text(row.time, fontFamily = Mono, fontSize = 11.sp, color = c.mute, maxLines = 1, softWrap = false, modifier = Modifier.testTag("time:${row.name}"))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.size(6.dp).clip(RoundedCornerShape(2.dp)).background(if (row.stale) c.dim else repoColor(row.repoKey)))

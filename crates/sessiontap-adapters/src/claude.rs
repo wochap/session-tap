@@ -107,6 +107,9 @@ impl HookDialect for ClaudeDialect {
         if let Some(model) = bounded_field(raw, &["to_model"], MODEL_MAX_CHARS) {
             metadata.get_or_insert_default().model = Some(model);
         }
+        if let Some(metadata) = metadata.as_mut() {
+            metadata.model_label = metadata.model.as_deref().and_then(model_label);
+        }
         metadata
     }
     fn turn_id(&self, raw: &Value) -> Option<String> {
@@ -150,6 +153,33 @@ impl HookDialect for ClaudeDialect {
 }
 
 const MODEL_MAX_CHARS: usize = 160;
+
+/// Short display name for a Claude model ID: `claude-opus-4-5-20251101[1m]` → `opus-4.5[1m]`.
+/// IDs the rule does not recognize are returned unchanged.
+pub(crate) fn model_label(model: &str) -> Option<String> {
+    let (base, suffix) = match model.find('[') {
+        Some(at) if model.ends_with(']') => model.split_at(at),
+        _ => (model, ""),
+    };
+    let mut base = base.strip_prefix("claude-").unwrap_or(base);
+    if let Some((head, date)) = base.rsplit_once('-')
+        && date.len() == 8
+        && date.bytes().all(|b| b.is_ascii_digit())
+    {
+        base = head;
+    }
+    let mut label = base.to_owned();
+    if let Some((head, minor)) = base.rsplit_once('-')
+        && let Some((name, major)) = head.rsplit_once('-')
+        && !name.is_empty()
+        && [major, minor]
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        label = format!("{name}-{major}.{minor}");
+    }
+    sanitize_bounded(&format!("{label}{suffix}"), MODEL_MAX_CHARS)
+}
 const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 
@@ -272,6 +302,7 @@ fn scan(request: &CollectSessionDataRequest) -> Result<Collected> {
                 context_tokens: context,
                 context_window_percent: None,
             }),
+            model_label: model.as_deref().and_then(model_label),
             model,
         },
         cursor: OpaqueCursor::new(cursor),
@@ -405,6 +436,7 @@ mod collection_tests {
         );
         let (enrichment, _) = collect(request(&temp, "s1", path)).unwrap();
         assert_eq!(enrichment.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(enrichment.model_label.as_deref(), Some("opus-5.5"));
 
         let (temp, path) = fixture(
             "s2",
@@ -414,6 +446,7 @@ mod collection_tests {
         );
         let (enrichment, _) = collect(request(&temp, "s2", path)).unwrap();
         assert!(enrichment.model.is_none());
+        assert!(enrichment.model_label.is_none());
     }
 
     #[test]
@@ -731,6 +764,49 @@ mod model_tests {
             event.kind,
             event.provider_metadata.and_then(|metadata| metadata.model),
         )
+    }
+
+    fn label(raw: &Value) -> Option<String> {
+        AgentAdapter::normalize(&ClaudeAdapter, &InvocationId::new(), raw)
+            .unwrap()
+            .into_event()
+            .unwrap()
+            .event
+            .provider_metadata
+            .and_then(|metadata| metadata.model_label)
+    }
+
+    #[test]
+    fn model_label_shortens_claude_ids() {
+        for (id, expected) in [
+            ("claude-opus-5-5", "opus-5.5"),
+            ("claude-opus-4-5-20251101", "opus-4.5"),
+            ("claude-opus-5-5[1m]", "opus-5.5[1m]"),
+            ("claude-sonnet-5", "sonnet-5"),
+            ("opus", "opus"),
+        ] {
+            assert_eq!(model_label(id).as_deref(), Some(expected), "{id}");
+        }
+    }
+
+    #[test]
+    fn hooks_report_label_with_every_model() {
+        assert_eq!(
+            label(
+                &json!({"hook_event_name":"SessionStart","session_id":"s","source":"startup","model":"claude-sonnet-5"})
+            ),
+            Some("sonnet-5".into())
+        );
+        assert_eq!(
+            label(
+                &json!({"hook_event_name":"PostModelSwitch","session_id":"s","to_model":"claude-opus-5-5"})
+            ),
+            Some("opus-5.5".into())
+        );
+        assert_eq!(
+            label(&json!({"hook_event_name":"SessionStart","session_id":"s","source":"startup"})),
+            None
+        );
     }
 
     #[test]

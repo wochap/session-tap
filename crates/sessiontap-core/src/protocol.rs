@@ -411,6 +411,7 @@ mod tests {
         });
         rich.metadata = Some(ProviderMetadata {
             model: Some("claude-opus".into()),
+            model_label: None,
             effort: Some("high".into()),
             permission_mode: None,
             current_turn_id: None,

@@ -44,6 +44,8 @@ data class RowModel(
     val swipeable: Boolean,
     /** This device can open the agent's live terminal. */
     val terminal: Boolean = false,
+    /** Short model name for the row chip: the adapter's label, else the raw model. */
+    val model: String? = null,
 )
 
 sealed interface FeedItem {
@@ -159,6 +161,7 @@ fun rowModel(item: AgentItem, hub: HubEntity?, hubTag: String?, expanded: Boolea
         blocked = item.effective == Status.Blocked && !stale,
         swipeable = v.status == Status.Stopped && hub?.canManage == true,
         terminal = TerminalAccess.of(hub?.canWatch == true, hub?.canControl == true, v).canOpen,
+        model = v.metadata?.let { it.modelLabel ?: it.model }?.takeIf { it.isNotBlank() },
     )
 }
 

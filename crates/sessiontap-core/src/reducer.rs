@@ -723,6 +723,7 @@ pub fn reduce(snapshot: &mut InvocationSnapshot, event: &NormalizedEvent) {
         let fills_only = event.evidence.channel == EvidenceChannel::ProviderArtifact;
         if metadata.model.is_some() && !(fills_only && current.model.is_some()) {
             current.model.clone_from(&metadata.model);
+            current.model_label.clone_from(&metadata.model_label);
         }
         if metadata.effort.is_some() {
             current.effort.clone_from(&metadata.effort);
@@ -1285,6 +1286,48 @@ mod tests {
                 .as_deref(),
             Some("hook-model")
         );
+    }
+
+    #[test]
+    fn model_and_label_merge_as_a_pair() {
+        let pair = |model: Option<&str>, label: Option<&str>| {
+            Some(ProviderMetadata {
+                model: model.map(Into::into),
+                model_label: label.map(Into::into),
+                ..Default::default()
+            })
+        };
+        let current = |state: &State| {
+            let metadata = state.snapshot.provider_metadata.clone().unwrap_or_default();
+            (metadata.model, metadata.model_label)
+        };
+        let expect =
+            |model: &str, label: Option<&str>| (Some(model.to_owned()), label.map(str::to_owned));
+        let mut state = State::new();
+        let mut hook = event(EventKind::Working);
+        hook.provider_metadata = pair(Some("claude-sonnet-5"), Some("sonnet-5"));
+        state.apply(&hook, None);
+        hook.provider_metadata = pair(Some("claude-opus-5-5"), Some("opus-5.5"));
+        state.apply(&hook, None);
+        assert_eq!(current(&state), expect("claude-opus-5-5", Some("opus-5.5")));
+
+        let mut artifact = event(EventKind::Working);
+        artifact.evidence = EventEvidence::local(EvidenceChannel::ProviderArtifact);
+        artifact.provider_metadata = pair(Some("claude-sonnet-5"), Some("sonnet-5"));
+        state.apply(&artifact, None);
+        assert_eq!(current(&state), expect("claude-opus-5-5", Some("opus-5.5")));
+
+        let mut effort = event(EventKind::Working);
+        effort.provider_metadata = Some(ProviderMetadata {
+            effort: Some("high".into()),
+            ..Default::default()
+        });
+        state.apply(&effort, None);
+        assert_eq!(current(&state), expect("claude-opus-5-5", Some("opus-5.5")));
+
+        hook.provider_metadata = pair(Some("custom-x"), None);
+        state.apply(&hook, None);
+        assert_eq!(current(&state), expect("custom-x", None));
     }
 
     #[test]

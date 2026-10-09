@@ -356,6 +356,7 @@ impl UsageCoordinator {
                 provider_session_start_reason: None,
                 provider_metadata: enrichment.model.clone().map(|model| ProviderMetadata {
                     model: Some(model),
+                    model_label: enrichment.model_label.clone(),
                     ..ProviderMetadata::default()
                 }),
                 usage: enrichment.usage.clone(),
@@ -551,6 +552,7 @@ mod tests {
                         session_name: None,
                         usage: Some(usage.clone()),
                         model: Some("claude-sonnet-5".into()),
+                        model_label: Some("sonnet-5".into()),
                     },
                     cursor: OpaqueCursor::new(cursor),
                 },
@@ -573,6 +575,13 @@ mod tests {
                     .as_ref()
                     .and_then(|metadata| metadata.model.as_deref()),
                 Some("claude-sonnet-5")
+            );
+            assert_eq!(
+                event
+                    .provider_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.model_label.as_deref()),
+                Some("sonnet-5")
             );
         }
         assert_eq!(stored_cursor(&coordinator, &key), Some(cursor));

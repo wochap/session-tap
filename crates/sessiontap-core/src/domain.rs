@@ -457,6 +457,8 @@ pub struct ProviderMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
@@ -1082,6 +1084,22 @@ mod tests {
             children: None,
             terminal: None,
         };
+        let mut labeled = base.clone();
+        labeled.metadata = Some(ProviderMetadata {
+            model: Some("claude-opus-5-5".into()),
+            ..ProviderMetadata::default()
+        });
+        let mut relabeled = labeled.clone();
+        relabeled.metadata.as_mut().unwrap().model_label = Some("opus-5.5".into());
+        assert_eq!(
+            changed_public_fields(Some(&labeled), &relabeled),
+            BTreeSet::from([PublicField::Metadata])
+        );
+        assert_eq!(
+            serde_json::to_value(&relabeled.metadata).unwrap()["model_label"],
+            "opus-5.5"
+        );
+
         let mut blocked = base.clone();
         blocked.status = PublicStatus::Blocked;
         blocked.reason = Some(PublicStatusReason {

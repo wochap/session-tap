@@ -52,6 +52,14 @@ pub const OWNERSHIP_MARKER: &str = "// sessiontap-managed-extension v1";
 
 const SESSION_NAME_MAX_CHARS: usize = 160;
 const MODEL_MAX_CHARS: usize = 160;
+
+/// Display name for a pi model: drops the `<provider>/` prefix.
+fn model_label(model: &str) -> String {
+    model
+        .split_once('/')
+        .map_or(model, |(_, name)| name)
+        .to_owned()
+}
 const AGENT_DIR_ENV: &str = "PI_CODING_AGENT_DIR";
 const EXECUTABLE_PLACEHOLDER: &str = "\"__SESSIONTAP_EXECUTABLE__\"";
 
@@ -92,9 +100,11 @@ impl HookDialect for PiDialect {
             .filter(|v| matches!(v.as_str(), "startup" | "new" | "resume" | "fork" | "reload"))
     }
     fn metadata(&self, raw: &Value) -> Option<ProviderMetadata> {
+        let model = bounded_field(raw, &["served_model"], MODEL_MAX_CHARS)
+            .or_else(|| bounded_field(raw, &["model"], MODEL_MAX_CHARS));
         let metadata = ProviderMetadata {
-            model: bounded_field(raw, &["served_model"], MODEL_MAX_CHARS)
-                .or_else(|| bounded_field(raw, &["model"], MODEL_MAX_CHARS)),
+            model_label: model.as_deref().map(model_label),
+            model,
             effort: bounded_field(raw, &["thinking_level"], 32)
                 .and_then(|level| effort_level(&level)),
             permission_mode: None,
@@ -443,6 +453,7 @@ mod tests {
             Some("My session")
         );
         let metadata = started.event.provider_metadata.unwrap();
+        assert_eq!(metadata.model_label.as_deref(), Some("claude-sonnet-4-5"));
         assert_eq!(
             metadata.model.as_deref(),
             Some("anthropic/claude-sonnet-4-5")
@@ -504,8 +515,10 @@ mod tests {
             "served_model":"openai-codex/gpt-5.5"
         }));
         assert_eq!(served.model.as_deref(), Some("openai-codex/gpt-5.5"));
+        assert_eq!(served.model_label.as_deref(), Some("gpt-5.5"));
         let selected = model(json!({"pi_event":"model_select","model":"openai-codex/auto"}));
         assert_eq!(selected.model.as_deref(), Some("openai-codex/auto"));
+        assert_eq!(selected.model_label.as_deref(), Some("auto"));
         let oversized = model(json!({
             "pi_event":"turn_end",
             "model":"openai-codex/auto",
