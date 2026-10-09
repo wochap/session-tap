@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.map
 
 private val Context.alertStore: DataStore<Preferences> by preferencesDataStore(name = "alerts")
 
-/** Alert toggles and per-hub mutes. Stored only on this phone. */
+/** Alert toggles, per-hub mutes, and session list section collapse. Stored only on this phone. */
 class SettingsStore(private val store: DataStore<Preferences>) {
     constructor(context: Context) : this(context.alertStore)
 
@@ -22,6 +22,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     private val input = booleanPreferencesKey("input")
     private val finished = booleanPreferencesKey("finished")
     private fun muteKey(hubId: String) = longPreferencesKey("mute_$hubId")
+    private fun collapseKey(sectionKey: String) = booleanPreferencesKey("collapse_$sectionKey")
 
     val settings: Flow<AlertSettings> = store.data.map {
         AlertSettings(
@@ -38,6 +39,13 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         }.toMap()
     }
 
+    /** section key (`attn`, `h_<hubId>`, `stale`) -> collapsed. Only sections the user toggled are present. */
+    val collapsed: Flow<Map<String, Boolean>> = store.data.map { prefs ->
+        prefs.asMap().mapNotNull { (key, value) ->
+            if (key.name.startsWith("collapse_") && value is Boolean) key.name.removePrefix("collapse_") to value else null
+        }.toMap()
+    }
+
     suspend fun current(): AlertSettings = settings.first()
 
     suspend fun isMuted(hubId: String, nowMs: Long): Boolean = (mutes.first()[hubId] ?: 0) > nowMs
@@ -48,4 +56,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
 
     suspend fun mute(hubId: String, untilMs: Long) = store.edit { it[muteKey(hubId)] = untilMs }
     suspend fun unmute(hubId: String) = store.edit { it.remove(muteKey(hubId)) }
+
+    suspend fun setCollapsed(sectionKey: String, value: Boolean) = store.edit { it[collapseKey(sectionKey)] = value }
+    suspend fun clearCollapsed(sectionKey: String) = store.edit { it.remove(collapseKey(sectionKey)) }
 }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -192,5 +193,24 @@ class HubRepositoryTest {
         val many = (1..10).map { "10.1.0.$it:8932" }
         repo.onConnected(hubId, "macbook.tailnet.ts.net:8932", info.copy(endpoints = many))
         assertEquals(listOf("macbook.tailnet.ts.net:8932") + many.take(7), db.hubs().hub(hubId)!!.endpoints)
+    }
+
+    @Test
+    fun collapseStateRoundTripsAndClears() = runBlocking {
+        assertEquals(emptyMap<String, Boolean>(), settings.collapsed.first())
+        settings.setCollapsed("stale", false)
+        settings.setCollapsed("h_x", true)
+        assertEquals(mapOf("stale" to false, "h_x" to true), settings.collapsed.first())
+        settings.clearCollapsed("h_x")
+        assertEquals(mapOf("stale" to false), settings.collapsed.first())
+    }
+
+    @Test
+    fun unpairClearsOnlyThatHubsCollapseState() = runBlocking {
+        settings.setCollapsed("h_$hubId", true)
+        settings.setCollapsed("h_other", true)
+        settings.setCollapsed("attn", true)
+        repo.unpair(hubId)
+        assertEquals(mapOf("h_other" to true, "attn" to true), settings.collapsed.first())
     }
 }

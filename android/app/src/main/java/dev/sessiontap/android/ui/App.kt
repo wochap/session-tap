@@ -120,6 +120,8 @@ fun SessionTapRoot(app: SessionTapApp, pairVm: PairViewModel, nav: NavHostContro
     val hidden by repo.hidden.collectAsStateWithLifecycle()
     val alerts by app.settings.settings.collectAsStateWithLifecycle(initialValue = dev.sessiontap.android.domain.AlertSettings())
     val mutes by app.settings.mutes.collectAsStateWithLifecycle(initialValue = emptyMap())
+    // null until the store loads, so a collapsed section never renders open first.
+    val collapsed by app.settings.collapsed.collectAsStateWithLifecycle(initialValue = null)
     val pairState by pairVm.state.collectAsStateWithLifecycle()
     val now by produceState(Instant.now()) {
         while (true) {
@@ -280,8 +282,10 @@ fun SessionTapRoot(app: SessionTapApp, pairVm: PairViewModel, nav: NavHostContro
                     conn = conn,
                     agents = agents,
                     hidden = hidden,
+                    collapsed = collapsed,
                     now = now,
                     onOpen = { nav.navigate(Routes.detail(it)) },
+                    onToggleSection = { key, value -> scope.launch { app.settings.setCollapsed(key, value) } },
                     onForget = ::forget,
                     onPair = { nav.navigate(Routes.SCAN) },
                     onHubs = { nav.navigate(Routes.HUBS) { launchSingleTop = true } },

@@ -35,9 +35,9 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -94,6 +94,12 @@ import dev.sessiontap.android.ui.theme.St
 import dev.sessiontap.android.ui.theme.repoColor
 import java.time.Instant
 
+/** Expanded rows survive tab switches; each key is flattened to its three id strings. */
+private val AgentKeySetSaver = Saver<Set<AgentKey>, ArrayList<String>>(
+    save = { keys -> ArrayList(keys.flatMap { listOf(it.hubId, it.sourceId, it.invocationId) }) },
+    restore = { flat -> flat.chunked(3).map { AgentKey(it[0], it[1], it[2]) }.toSet() },
+)
+
 private val GRAYSCALE = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
 
 @Composable
@@ -102,8 +108,10 @@ fun SessionsScreen(
     conn: Map<String, ConnState>,
     agents: List<AgentItem>,
     hidden: Set<AgentKey>,
+    collapsed: Map<String, Boolean>?,
     now: Instant,
     onOpen: (AgentKey) -> Unit,
+    onToggleSection: (String, Boolean) -> Unit,
     onForget: (AgentKey) -> Unit,
     onPair: () -> Unit,
     onHubs: () -> Unit,
@@ -115,12 +123,12 @@ fun SessionsScreen(
     val c = St.colors
     var hubSel by rememberSaveable { mutableStateOf<String?>(null) }
     var filter by rememberSaveable { mutableStateOf(Filter.All) }
-    val collapsed = remember { mutableStateMapOf<String, Boolean>() }
-    val expanded = remember { mutableStateMapOf<AgentKey, Boolean>() }
+    var expanded by rememberSaveable(stateSaver = AgentKeySetSaver) { mutableStateOf(emptySet<AgentKey>()) }
     var menu by remember { mutableStateOf(false) }
     if (hubSel != null && hubs.none { it.hubId == hubSel }) hubSel = null
     val multi = hubs.size > 1
-    val feed = buildFeed(FeedInput(hubs, conn, agents, hidden, hubSel, filter, collapsed.toMap(), expanded.filterValues { it }.keys, now))
+    // Collapse state still loading: show nothing rather than flash sections open.
+    val feed = if (collapsed == null) emptyList() else buildFeed(FeedInput(hubs, conn, agents, hidden, hubSel, filter, collapsed, expanded, now))
     val counts = filterCounts(agents, hidden, hubSel, now)
 
     Column(Modifier.fillMaxSize().background(c.bg).padding(top = contentPadding.calculateTopPadding())) {
@@ -199,7 +207,7 @@ fun SessionsScreen(
         LazyColumn(Modifier.weight(1f).testTag("feed"), state = listState, contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding() + 12.dp)) {
             items(feed, key = { it.id }) { item ->
                 when (item) {
-                    is FeedItem.Section -> SectionHeader(item) { collapsed[item.key] = !item.collapsed }
+                    is FeedItem.Section -> SectionHeader(item) { onToggleSection(item.key, !item.collapsed) }
                     is FeedItem.Source -> Row(Modifier.padding(start = 30.dp, end = 16.dp, top = 8.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(if (item.host) PhosphorIcons.Regular.Desktop else PhosphorIcons.Regular.Cube, null, tint = c.mute, modifier = Modifier.size(12.dp))
                         Text(item.title, fontFamily = Mono, fontSize = 11.sp, color = c.mute)
@@ -210,7 +218,7 @@ fun SessionsScreen(
                     is FeedItem.Row -> SessionRow(
                         row = item.row,
                         onOpen = { onOpen(item.row.key) },
-                        onToggleKids = { expanded[item.row.key] = !item.row.expanded },
+                        onToggleKids = { expanded = if (item.row.expanded) expanded - item.row.key else expanded + item.row.key },
                         onForget = { onForget(item.row.key) },
                     )
                     is FeedItem.Kids -> KidsBlock(item.row)

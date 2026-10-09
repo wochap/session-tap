@@ -140,11 +140,12 @@ class HubRepository(
         dao.upsertHub(hub.copy(revoked = true))
     }
 
-    /** Deletes the hub, its pinned identity, agents, notifications, and mute. */
+    /** Deletes the hub, its pinned identity, agents, notifications, mute, and section collapse state. */
     suspend fun unpair(hubId: String) = mutex.withLock {
         dao.deleteHub(hubId)
         notifier.cancelHub(hubId)
         settings.unmute(hubId)
+        settings.clearCollapsed("h_$hubId")
         _conn.update { it - hubId }
         _hidden.update { hidden -> hidden.filter { it.hubId != hubId }.toSet() }
     }

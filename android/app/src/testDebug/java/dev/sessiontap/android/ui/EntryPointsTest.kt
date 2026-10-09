@@ -1,6 +1,11 @@
 package dev.sessiontap.android.ui
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -91,8 +96,10 @@ class EntryPointsTest {
                     conn = mapOf("hub" to ConnState.Live("h:1")),
                     agents = listOf(item(withTerm), item(headless)),
                     hidden = emptySet(),
+                    collapsed = emptyMap(),
                     now = Fixtures.NOW,
                     onOpen = {},
+                    onToggleSection = { _, _ -> },
                     onForget = {},
                     onPair = {},
                     onHubs = {},
@@ -107,5 +114,73 @@ class EntryPointsTest {
         rule.onNodeWithTag("row:Headless").assertExists()
         rule.onNodeWithTag("term:With terminal", useUnmergedTree = true).assertExists()
         rule.onAllNodesWithTag("term:Headless", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun sectionCollapseSurvivesLeavingTheScreen() {
+        val hubs = listOf(hub("read"), HubEntity("hub2", "Linux", listOf("h:2"), listOf("read"), pairedAt = 0))
+        val agents = listOf(item(view(Status.Running, id = "a", sessionName = "Alpha")))
+        // Stands in for SettingsStore.collapsed, which outlives the destination.
+        val collapsed = mutableStateMapOf<String, Boolean>()
+        var onSessions by mutableStateOf(true)
+        rule.setContent {
+            SessionTapTheme {
+                val holder = rememberSaveableStateHolder()
+                if (onSessions) holder.SaveableStateProvider("sessions") {
+                    SessionsScreen(
+                        hubs = hubs,
+                        conn = mapOf("hub" to ConnState.Live("h:1"), "hub2" to ConnState.Live("h:2")),
+                        agents = agents,
+                        hidden = emptySet(),
+                        collapsed = collapsed.toMap(),
+                        now = Fixtures.NOW,
+                        onOpen = {},
+                        onToggleSection = { k, v -> collapsed[k] = v },
+                        onForget = {},
+                        onPair = {},
+                        onHubs = {},
+                        onAlerts = {},
+                        onRetry = {},
+                        onOpenTailscale = {},
+                        contentPadding = PaddingValues(),
+                    )
+                }
+            }
+        }
+        rule.onNodeWithTag("row:Alpha").assertExists()
+        rule.onNodeWithTag("section:h_hub").performClick()
+        rule.onAllNodesWithTag("row:Alpha").assertCountEquals(0)
+        onSessions = false
+        rule.waitForIdle()
+        onSessions = true
+        rule.waitForIdle()
+        rule.onNodeWithTag("section:h_hub").assertExists()
+        rule.onAllNodesWithTag("row:Alpha").assertCountEquals(0)
+    }
+
+    @Test
+    fun loadingCollapseStateRendersNoSections() {
+        rule.setContent {
+            SessionTapTheme {
+                SessionsScreen(
+                    hubs = listOf(hub("read")),
+                    conn = mapOf("hub" to ConnState.Live("h:1")),
+                    agents = listOf(item(view(Status.Running, id = "a", sessionName = "Alpha"))),
+                    hidden = emptySet(),
+                    collapsed = null,
+                    now = Fixtures.NOW,
+                    onOpen = {},
+                    onToggleSection = { _, _ -> },
+                    onForget = {},
+                    onPair = {},
+                    onHubs = {},
+                    onAlerts = {},
+                    onRetry = {},
+                    onOpenTailscale = {},
+                    contentPadding = PaddingValues(),
+                )
+            }
+        }
+        rule.onAllNodesWithTag("row:Alpha").assertCountEquals(0)
     }
 }
