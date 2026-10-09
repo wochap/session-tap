@@ -217,7 +217,7 @@ The Alerts screen SHALL provide toggles for needs permission, needs input, and f
 - **THEN** that hub posts no notifications for one hour while the session list keeps updating
 
 ### Requirement: Onboarding requests required permissions
-Before or right after the first pairing, the app SHALL present a checklist that requests camera access, notification permission, and exemption from battery optimization, and that explains that off-LAN hubs need Tailscale connected on the phone. Denied permissions SHALL show how to grant them later without blocking access to the session list.
+Before or right after the first pairing, the app SHALL present a checklist that requests camera access, notification permission, and exemption from battery optimization. It SHALL explain that hubs on another network need Tailscale connected on the phone, and that on a new shared Wi-Fi network the app finds a hub only when that hub enables `remote.discovery`. Denied permissions SHALL show how to grant them later without blocking access to the session list.
 
 #### Scenario: Notifications denied
 - **WHEN** the user denies the notification permission
@@ -241,6 +241,37 @@ After each successful connection whose server certificate matches the hub's pinn
 #### Scenario: Endpoint presents a different certificate
 - **WHEN** an endpoint presents a certificate whose SPKI hash differs from the stored hub ID
 - **THEN** the app sends it no request and stores no endpoint hints from it
+
+### Requirement: App discovers paired hubs on the local network
+On each connection attempt while the default network has Wi-Fi or Ethernet transport, the app SHALL run a DNS-SD browse for `_sessiontap._tcp`, bounded to 10 seconds, alongside the race over stored endpoint hints. It SHALL feed resolved candidates into that race as they arrive. One browse SHALL serve every paired hub that is reconnecting. The app SHALL NOT browse while all hubs are connected, on networks without Wi-Fi or Ethernet transport, or continuously in the background. It SHALL ignore IPv6 link-local candidates and candidates already in a hub's hints. It SHALL try at most 8 discovered candidates per browse and dial at most 4 endpoints concurrently per hub. Each candidate SHALL be dialed by IP literal under the hub's pinned certificate. A candidate whose server certificate does not match SHALL be dropped before the app sends a client certificate or any message, and SHALL NOT be stored. A matching candidate SHALL connect like any hint, and the endpoint merge of "App refreshes endpoint hints from connected hubs" SHALL then apply. Discovery SHALL NOT be used to identify, trust, or pin a hub. When no endpoint connects, reconnection SHALL continue with the existing backoff, and each attempt SHALL browse again under the same rules.
+
+#### Scenario: Both devices join a new Wi-Fi network
+- **WHEN** the hub, with discovery on, and the phone join a new Wi-Fi network where the hub has 192.168.5.20, and the phone's stored hints are all from another network
+- **THEN** the app connects to `192.168.5.20:8932` within 15 seconds of the network becoming available, without re-pairing, and the stored hints start with `192.168.5.20:8932`
+
+#### Scenario: Another hub on the network
+- **WHEN** the network has the user's hub and a friend's SessionTap hub, both announcing
+- **THEN** the app completes TLS only with the hub whose certificate matches the pin, and the friend's hub receives no client certificate or message
+
+#### Scenario: Fake announcement
+- **WHEN** a service announces `_sessiontap._tcp` and presents a certificate that does not match the pin
+- **THEN** the handshake aborts before any client certificate or message is sent, nothing is stored, and the attempt continues with other candidates
+
+#### Scenario: Many fake records
+- **WHEN** 50 services announce `_sessiontap._tcp` during a browse
+- **THEN** the app tries at most 8 of them and dials at most 4 endpoints concurrently per hub
+
+#### Scenario: Cellular only
+- **WHEN** the phone's default network is cellular
+- **THEN** the app does not browse and reconnects through stored hints, such as a tailnet hint, as before
+
+#### Scenario: Connected hubs
+- **WHEN** the network changes while every hub stays connected
+- **THEN** the app starts no browse
+
+#### Scenario: Hub has discovery off
+- **WHEN** no paired hub is found after the browse window on a new network
+- **THEN** the hub shows as reconnecting, and its card says the hub can be found on new networks by enabling `remote.discovery`
 
 ### Requirement: App shows requested and granted scopes
 While waiting for operator approval during pairing, the app SHALL list the scopes requested by the QR payload as chips labelled Read, Manage, Watch terminal, and Control terminal. The Control terminal chip SHALL use the amber warning style, and the screen SHALL show the line "Control terminal can type into agents, which can run commands on <hub name>." when `control` is requested. Each hub card on the Hubs screen SHALL show the hub's granted scopes, as last reported by `hub.info`, as compact chips in the order `read`, `manage`, `watch`, `control`, with `control` in the warning style. A scope name the app does not know SHALL be shown as its raw name. Onboarding copy SHALL describe the app as following sessions and, on hubs that allow it, answering agents in their live terminal.

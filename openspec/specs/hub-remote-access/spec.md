@@ -293,6 +293,59 @@ The `hub.info` result SHALL include an `endpoints` array of `host:port` strings.
 - **WHEN** a paired device with only the `read` scope sends `hub.info`
 - **THEN** the result includes the `endpoints` list
 
+### Requirement: Discovery is opt-in and requires a wildcard bind
+The `remote` configuration SHALL accept an optional boolean `discovery`, false by default. When `discovery` is true and `remote.listen` is not a single wildcard entry, the configuration SHALL be invalid, the error SHALL name `remote.discovery`, and no remote listener SHALL open. When `discovery` is absent or false, the hub SHALL send no mDNS traffic. When `remote.listen` is a wildcard and `discovery` is not enabled, `sessiontap-hub pair` SHALL print one line saying that devices will not find the hub on a new network unless `remote.discovery` is enabled or a tailnet endpoint is advertised.
+
+#### Scenario: Discovery with an explicit address
+- **WHEN** the configuration sets `remote.listen: ["192.168.1.20:8932"]` and `remote.discovery: true`
+- **THEN** the configuration is invalid, the error names `remote.discovery`, and no remote listener opens
+
+#### Scenario: Discovery off
+- **WHEN** `remote.discovery` is absent
+- **THEN** the hub sends and answers no mDNS packets
+
+#### Scenario: Pair hint
+- **WHEN** `remote.listen` is `["0.0.0.0:8932"]`, discovery is off, and the user runs `sessiontap-hub pair`
+- **THEN** the command prints the discovery hint line and renders the QR code as usual
+
+### Requirement: Hub announces its LAN endpoint without identifying itself
+With discovery enabled, the hub SHALL announce a DNS-SD service of type `_sessiontap._tcp.local` with the wildcard's port. The announced addresses SHALL be exactly the interface addresses that "Pairing endpoint hints reflect the current bind mode" yields for the wildcard, without `remote.advertise` entries. They SHALL come from the same computation, so loopback, link-local, and `docker`, `veth`, `virbr`, and `br-` interfaces are never announced. For `0.0.0.0` the hub SHALL announce A records only, and for `[::]` A and AAAA records. The hub SHALL NOT announce on interfaces without multicast. The instance name and the SRV target host name SHALL be random values generated at each hub start, and SHALL contain neither the hub ID, `remote.name`, nor the machine host name. The TXT record SHALL contain only `v=1`. Discovery SHALL grant no trust. A connection that arrives at a discovered address SHALL be authenticated exactly like any other, and `hub.info` endpoints SHALL be unchanged by discovery.
+
+#### Scenario: Announced addresses
+- **WHEN** discovery is on, `remote.listen` is `["0.0.0.0:8932"]`, `remote.advertise` is `["macbook.tailnet.ts.net:8932"]`, and the host has `lo` 127.0.0.1, `wlan0` 192.168.0.165, `docker0` 172.17.0.1, and `eth1` 169.254.3.4
+- **THEN** the hub announces `_sessiontap._tcp.local` on port 8932 with an A record for 192.168.0.165 only, and TXT `v=1`
+
+#### Scenario: IPv6 wildcard
+- **WHEN** discovery is on with `remote.listen: ["[::]:8932"]` and `wlan0` has 192.168.0.165, a global IPv6 address, and an `fe80::` address
+- **THEN** the hub announces A 192.168.0.165 and AAAA for the global address only
+
+#### Scenario: No identifying names
+- **WHEN** a host named `gean-laptop` with `remote.name: Laptop` announces
+- **THEN** neither the instance name nor the SRV target contains `gean-laptop`, `Laptop`, or any part of the hub ID
+
+#### Scenario: Names change per start
+- **WHEN** the hub restarts
+- **THEN** it announces a different instance name and SRV target than before
+
+### Requirement: Announcement follows the listener and address changes
+The hub SHALL announce only while the wildcard listener is bound. It SHALL withdraw the announcement when the listener returns to the bind retry loop, and announce again once bound. When the announced address set changes while the hub runs, it SHALL withdraw records for removed addresses and announce added ones within 30 seconds, without a restart. On shutdown it SHALL send DNS-SD goodbye packets. Announcement failures SHALL be logged once per failure kind and SHALL NOT affect remote listeners, ingestion, or the local unix socket.
+
+#### Scenario: Address changes while running
+- **WHEN** discovery is on and the LAN address changes from 192.168.0.165 to 192.168.0.170
+- **THEN** within 30 seconds the record for 192.168.0.165 is withdrawn and 192.168.0.170 is announced, without a restart
+
+#### Scenario: Listener not bound
+- **WHEN** the wildcard listener has not bound yet or has returned to retrying
+- **THEN** no announcement is present until it binds
+
+#### Scenario: Hub stops
+- **WHEN** the hub shuts down with discovery on
+- **THEN** it sends goodbye packets for its records
+
+#### Scenario: mDNS socket unavailable
+- **WHEN** the hub cannot open its mDNS socket
+- **THEN** it logs the failure once and keeps serving remote connections, ingestion, and the unix socket
+
 ### Requirement: Devices hold scopes from a fixed set
 A paired device SHALL hold a subset of four scopes:
 
