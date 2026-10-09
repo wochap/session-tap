@@ -93,11 +93,31 @@ The app SHALL compute each agent's effective status: `blocked` if the agent or a
 - **THEN** it appears grayed in the Stale section
 
 ### Requirement: Session list and detail present hub data
-Each session row SHALL show the effective status, session name (or the provider name when there is none), a provider mark, repository branch, a one-line reason or summary, a relative update time, and a child count when children exist. Expanding a row SHALL list its children with status, agent type, summary, and elapsed time. The detail screen SHALL show provider metadata (model, effort, permission mode), the hub and source, the status reason, cwd shortened against the home directory, branch, dirty flag, short head, context window percent, humanized input and output tokens, children, and created and updated times. Filter chips SHALL offer All, Needs attention, Running, and Stale. When the session list is scrolled to its very top and its content changes, it SHALL stay scrolled to the top so items added or moved above the old first item are visible. When the user has scrolled away from the top, content changes SHALL NOT move the list.
+Each session row SHALL show the effective status, session name (or the provider name when there is none), a provider mark, repository branch, a one-line reason or summary, a relative update time, and a child count when children exist. The relative update time SHALL sit at the trailing edge of the row's first line on every row, whatever the name length and whichever chips are shown. When the agent's provider metadata carries a model, the row's first line SHALL show a model chip after the provider mark and the terminal icon. The chip SHALL show `model_label`, or `model` when there is no label. It SHALL be capped in width with an ellipsis. When space runs out, the session name SHALL shorten first, then the model chip, and the time SHALL stay fully visible. A row without a model SHALL show no model chip. Expanding a row SHALL list its children with status, agent type, summary, and elapsed time. The detail screen SHALL show provider metadata (the full raw model, effort, permission mode), the hub and source, the status reason, cwd shortened against the home directory, branch, dirty flag, short head, context window percent, humanized input and output tokens, children, and created and updated times. Filter chips SHALL offer All, Needs attention, Running, and Stale. When the session list is scrolled to its very top and its content changes, it SHALL stay scrolled to the top so items added or moved above the old first item are visible. When the user has scrolled away from the top, content changes SHALL NOT move the list.
 
 #### Scenario: Open detail
 - **WHEN** the user taps a session row
 - **THEN** the detail screen shows that agent's metadata, usage, repository, and children
+
+#### Scenario: Time at the trailing edge
+- **WHEN** the list shows a row named `Claude Code` with a provider mark and no other chips
+- **THEN** the relative time's end is aligned with the row's trailing content edge
+
+#### Scenario: Model chip shows the label
+- **WHEN** an agent's provider metadata carries model `claude-opus-5-5` and label `opus-5.5`
+- **THEN** its row shows a chip `opus-5.5` after the provider mark and terminal icon, and the detail screen shows `claude-opus-5-5`
+
+#### Scenario: Model without a label
+- **WHEN** an agent's provider metadata carries model `gpt-5.5` and no label
+- **THEN** its row shows a chip `gpt-5.5`
+
+#### Scenario: No model
+- **WHEN** an agent's provider metadata carries no model
+- **THEN** its row shows no model chip
+
+#### Scenario: Long name with model and hub tag
+- **WHEN** a row has a long session name, a model chip, a terminal icon, and a hub tag on a narrow screen
+- **THEN** the session name is ellipsized and the time stays fully visible at the trailing edge
 
 #### Scenario: Filter with no matches
 - **WHEN** the user selects Stale and no agent is stale

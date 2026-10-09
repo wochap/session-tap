@@ -521,3 +521,22 @@ The broker SHALL remove a retained child agent whose status is running when 30 m
 #### Scenario: Only the child is stale
 - **WHEN** the root is stopped for the current turn and a running child becomes stale
 - **THEN** the sweep removes the child and the root remains stopped with its completed reason intact
+
+### Requirement: Model label travels with the model
+Provider metadata SHALL carry an optional `model_label`: a short display name for the model, chosen by the provider adapter that reported the model. `PublicAgentView` provider metadata SHALL include `model_label` when it is known. The broker SHALL treat `model` and `model_label` as one pair. Whenever an event replaces the stored `model`, the stored `model_label` SHALL take the event's `model_label`, even when the event carries no label. An event that does not replace the model SHALL leave the label unchanged. The fill-only rule for provider-artifact model evidence SHALL apply to the pair: when a model is already known, a provider-artifact event SHALL change neither field. `model_label` SHALL be sanitized and bounded to 160 characters like `model`. A change to `model_label` alone SHALL be a meaningful public change at path `provider_metadata.model_label`.
+
+#### Scenario: Hook replaces model and label
+- **WHEN** the stored pair is model `claude-sonnet-5`, label `sonnet-5`, and a hook reports model `claude-opus-5-5` with label `opus-5.5`
+- **THEN** the public view carries model `claude-opus-5-5` and label `opus-5.5`
+
+#### Scenario: New model without a label clears the old label
+- **WHEN** the stored pair is model `claude-sonnet-5`, label `sonnet-5`, and an event reports model `custom-x` with no label
+- **THEN** the stored model is `custom-x` and the label is absent
+
+#### Scenario: Transcript cannot replace half of the pair
+- **WHEN** a hook set model `claude-opus-5-5` with label `opus-5.5` and a provider-artifact event later reports model `claude-sonnet-5` with label `sonnet-5`
+- **THEN** both stored fields stay `claude-opus-5-5` and `opus-5.5`
+
+#### Scenario: Event without a model keeps the label
+- **WHEN** an event carries effort but no model
+- **THEN** the stored model and label are unchanged

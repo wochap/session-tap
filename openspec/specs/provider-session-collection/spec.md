@@ -164,16 +164,16 @@ The Codex collector SHALL inspect the bounded provider-owned `<home>/.codex/sess
 - **THEN** the collector omits index-derived name enrichment, retains any verified rollout-derived name fallback, and does not discard valid rollout-derived usage
 
 ### Requirement: Claude transcript collection reports the latest model
-The Claude collector SHALL report, as enrichment, the sanitized and bounded `message.model` of the latest assistant record in the session artifact that carries one. It SHALL omit the model when no assistant record carries a safe value. A transcript-reported model SHALL fill the session model only when no hook has reported a model for that invocation, and SHALL NOT replace a model reported by a hook.
+The Claude collector SHALL report, as enrichment, the sanitized and bounded `message.model` of the latest assistant record in the session artifact that carries one, together with the `model_label` the Claude adapter's label rule derives from it. It SHALL omit both when no assistant record carries a safe value. A transcript-reported model and label SHALL fill the session model and label only when no hook has reported a model for that invocation, and SHALL NOT replace a model or label reported by a hook.
 
 #### Scenario: Hook gave no model
 - **WHEN** a Claude session's hooks carry no model and its transcript has assistant records from `claude-sonnet-5`
-- **THEN** the session's model becomes `claude-sonnet-5` after collection
+- **THEN** the session's model becomes `claude-sonnet-5` and its label becomes `sonnet-5` after collection
 
 #### Scenario: Hook model is kept
 - **WHEN** a `PostModelSwitch` hook set the model to `claude-opus-5-5` and the transcript's latest assistant record still names `claude-sonnet-5`
-- **THEN** the session's model stays `claude-opus-5-5`
+- **THEN** the session's model stays `claude-opus-5-5` and its label stays `opus-5.5`
 
 #### Scenario: Model kept after the session ends
 - **WHEN** a Claude session with a known model exits and its snapshot is retained
-- **THEN** the retained snapshot and its public view still carry that model
+- **THEN** the retained snapshot and its public view still carry that model and label

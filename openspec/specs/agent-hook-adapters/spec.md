@@ -568,19 +568,31 @@ Every adapter SHALL declare a terminal policy describing provider-specific behav
 - **THEN** the alias's invocations report the Claude terminal policy
 
 ### Requirement: Session model follows provider switches
-The Claude and Pi adapters SHALL keep the session's model current from every model signal their provider exposes. Claude SHALL take the model from `SessionStart` when present, and SHALL subscribe `PostModelSwitch` and map its `to_model` to the session model. Pi SHALL take the selected model from every forwarded event and `model_select`, and the managed extension SHALL forward the provider and model of the assistant message that ended each turn, which then becomes the session model. Every model value SHALL be sanitized and bounded to 160 characters. The thinking level `off` SHALL be a valid effort value, so a switch to `off` replaces the previous effort. The last reported model and effort SHALL remain in the snapshot after the session ends.
+The Claude and Pi adapters SHALL keep the session's model current from every model signal their provider exposes. Claude SHALL take the model from `SessionStart` when present, and SHALL subscribe `PostModelSwitch` and map its `to_model` to the session model. Pi SHALL take the selected model from every forwarded event and `model_select`, and the managed extension SHALL forward the provider and model of the assistant message that ended each turn, which then becomes the session model. Every model value SHALL be sanitized and bounded to 160 characters. Every time an adapter reports a model it SHALL also report a `model_label` derived by that adapter's own rule, sanitized and bounded the same way. The Claude rule SHALL drop a leading `claude-`, drop a trailing `-YYYYMMDD` date, and join a trailing `-<major>-<minor>` version with a dot, keeping any bracketed suffix such as `[1m]`. The Pi rule SHALL drop a leading `<provider>/` prefix. When a rule does not change the value, the label SHALL equal the model. Label derivation SHALL live only in the adapter that reports the model. The thinking level `off` SHALL be a valid effort value, so a switch to `off` replaces the previous effort. The last reported model, label, and effort SHALL remain in the snapshot after the session ends.
 
 #### Scenario: Claude model switch
 - **WHEN** a wrapped Claude session runs `/model` and `PostModelSwitch` reports `to_model` `claude-opus-5-5`
-- **THEN** the session's model becomes `claude-opus-5-5`
+- **THEN** the session's model becomes `claude-opus-5-5` and its label becomes `opus-5.5`
+
+#### Scenario: Claude dated model
+- **WHEN** a Claude hook reports model `claude-opus-4-5-20251101`
+- **THEN** the label is `opus-4.5`
+
+#### Scenario: Claude model with context suffix
+- **WHEN** a Claude hook reports model `claude-opus-5-5[1m]`
+- **THEN** the label is `opus-5.5[1m]`
+
+#### Scenario: Claude alias model
+- **WHEN** a Claude hook reports model `opus`
+- **THEN** the label is `opus`
 
 #### Scenario: Claude SessionStart without model
 - **WHEN** a Claude `SessionStart` hook carries no `model`
-- **THEN** the adapter emits no model and keeps any previously known model
+- **THEN** the adapter emits no model and no label and keeps any previously known model and label
 
 #### Scenario: Pi virtual model
 - **WHEN** pi has `openai-codex/auto` selected and a turn ends with an assistant message from provider `openai-codex` and model `gpt-5.5`
-- **THEN** the session's model becomes `openai-codex/gpt-5.5`
+- **THEN** the session's model becomes `openai-codex/gpt-5.5` and its label becomes `gpt-5.5`
 
 #### Scenario: Thinking turned off
 - **WHEN** pi reports `thinking_level_select` with level `off` after `high`
