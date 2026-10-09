@@ -86,6 +86,19 @@ Phone check for direct mode: see "Direct keyboard with Claude vim mode" in
 - The app tries every endpoint from the QR code and prefers the last one that
   worked. The Hubs screen shows the endpoint in use.
 
+## Troubleshooting
+
+`adb install` fails with `adb: protocol fault (couldn't read status): Connection
+reset by peer`: the adb server is stuck. Restart it and retry:
+
+```bash
+adb kill-server
+adb start-server
+adb devices                    # phone must show as "device", not "unauthorized"
+```
+
+If it persists, replug the USB cable or toggle USB debugging on the phone.
+
 ## Emulator checks
 
 ```bash
