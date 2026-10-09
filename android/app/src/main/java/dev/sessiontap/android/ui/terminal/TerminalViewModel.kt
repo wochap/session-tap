@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Redraw tick for the pane: [version] changes on every frame, [scrolled] counts lines that left the screen. */
@@ -70,6 +71,19 @@ class TerminalViewModel(
     private var ctrlJob: Job? = null
     private var loop: Job? = null
 
+    private val _frozen = MutableStateFlow(false)
+    /** Selection mode holds the view still: output is queued instead of applied. */
+    val frozen: StateFlow<Boolean> = _frozen
+    private val _heldLines = MutableStateFlow(0)
+    /** `\n` bytes held while frozen, for the Jump to live pill. */
+    val heldLines: StateFlow<Int> = _heldLines
+    private val held = ArrayList<ByteArray>()
+    private var heldBytes = 0
+    private var heldSnapshot: TerminalFrame.Snapshot? = null
+    /** Held output passed [HOLD_CAP_BYTES] and was dropped; unfreeze reopens for a fresh snapshot. */
+    private var stale = false
+    private val reopen = Channel<Unit>(Channel.CONFLATED)
+
     fun start() {
         if (loop != null) return
         loop = scope.launch { run() }
@@ -87,6 +101,7 @@ class TerminalViewModel(
 
     private suspend fun run() {
         var first = true
+        var reopening = false
         while (scope.isActive && !_state.value.final) {
             val h = awaitHub()
             client = h
@@ -100,13 +115,15 @@ class TerminalViewModel(
                     h.state.first { it.connected || it == ConnState.Revoked || it is ConnState.Connecting }
                     continue
                 }
-                else -> if (!first || _state.value.phase is TerminalPhase.Error) {
+                else -> if (!reopening && (!first || _state.value.phase is TerminalPhase.Error)) {
                     dispatch(TerminalEvent.Reconnected(scopes()))
                     if (_state.value.final) return
                 }
             }
             first = false
-            dispatch(TerminalEvent.Opening)
+            // A reopen after a held-output overflow keeps the pane; the new snapshot shows as catching up.
+            if (!reopening) dispatch(TerminalEvent.Opening)
+            reopening = false
             val connState = h.state.value
             val opened = try {
                 h.openTerminal(key.sourceId, key.invocationId)
@@ -119,11 +136,22 @@ class TerminalViewModel(
                 continue
             }
             stream = opened
-            for (frame in opened.frames) {
+            while (true) {
+                val frame = select<TerminalFrame?> {
+                    opened.frames.onReceiveCatching { it.getOrNull() }
+                    reopen.onReceive {
+                        reopening = true
+                        null
+                    }
+                } ?: break
                 handle(frame)
                 if (_state.value.final || _state.value.phase == TerminalPhase.Reconnecting) break
             }
             stream = null
+            if (reopening) {
+                closeQuietly(h, opened)
+                continue
+            }
             if (_state.value.final) {
                 closeQuietly(h, opened)
                 return
@@ -146,11 +174,60 @@ class TerminalViewModel(
         delay(retryMs / 4)
     }
 
+    /** Holds the view still: later output is queued until [unfreeze]. */
+    fun freeze() {
+        _frozen.value = true
+    }
+
+    /** Applies held output in order, or reopens the stream for a fresh snapshot after an overflow. */
+    fun unfreeze() {
+        if (!_frozen.value) return
+        _frozen.value = false
+        heldSnapshot?.let(::applySnapshot)
+        heldSnapshot = null
+        var lines = 0L
+        held.forEach { lines += emulator.append(it) }
+        if (held.isNotEmpty()) _tick.update { PaneTick(emulator.version, it.scrolled + lines) }
+        held.clear()
+        heldBytes = 0
+        _heldLines.value = 0
+        if (stale) {
+            stale = false
+            reopen.trySend(Unit)
+        }
+    }
+
+    private fun applySnapshot(frame: TerminalFrame.Snapshot) {
+        emulator.reset(frame)
+        _tick.update { PaneTick(emulator.version, it.scrolled) }
+    }
+
+    private fun hold(bytes: ByteArray) {
+        if (stale) return
+        if (heldBytes + bytes.size > HOLD_CAP_BYTES) {
+            held.clear()
+            heldBytes = 0
+            heldSnapshot = null
+            stale = true
+        } else {
+            held += bytes
+            heldBytes += bytes.size
+        }
+        _heldLines.update { n -> n + bytes.count { it == '\n'.code.toByte() } }
+    }
+
     private fun handle(frame: TerminalFrame) {
         when (frame) {
             is TerminalFrame.Snapshot -> {
-                emulator.reset(frame)
-                _tick.update { PaneTick(emulator.version, it.scrolled) }
+                if (_frozen.value) {
+                    // A newer snapshot supersedes anything queued before it.
+                    held.clear()
+                    heldBytes = 0
+                    stale = false
+                    heldSnapshot = frame
+                } else {
+                    applySnapshot(frame)
+                }
                 val catching = _state.value.baselined
                 dispatch(TerminalEvent.Snapshot(frame.input))
                 if (catching) {
@@ -160,7 +237,7 @@ class TerminalViewModel(
                     }
                 }
             }
-            is TerminalFrame.Output -> {
+            is TerminalFrame.Output -> if (_frozen.value) hold(frame.bytes) else {
                 val lines = emulator.append(frame.bytes)
                 _tick.update { PaneTick(emulator.version, it.scrolled + lines) }
             }
@@ -303,6 +380,8 @@ class TerminalViewModel(
     companion object {
         const val CTRL_C_CONFIRM_MS = 2_500L
         const val SENT_COMBO_MS = 1_500L
+        /** Output held while frozen, past which it is dropped and a fresh snapshot is fetched. */
+        const val HOLD_CAP_BYTES = 1 shl 20
 
         fun inputError(e: RpcException): String = when (e.code) {
             TerminalErrors.FORBIDDEN -> "This phone can no longer type into agents on this hub."

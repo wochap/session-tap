@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -158,6 +159,8 @@ data class TerminalUi(
     val mods: Modifiers = Modifiers(),
     /** "Ctrl+R" right after a modified key was sent. */
     val sentCombo: String? = null,
+    /** Lines held back while selection mode freezes the view. */
+    val heldLines: Int = 0,
 )
 
 /** Callbacks from the screen; all default to no-ops for previews and tests. */
@@ -176,7 +179,16 @@ data class TerminalActions(
     val onModTap: (ModKey) -> Unit = {},
     val onModLock: (ModKey) -> Unit = {},
     val onEditKeys: () -> Unit = {},
+    /** Selection mode began: hold output. */
+    val onFreeze: () -> Unit = {},
+    /** Selection mode ended: apply held output. */
+    val onUnfreeze: () -> Unit = {},
+    /** Selected text to put on the clipboard. */
+    val onCopyText: (String) -> Unit = {},
 )
+
+/** How long "Copied · N lines" shows. */
+private const val COPIED_MS = 2_200L
 
 private val CLOCK = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
 
@@ -206,6 +218,19 @@ fun TerminalScreen(
     val ime = WindowInsets.isImeVisible
     val state = ui.state
     val phase = state.phase
+    view.onFreeze = actions.onFreeze
+    view.onUnfreeze = actions.onUnfreeze
+    view.heldLines = ui.heldLines
+    // Back ends selection mode without leaving the screen.
+    BackHandler(view.selecting) { view.endSelection() }
+    var copied by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(copied) {
+        if (copied != null) {
+            delay(COPIED_MS)
+            copied = null
+        }
+    }
+    // jumpToLive ends selection mode first, so input lands on the live view.
     val sending = actions.copy(
         onSend = { enter -> view.jumpToLive(); actions.onSend(enter) },
         onKey = { key -> view.jumpToLive(); actions.onKey(key) },
@@ -220,9 +245,14 @@ fun TerminalScreen(
                 phase == TerminalPhase.Opening -> OpeningPane(ui.hubName)
                 phase is TerminalPhase.Error -> ErrorPane(phase.kind, ui, actions)
                 else -> {
-                    PaneView(emulator, tick, view, dimmed = phase is TerminalPhase.Ended)
+                    PaneView(emulator, tick, view, dimmed = phase is TerminalPhase.Ended, onCopy = { text, lines ->
+                        actions.onCopyText(text)
+                        copied = lines
+                    })
                     Overlay(ui, phase, view, ime)
-                    if (view.scrolledUp) JumpPill(view.newLines) { view.jumpToLive() }
+                    val pill = view.scrolledUp || (view.selecting && ui.heldLines > 0)
+                    if (pill) JumpPill(view.newLines + if (view.selecting) ui.heldLines else 0) { view.jumpToLive() }
+                    copied?.let { CopiedToast(it, abovePill = pill) }
                 }
             }
         }
@@ -369,6 +399,20 @@ private fun BoxScope.JumpPill(newLines: Int, onClick: () -> Unit) {
         Text("Jump to live", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.accInk)
         if (newLines > 0) Text("· $newLines new", fontFamily = Mono, fontSize = 11.5.sp, color = c.accInk.copy(alpha = 0.8f))
     }
+}
+
+@Composable
+private fun BoxScope.CopiedToast(lines: Int, abovePill: Boolean) {
+    val c = St.colors
+    val shape = RoundedCornerShape(17.dp)
+    Text(
+        "Copied · $lines ${if (lines == 1) "line" else "lines"}",
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        color = c.text,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (abovePill) 54.dp else 10.dp).clip(shape)
+            .background(c.surf2).border(1.dp, c.line, shape).padding(horizontal = 14.dp, vertical = 8.dp).testTag("copied-toast"),
+    )
 }
 
 @Composable

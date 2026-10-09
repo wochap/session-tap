@@ -128,6 +128,53 @@ class TerminalViewModelTest {
     }
 
     @Test
+    fun frozenQueuesOutputAndAppliesInOrderOnUnfreeze() = runTest {
+        val vm = live()
+        vm.freeze()
+        hub.push(outputFrame("\r\none"))
+        hub.push(outputFrame("\r\ntwo"))
+        runCurrent()
+        assertEquals("Do you want to proceed?", vm.emulator.screenText())
+        assertEquals(2, vm.heldLines.value)
+        vm.unfreeze()
+        assertEquals("Do you want to proceed?\none\ntwo", vm.emulator.screenText())
+        assertEquals(0, vm.heldLines.value)
+        assertFalse(vm.frozen.value)
+    }
+
+    @Test
+    fun snapshotWhileFrozenSupersedesQueuedOutput() = runTest {
+        val vm = live()
+        vm.freeze()
+        hub.push(outputFrame(" stale"))
+        hub.push(snapshotFrame("fresh"))
+        hub.push(outputFrame(" after"))
+        runCurrent()
+        assertEquals("Do you want to proceed?", vm.emulator.screenText())
+        vm.unfreeze()
+        assertEquals("fresh after", vm.emulator.screenText())
+    }
+
+    @Test
+    fun overflowWhileFrozenReopensForFreshSnapshot() = runTest {
+        val vm = live()
+        vm.freeze()
+        val chunk = "x".repeat(64 * 1024)
+        repeat(17) { hub.push(outputFrame(chunk)) }
+        runCurrent()
+        assertEquals(1, hub.opens.size)
+        vm.unfreeze()
+        runCurrent()
+        assertEquals("Do you want to proceed?", vm.emulator.screenText())
+        assertEquals(2, hub.opens.size)
+        assertEquals(listOf(1L), hub.closes)
+        assertTrue(vm.state.value.phase is TerminalPhase.Live)
+        hub.push(snapshotFrame("reopened"))
+        runCurrent()
+        assertEquals("reopened", vm.emulator.screenText())
+    }
+
+    @Test
     fun laterSnapshotShowsCatchingUp() = runTest {
         val vm = live()
         hub.push(snapshotFrame("resynced"))

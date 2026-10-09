@@ -9,6 +9,10 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -129,6 +133,86 @@ class TerminalScreenTest {
         rule.onNodeWithTag("jump-live").assertTextContains("12 new", substring = true)
         rule.onNodeWithTag("jump-live").performClick()
         rule.onNodeWithTag("jump-live").assertDoesNotExist()
+    }
+
+    /** Center of [cell] on the pane at the read size, from the bottom-aligned live view. */
+    private fun cellCenter(cell: Cell, rows: Int = 40): androidx.compose.ui.geometry.Offset {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val px = with(rule.density) { READ_SIZE.toPx() }.let { kotlin.math.round(it).toInt() }
+        val typeface = androidx.core.content.res.ResourcesCompat.getFont(context, dev.sessiontap.android.R.font.jetbrains_mono_nerd)!!
+        val r = com.termux.view.TerminalRenderer(px, typeface)
+        val viewH = rule.onNodeWithTag("pane").fetchSemanticsNode().size.height
+        val pad = with(rule.density) { 6.dp.toPx() }
+        val lineH = r.fontLineSpacing.toFloat()
+        return androidx.compose.ui.geometry.Offset(pad + (cell.col + 0.5f) * r.fontWidth, viewH - (rows - cell.row) * lineH + lineH / 2)
+    }
+
+    private fun selectionText(): String? = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SelectionText)).fetchSemanticsNodes().firstOrNull()?.config?.get(SelectionText)
+
+    @Test
+    fun longPressSelectsWordAndCopyEndsSelection() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val calls = mutableListOf<String>()
+        val emulator = pane("run ./src/auth/session.rs: now")
+        show(ui(), TerminalActions(onFreeze = { calls += "freeze" }, onUnfreeze = { calls += "unfreeze" }, onCopyText = { copyText(context, it) }), emulator = emulator)
+        val at = cellCenter(Cell(0, 10))
+        rule.onNodeWithTag("pane").performTouchInput { longClick(at) }
+        assertEquals("./src/auth/session.rs", selectionText())
+        assertEquals(listOf("freeze"), calls)
+        rule.onNodeWithTag("selection-toolbar").assertExists()
+        rule.onNodeWithTag("sel:copy").performClick()
+        val clip = context.getSystemService(ClipboardManager::class.java).primaryClip!!
+        assertEquals("./src/auth/session.rs", clip.getItemAt(0).text.toString())
+        rule.onNodeWithTag("copied-toast").assertTextContains("Copied · 1 line")
+        assertEquals(null, selectionText())
+        assertEquals(listOf("freeze", "unfreeze"), calls)
+    }
+
+    @Test
+    fun selectAllAndBlockToggle() {
+        show(ui(), emulator = pane("first line"))
+        rule.onNodeWithTag("pane").performTouchInput { longClick(cellCenter(Cell(0, 1))) }
+        assertEquals("first", selectionText())
+        rule.onNodeWithTag("sel:all").performClick()
+        assertEquals("first line", selectionText()!!.trim())
+        rule.onNodeWithTag("sel:mode:line").assertIsSelected()
+        rule.onNodeWithTag("sel:mode:block").performClick()
+        rule.onNodeWithTag("sel:mode:block").assertIsSelected()
+    }
+
+    @Test
+    fun tapOutsideEndsSelectionAndInputEndsItFirst() {
+        val calls = mutableListOf<String>()
+        show(ui(), TerminalActions(onFreeze = { calls += "freeze" }, onUnfreeze = { calls += "unfreeze" }, onKey = { calls += "key:$it" }))
+        rule.onNodeWithTag("pane").performTouchInput { longClick(cellCenter(Cell(0, 1))) }
+        rule.onNodeWithTag("pane").performTouchInput { click(cellCenter(Cell(20, 60))) }
+        rule.mainClock.advanceTimeBy(500)
+        assertEquals(null, selectionText())
+        rule.onNodeWithTag("pane").performTouchInput { longClick(cellCenter(Cell(0, 1))) }
+        rule.onNodeWithTag("key:escape").performClick()
+        assertEquals(null, selectionText())
+        assertEquals(listOf("freeze", "unfreeze", "freeze", "unfreeze", "key:escape"), calls)
+    }
+
+    @Test
+    fun heldLinesShowInJumpPill() {
+        var held by mutableStateOf(0)
+        rule.setContent { SessionTapTheme { TerminalScreen(ui().copy(heldLines = held), pane(), PaneTick(), TerminalActions(), PaddingValues()) } }
+        rule.onNodeWithTag("pane").performTouchInput { longClick(cellCenter(Cell(0, 1))) }
+        rule.onNodeWithTag("jump-live").assertDoesNotExist()
+        held = 12
+        rule.onNodeWithTag("jump-live").assertTextContains("12 new", substring = true)
+        rule.onNodeWithTag("jump-live").performClick()
+        assertEquals(null, selectionText())
+    }
+
+    @Test
+    fun watchOnlyAndEndedTerminalsCanSelect() {
+        val ended = reduce(live, TerminalEvent.Ended(EndReason.AgentExited, 0))
+        show(ui(state = ended.copy(control = false)), emulator = pane("You chose option 1"))
+        rule.onNodeWithTag("pane").performTouchInput { longClick(cellCenter(Cell(0, 5))) }
+        assertEquals("chose", selectionText())
+        rule.onNodeWithTag("sel:copy").assertExists()
     }
 
     @Test

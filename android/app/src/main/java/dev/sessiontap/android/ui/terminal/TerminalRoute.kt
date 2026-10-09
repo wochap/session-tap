@@ -67,6 +67,7 @@ fun TerminalRoute(
     val armed by vm.ctrlArmed.collectAsStateWithLifecycle()
     val mods by vm.mods.collectAsStateWithLifecycle()
     val sentCombo by vm.sentCombo.collectAsStateWithLifecycle()
+    val heldLines by vm.heldLines.collectAsStateWithLifecycle()
     val layout by app.keyLayout.layout.collectAsStateWithLifecycle(KeyLayout.DEFAULT)
     val hubName = hub?.name ?: "hub"
     val access = TerminalAccess.of(hub?.canWatch == true, state.control, item?.view)
@@ -92,6 +93,7 @@ fun TerminalRoute(
         layout = layout,
         mods = mods,
         sentCombo = sentCombo,
+        heldLines = heldLines,
     )
     TerminalScreen(
         ui = ui,
@@ -114,6 +116,9 @@ fun TerminalRoute(
             onModTap = vm::tapModifier,
             onModLock = vm::lockModifier,
             onEditKeys = onEditKeys,
+            onFreeze = vm::freeze,
+            onUnfreeze = vm::unfreeze,
+            onCopyText = { copyText(context, it) },
         ),
         contentPadding = contentPadding,
     )
