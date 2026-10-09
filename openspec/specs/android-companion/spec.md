@@ -111,6 +111,33 @@ Each session row SHALL show the effective status, session name (or the provider 
 - **WHEN** the user has scrolled down the list and an update moves an agent to the top
 - **THEN** the rows on screen stay where they are
 
+### Requirement: Session list section collapse is remembered
+The app SHALL save on the phone each session list section the user collapses or expands: Needs attention, each hub section (keyed by hub ID), and Stale. It SHALL restore that state whenever the session list is shown, including after switching tabs and after the app process restarts. A section with no saved state SHALL use its default: Stale collapsed, all others expanded. Unpairing a hub SHALL delete that hub section's saved state. Expanded child rows SHALL stay expanded across tab switches while the app process lives.
+
+#### Scenario: Collapse survives a tab switch
+- **WHEN** the user collapses the `sandbox` hub section, opens Settings, and returns to Sessions
+- **THEN** the `sandbox` section is still collapsed
+
+#### Scenario: Collapse survives a restart
+- **WHEN** the user collapses the `sandbox` hub section and Android kills and restarts the app
+- **THEN** the `sandbox` section is collapsed when the session list appears
+
+#### Scenario: Stale opened on purpose
+- **WHEN** the user expands the Stale section and later reopens the app
+- **THEN** the Stale section is expanded
+
+#### Scenario: Untouched sections use defaults
+- **WHEN** the user has never toggled any section
+- **THEN** Needs attention and hub sections are expanded and Stale is collapsed
+
+#### Scenario: Hub unpaired and paired again
+- **WHEN** the user collapses the `sandbox` section, unpairs that hub, and pairs it again
+- **THEN** the `sandbox` section is expanded
+
+#### Scenario: Expanded children survive a tab switch
+- **WHEN** the user expands a row's children, opens Settings, and returns to Sessions
+- **THEN** that row's children are still listed
+
 ### Requirement: Stopped sessions can be forgotten
 For a hub where the device has the `manage` scope, the app SHALL offer forget on stopped sessions by swiping a row and from the detail screen. It SHALL show an undo snackbar for a few seconds and send the hub `forget` only when the undo window ends. Non-stopped sessions SHALL NOT offer forget. A hub error SHALL restore the row and show the error.
 
