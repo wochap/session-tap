@@ -54,10 +54,14 @@
 
 <div style="flex:1;min-height:0;position:relative;background:var(--a-bg)">
 <sc-if value="{{ showTerm }}" hint-placeholder-val="{{ true }}">
-<div ref="{{ termRef }}" onScroll="{{ onTermScroll }}" onDoubleClick="{{ toggleZoom }}" style="position:absolute;inset:0;overflow:auto;scrollbar-width:none;padding:8px 6px;box-sizing:border-box;font-family:var(--st-mono);font-size:{{ fs }};line-height:1.3;color:var(--a-fg);opacity:{{ termOp }};filter:{{ termFilter }};transition:opacity .3s">
-<div style="width:max-content;min-width:100%;min-height:100%;display:flex;flex-direction:column;justify-content:flex-end">
+<div ref="{{ termRef }}" onScroll="{{ onTermScroll }}" onDoubleClick="{{ toggleZoom }}" onPointerDown="{{ paneDown }}" onPointerMove="{{ paneMove }}" onPointerUp="{{ paneUp }}" onPointerCancel="{{ paneUp }}" onClick="{{ paneClick }}" onContextMenu="{{ noMenu }}" style="position:absolute;inset:0;overflow:auto;scrollbar-width:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;padding:8px 6px;box-sizing:border-box;font-family:var(--st-mono);font-size:{{ fs }};line-height:1.3;color:var(--a-fg);opacity:{{ termOp }};filter:{{ termFilter }};transition:opacity .3s">
+<div ref="{{ contentRef }}" style="position:relative;width:max-content;min-width:100%;min-height:100%;display:flex;flex-direction:column;justify-content:flex-end">
 <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="12">
 <div style="white-space:pre;height:1.3em"><sc-for list="{{ ln.segs }}" as="g"><span style="color:{{ g.c }};background:{{ g.bg }};font-weight:{{ g.w }}">{{ g.t }}</span></sc-for></div>
+</sc-for>
+<span ref="{{ measRef }}" style="position:absolute;left:0;top:0;visibility:hidden;white-space:pre;pointer-events:none">00000000000000000000000000000000000000000000000000</span>
+<sc-for list="{{ handles }}" as="hd">
+<div onPointerDown="{{ hd.down }}" onPointerMove="{{ hMove }}" onPointerUp="{{ hUp }}" onPointerCancel="{{ hUp }}" style="position:absolute;z-index:2;left:{{ hd.x }};top:{{ hd.y }};width:44px;height:44px;touch-action:none;cursor:grab"><span style="position:absolute;left:11px;top:11px;width:22px;height:22px;border-radius:{{ hd.r }};background:var(--color-accent);box-shadow:0 0 0 {{ hd.ring }} color-mix(in oklab,var(--color-accent) 30%,transparent),0 1px 3px color-mix(in oklab,#000 50%,transparent)"></span></div>
 </sc-for>
 </div>
 </div>
@@ -95,6 +99,31 @@
 </sc-if>
 <sc-if value="{{ jump }}" hint-placeholder-val="{{ false }}">
 <div onClick="{{ jump.onClick }}" style="position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:17px;background:var(--color-accent-900);box-shadow:inset 0 0 0 1px var(--color-accent),var(--shadow-md);color:var(--color-accent-100);font:500 13px var(--font-body);cursor:pointer;white-space:nowrap;user-select:none"><i class="ph-bold ph-arrow-down" style="font-size:14px"></i>Jump to live<sc-if value="{{ jump.n }}"><span style="font:500 11.5px var(--st-mono);color:var(--color-accent-200)">{{ jump.n }}</span></sc-if></div>
+</sc-if>
+
+<sc-if value="{{ edgeBand }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;z-index:2;left:0;right:0;top:{{ edgeBand.top }};bottom:{{ edgeBand.bottom }};height:44px;background:linear-gradient({{ edgeBand.dir }},color-mix(in oklab,var(--color-accent) 26%,transparent),transparent);pointer-events:none">
+<span style="position:absolute;left:0;right:0;top:{{ edgeBand.top }};bottom:{{ edgeBand.bottom }};height:2px;background:linear-gradient(90deg,transparent,var(--color-accent) 48px,var(--color-accent) calc(100% - 48px),transparent)"></span>
+<span style="position:absolute;left:8px;top:{{ edgeBand.ct }};bottom:{{ edgeBand.cb }};display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:var(--a-chip);box-shadow:inset 0 0 0 1px var(--color-accent);font:500 11.5px var(--font-body);color:var(--color-accent-100);white-space:nowrap"><i class="{{ edgeBand.icon }}" style="font-size:12px"></i>{{ edgeBand.label }}</span>
+</div>
+</sc-if>
+<sc-if value="{{ tbar }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;z-index:3;left:{{ tbar.x }};top:{{ tbar.y }};width:204px;height:44px;box-sizing:border-box;display:flex;align-items:center;padding:0 4px;border-radius:22px;background:var(--st-surf2);box-shadow:inset 0 0 0 1px var(--st-line),var(--shadow-md);color:var(--st-text)">
+<button onClick="{{ tbar.copy }}" style="flex:1;height:44px;padding:0 10px;border:none;border-radius:22px;background:transparent;color:inherit;font:500 14px var(--font-body);display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer" style-hover="background:var(--st-acc-tint)"><i class="ph ph-copy" style="font-size:18px"></i>Copy</button>
+<span style="width:1px;height:20px;flex:none;background:var(--st-line)"></span>
+<button onClick="{{ tbar.all }}" style="flex:1;height:44px;padding:0 10px;border:none;border-radius:22px;background:transparent;color:inherit;font:500 14px var(--font-body);display:flex;align-items:center;justify-content:center;cursor:pointer;white-space:nowrap" style-hover="background:var(--st-acc-tint)">Select all</button>
+</div>
+</sc-if>
+<sc-if value="{{ loupe }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;z-index:4;left:{{ loupe.x }};top:{{ loupe.y }};width:168px;height:52px;border-radius:14px;overflow:hidden;background:var(--a-bg);box-shadow:inset 0 0 0 1px var(--a-ring),var(--shadow-lg);font:400 18px/23.4px var(--st-mono);color:var(--a-fg);pointer-events:none">
+<div style="position:absolute;left:{{ loupe.lx }};top:-9.1px;display:flex;flex-direction:column">
+<sc-for list="{{ loupe.rows }}" as="lr"><div style="white-space:pre;height:23.4px;opacity:{{ lr.op }}"><sc-for list="{{ lr.segs }}" as="g"><span style="color:{{ g.c }};background:{{ g.bg }};font-weight:{{ g.w }}">{{ g.t }}</span></sc-for></div></sc-for>
+</div>
+<span style="position:absolute;left:83px;top:14.3px;width:2px;height:23.4px;border-radius:1px;background:var(--color-accent)"></span>
+</div>
+</sc-if>
+<sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;z-index:4;left:50%;bottom:{{ toast.b }};transform:translateX(-50%);display:flex;align-items:center;gap:8px;height:40px;padding:0 16px 0 12px;border-radius:20px;background:var(--st-surf2);box-shadow:inset 0 0 0 1px var(--st-line),var(--shadow-md);color:var(--st-text);font:500 13.5px var(--font-body);white-space:nowrap;pointer-events:none"><i class="ph-bold ph-check" style="font-size:16px;color:var(--st-acc-ink)"></i>Copied<span style="font-weight:400;color:var(--st-mute)">{{ toast.meta }}</span></div>
 </sc-if>
 </div>
 </sc-if>
@@ -239,9 +268,9 @@
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;input&quot;,&quot;multi&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;read&quot;,&quot;fit&quot;],&quot;default&quot;:&quot;read&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;kb&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;scrolled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;cols&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:120,&quot;min&quot;:60,&quot;max&quot;:220,&quot;tsType&quot;:&quot;number&quot;},&quot;rows&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:40,&quot;min&quot;:10,&quot;max&quot;:80,&quot;tsType&quot;:&quot;number&quot;},&quot;draft&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;bar&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;strip&quot;,&quot;grid&quot;],&quot;default&quot;:&quot;strip&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;two&quot;,&quot;three&quot;],&quot;default&quot;:&quot;two&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;direct&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;mod&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;ctrl1&quot;,&quot;ctrlL&quot;,&quot;alt1&quot;,&quot;ctrlc&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;menu&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;lpkey&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;typed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:432,&quot;height&quot;:935},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;term&quot;,&quot;sheet&quot;],&quot;default&quot;:&quot;term&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;waiting&quot;,&quot;input&quot;,&quot;multi&quot;,&quot;live&quot;,&quot;watch&quot;,&quot;paused&quot;,&quot;scrolling&quot;,&quot;ended&quot;,&quot;opening&quot;,&quot;reconnecting&quot;,&quot;catching&quot;,&quot;revoked&quot;,&quot;unreachable&quot;,&quot;nocontrol&quot;,&quot;mismatch&quot;],&quot;default&quot;:&quot;waiting&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;orient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;portrait&quot;,&quot;landscape&quot;],&quot;default&quot;:&quot;portrait&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;zoom&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;read&quot;,&quot;fit&quot;],&quot;default&quot;:&quot;read&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;kb&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;scrolled&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;cols&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:120,&quot;min&quot;:60,&quot;max&quot;:220,&quot;tsType&quot;:&quot;number&quot;},&quot;rows&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:40,&quot;min&quot;:10,&quot;max&quot;:80,&quot;tsType&quot;:&quot;number&quot;},&quot;draft&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;end&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;exited&quot;,&quot;closed&quot;,&quot;tmux&quot;],&quot;default&quot;:&quot;exited&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;MacBook&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;bar&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;strip&quot;,&quot;grid&quot;],&quot;default&quot;:&quot;strip&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;two&quot;,&quot;three&quot;],&quot;default&quot;:&quot;two&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;direct&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;mod&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;ctrl1&quot;,&quot;ctrlL&quot;,&quot;alt1&quot;,&quot;ctrlc&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;menu&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;lpkey&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;typed&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;sel&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hl&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;fixed&quot;,&quot;swap&quot;],&quot;default&quot;:&quot;fixed&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;drag&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;a&quot;,&quot;b&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;edge&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;top&quot;,&quot;bottom&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;newn&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:0,&quot;min&quot;:0,&quot;max&quot;:60,&quot;tsType&quot;:&quot;number&quot;},&quot;copied&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;stream&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
 class Component extends DCLogic {
-  state = { phase: null, extra: null, sel: 0, msel: 0, checked: null, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false, away: null, awayN: null, direct: null, mod: null, lp: null, menu: null, sent: null };
+  state = { phase: null, extra: null, sel: 0, msel: 0, checked: null, mode: 0, text: null, paste: '', zoom: null, pressed: null, ctrlArm: false, away: null, awayN: null, direct: null, mod: null, lp: null, menu: null, sent: null, sel: undefined, drag: null, edge: null, tb: true, toast: null, vp: null, selN: null, selAway: false };
   KN = { esc: 'Esc', tab: 'Tab', stab: 'S-Tab', up: 'Up', down: 'Down', left: 'Left', right: 'Right', enter: 'Enter', space: 'Space', bksp: 'Bksp', del: 'Del', ctrlc: 'Ctrl+C', paste: 'Paste', ctrl: 'Ctrl', alt: 'Alt', home: 'Home', end: 'End', pgup: 'PgUp', pgdn: 'PgDn' };
   KI = { up: 'ph-bold ph-arrow-up', down: 'ph-bold ph-arrow-down', left: 'ph-bold ph-arrow-left', right: 'ph-bold ph-arrow-right', bksp: 'ph ph-backspace' };
   KDESC = { esc: 'sends Esc', tab: 'sends Tab', stab: 'Shift+Tab · cycles mode', up: 'arrow key', down: 'arrow key', left: 'arrow key', right: 'arrow key', enter: 'sends Enter', space: 'sends a space', bksp: 'deletes left', del: 'deletes right', ctrlc: 'interrupt · tap twice', paste: 'clipboard → reply field', ctrl: 'tap: next key · hold: lock', alt: 'tap: next key · hold: lock', home: 'line start', end: 'line end', pgup: 'page up', pgdn: 'page down' };
@@ -252,11 +281,119 @@ class Component extends DCLogic {
   CLIP = 'see CI run 4821: session.spec.ts flaked 3/20 before the fix';
   PAL = [['k','black','0.34 0.02 275'],['r','red','0.68 0.16 22'],['g','green','0.76 0.13 150'],['y','yellow','0.83 0.12 85'],['b','blue','0.72 0.11 255'],['m','magenta','0.72 0.12 288'],['c','cyan','0.78 0.09 205'],['w','white','0.84 0.01 275'],['K','br black','0.52 0.02 275'],['R','br red','0.76 0.15 22'],['G','br green','0.84 0.12 150'],['Y','br yellow','0.90 0.11 90'],['B','br blue','0.80 0.10 255'],['M','br magenta','0.80 0.11 288'],['C','br cyan','0.86 0.08 205'],['W','br white','0.97 0.005 275']];
 
-  componentDidMount() { const p0 = this.props; if (p0.typed) this.setState({ paste: p0.typed }); if ((p0.mod || '').includes('ctrlc')) this.setState({ ctrlArm: true }); setTimeout(() => { const el = this.termEl; if (!el) return; if (this.isAway()) { el.scrollTop = el.scrollHeight * 0.3; this.lastKey = this.key; } else this.toBottom(); }, 80); }
-  componentDidUpdate() { if (this.key !== this.lastKey && !this.isAway()) this.toBottom(); }
-  componentWillUnmount() { clearTimeout(this.kT); clearTimeout(this.sT); clearTimeout(this.tf); clearTimeout(this.tc); clearTimeout(this.lpT); }
+  componentDidMount() { const p0 = this.props; if (p0.typed) this.setState({ paste: p0.typed }); if ((p0.mod || '').includes('ctrlc')) this.setState({ ctrlArm: true }); setTimeout(() => { const el = this.termEl; if (!el) return; if (this.isAway()) { el.scrollTop = el.scrollHeight * 0.3; this.lastKey = this.key; } else this.toBottom();
+      if (p0.sel) {
+        this.selActive = true;
+        if (p0.newn) el.scrollTop -= p0.newn * this.lhPx();
+        const first = Math.ceil((el.scrollTop - 8) / this.lhPx()), sel = this.parseSel(p0.sel, this.rawLines, first);
+        if (sel) { this.setState({ sel, drag: p0.drag || null, edge: p0.edge || null, tb: !p0.drag, selN: this.nLines - (p0.newn || 0), selAway: false }); this.startStream(); } else this.selActive = false;
+      }
+      this.setVp(el); }, 80);
+    document.fonts && document.fonts.ready.then(() => { const m = this.measEl; if (!m || !this.fsPx) return; const r = m.offsetWidth / 50 / parseFloat(this.fsPx.toFixed(2)); if (r > 0.4 && r < 0.8 && Math.abs(r - (this.cwR || 0.6)) > 0.002) { this.cwR = r; this.forceUpdate(); } }); }
+  componentDidUpdate() { if (this.key !== this.lastKey && !this.isAway() && !this.selActive) this.toBottom(); const el = this.termEl, v = this.state.vp; if (el && v && (el.clientHeight !== v.h || el.clientWidth !== v.w)) this.setVp(el); }
+  componentWillUnmount() { clearInterval(this.strT); clearInterval(this.edT); clearTimeout(this.toT); clearTimeout(this.tapT); clearTimeout(this.lpSel); clearTimeout(this.kT); clearTimeout(this.sT); clearTimeout(this.tf); clearTimeout(this.tc); clearTimeout(this.lpT); }
   isAway() { return this.state.away ?? !!this.props.scrolled; }
   toBottom() { const el = this.termEl; if (!el) return; el.scrollTop = el.scrollHeight; el.scrollLeft = Math.max(0, this.curCol * this.fsPx * 0.6 + 8 - el.clientWidth * 0.75); this.lastKey = this.key; }
+
+  setVp(el) { const v = this.state.vp, n = { top: el.scrollTop, left: el.scrollLeft, h: el.clientHeight, w: el.clientWidth }; if (!v || v.top !== n.top || v.left !== n.left || v.h !== n.h || v.w !== n.w) this.setState({ vp: n }); }
+  lhPx() { return parseFloat(this.fsPx.toFixed(2)) * 1.3; }
+  cwPx(fs) { return (fs ?? parseFloat(this.fsPx.toFixed(2))) * (this.cwR || 0.6); }
+  txt(ln) { return (ln ? ln.segs : []).map(g => g.t).join(''); }
+  cmp(p, q) { return p.l - q.l || p.c - q.c; }
+  parseSel(spec, lines, first) {
+    if (!spec) return null;
+    const tok = t => t.startsWith('t+') ? (first == null ? NaN : first + +t.slice(2)) : +t;
+    const len = l => this.txt(lines[l]).length;
+    if (spec.startsWith('w:')) { const [, l, c] = spec.split(':'); const L = tok(l); return isNaN(L) ? null : this.wordAt(lines, L, +c); }
+    const [A, B] = spec.split('-'), [al, ac] = A.split(':'), [bl, bc] = B.split(':');
+    const a = { l: tok(al) }, b = { l: tok(bl) }; if (isNaN(a.l) || isNaN(b.l)) return null;
+    a.c = ac === 'e' ? len(a.l) : +ac; b.c = bc === 'e' ? len(b.l) : +bc; return { a, b };
+  }
+  wordAt(lines, l, c) {
+    const t = this.txt(lines[l]); if (!t.trim()) return null;
+    const W = /[A-Za-z0-9_.\/~:@+\-']/;
+    c = Math.min(c, t.length - 1);
+    if (!W.test(t[c])) { let k = c; while (k > 0 && !W.test(t[k])) k--; if (!W.test(t[k])) return null; c = k; }
+    let s = c, e = c + 1; while (s > 0 && W.test(t[s - 1])) s--; while (e < t.length && W.test(t[e])) e++;
+    while (e - 1 > s && /[.:,']/.test(t[e - 1])) e--;
+    return { a: { l, c: s }, b: { l, c: e } };
+  }
+  paintSel(lines, sel, hl) {
+    if (!sel) return lines;
+    const { a, b } = sel, out = lines.slice();
+    const on = g => hl === 'swap' ? { ...g, c: g.bg === 'transparent' ? 'var(--a-bg)' : g.bg, bg: g.c === 'inherit' ? 'var(--a-fg)' : g.c } : { ...g, c: 'var(--a-bg)', bg: 'var(--a-fg)' };
+    for (let i = Math.max(0, a.l); i <= Math.min(b.l, lines.length - 1); i++) {
+      const st = i === a.l ? a.c : 0, en = i === b.l ? b.c : Infinity, segs = []; let x = 0;
+      for (const g of lines[i].segs) {
+        const n = g.t.length, s0 = Math.max(st, x), e0 = Math.min(en, x + n);
+        if (e0 <= s0) segs.push(g);
+        else { if (s0 > x) segs.push({ ...g, t: g.t.slice(0, s0 - x) }); segs.push(on({ ...g, t: g.t.slice(s0 - x, e0 - x) })); if (e0 < x + n) segs.push({ ...g, t: g.t.slice(e0 - x) }); }
+        x += n;
+      }
+      if (i < b.l) segs.push(on(this.S(' ')));
+      out[i] = { segs };
+    }
+    return out;
+  }
+  selText(lines, { a, b }) { const o = []; for (let i = a.l; i <= b.l; i++) o.push(this.txt(lines[i]).slice(i === a.l ? a.c : 0, i === b.l ? b.c : undefined).replace(/\s+$/, '')); return o.join('\n'); }
+  startSel(sel) { if (!sel) return; const was = !!this.state.sel; this.selActive = true; this.setState({ sel, tb: true, drag: null, ...(was ? {} : { selN: this.nLines, selAway: this.isAway() }) }); this.startStream(); }
+  endSel(cb) {
+    clearInterval(this.strT); this.strT = null; clearInterval(this.edT); this.edT = null; clearTimeout(this.tapT); this.dragW = null;
+    const back = !this.state.selAway; this.selActive = false;
+    this.setState({ sel: null, drag: null, edge: null, selN: null, tb: true }, () => { if (back) this.setState({ away: false, awayN: null }, () => this.toBottom()); cb && cb(); });
+  }
+  startStream() {
+    if (!this.props.stream || this.strT) return; let n = 0;
+    this.strT = setInterval(() => { if (!this.selActive || n > 40) { clearInterval(this.strT); this.strT = null; return; } n++; this.push([this.L(this.S('  ✓ ', 'g'), this.S(`auth.integration › retry under 503 window #${n}`, 'K'), this.S(` ${40 + n * 7}ms`, 'K'))], this.phaseNow()); }, 1300);
+  }
+  toContent(e) { const el = this.contentEl, r = el.getBoundingClientRect(), k = r.width / el.offsetWidth || 1; return { x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k }; }
+  cellAt(pt, lines, edge) {
+    const lh = this.lhPx(), cw = this.cwPx();
+    const l = Math.max(0, Math.min(lines.length - 1, edge ? Math.round(pt.y / lh) - 1 : Math.floor(pt.y / lh)));
+    const len = this.txt(lines[l]).length;
+    return { l, c: Math.max(0, Math.min(len, edge ? Math.round(pt.x / cw) : Math.floor(pt.x / cw))) };
+  }
+  paneDown(e) {
+    if (e.button > 0 || !this.contentEl) return;
+    this.lpDone = false; this.pd = { x: e.clientX, y: e.clientY }; clearTimeout(this.lpSel);
+    const pt = this.toContent(e);
+    this.lpSel = setTimeout(() => { this.lpDone = true; const L = this.rawLines, c = this.cellAt(pt, L); this.startSel(this.wordAt(L, c.l, c.c)); }, 450);
+  }
+  paneMove(e) { if (this.pd && Math.hypot(e.clientX - this.pd.x, e.clientY - this.pd.y) > 8) clearTimeout(this.lpSel); }
+  paneUp() { clearTimeout(this.lpSel); this.pd = null; }
+  paneClick(e) {
+    if (this.lpDone) { this.lpDone = false; return; }
+    const s = this.state; if (!s.sel || !this.contentEl) return;
+    const c = this.cellAt(this.toContent(e), this.rawLines), inside = this.cmp(c, s.sel.a) >= 0 && this.cmp(c, s.sel.b) < 0;
+    clearTimeout(this.tapT);
+    this.tapT = setTimeout(() => { if (inside) this.setState(st => ({ tb: !st.tb })); else this.endSel(); }, 260);
+  }
+  hDown(which, e) {
+    e.stopPropagation(); e.preventDefault(); clearTimeout(this.lpSel);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {}
+    const s = this.state.sel, q = which === 'a' ? s.a : s.b, pt = this.toContent(e);
+    this.grab = { dx: pt.x - q.c * this.cwPx(), dy: pt.y - (q.l + 1) * this.lhPx() };
+    this.dragW = which; this.lastPt = { cx: e.clientX, cy: e.clientY };
+    this.setState({ drag: which, tb: false });
+  }
+  hMove(e) { if (!this.dragW) return; e.stopPropagation(); this.lastPt = { cx: e.clientX, cy: e.clientY }; this.dragTo(); this.edgeCheck(); }
+  dragTo() {
+    const el = this.contentEl, r = el.getBoundingClientRect(), k = r.width / el.offsetWidth || 1;
+    const pos = this.cellAt({ x: (this.lastPt.cx - r.left) / k - this.grab.dx, y: (this.lastPt.cy - r.top) / k - this.grab.dy }, this.rawLines, true);
+    let { a, b } = this.state.sel, w = this.dragW;
+    if (w === 'a') a = pos; else b = pos;
+    if (this.cmp(a, b) > 0) { [a, b] = [b, a]; w = w === 'a' ? 'b' : 'a'; this.dragW = w; }
+    if (this.cmp(a, b) === 0) { if (w === 'b') b = { l: a.l, c: a.c + 1 }; else a = { l: b.l, c: Math.max(0, b.c - 1) }; }
+    const cur = this.state.sel; if (this.cmp(cur.a, a) || this.cmp(cur.b, b) || w !== this.state.drag) this.setState({ sel: { a, b }, drag: w });
+  }
+  edgeCheck() {
+    const el = this.termEl, r = el.getBoundingClientRect(), k = r.height / el.offsetHeight || 1, y = (this.lastPt.cy - r.top) / k, h = el.clientHeight;
+    const edge = y < 36 ? 'top' : y > h - 36 ? 'bottom' : null;
+    if (edge !== this.state.edge) this.setState({ edge });
+    clearInterval(this.edT); this.edT = null;
+    if (edge) { const d = edge === 'top' ? 36 - y : y - (h - 36), v = Math.min(14, 3 + d * 0.35) * (edge === 'top' ? -1 : 1); this.edT = setInterval(() => { el.scrollTop += v; if (this.dragW) this.dragTo(); }, 30); }
+  }
+  hUp() { if (!this.dragW) return; this.dragW = null; clearInterval(this.edT); this.edT = null; this.setState({ drag: null, edge: null, tb: true }); }
 
   S(t, c, o = {}) { return { t, c: c ? `var(--a-${c})` : 'inherit', bg: o.bg ? `var(--a-${o.bg})` : 'transparent', w: o.b ? 600 : 400 }; }
   L(...segs) { return { segs }; }
@@ -358,7 +495,7 @@ class Component extends DCLogic {
     });
   }
   onKey(id) {
-    clearTimeout(this.tf);
+    clearTimeout(this.tf); if (this.selActive) this.endSel();
     this.setState({ pressed: id }); this.tf = setTimeout(() => this.setState({ pressed: null }), 160);
     const ph = this.phaseNow();
     if (id === 'paste') { this.setState(s => ({ text: (s.text ?? '') + this.CLIP })); return; }
@@ -389,6 +526,7 @@ class Component extends DCLogic {
     if (id === 'enter' && this.state.paste) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(this.state.paste, 'w'))], 'running'); this.setState({ paste: '' }); }
   }
   send(enter) {
+    if (this.selActive) this.endSel();
     const t = (this.state.text ?? '').trim();
     this.setState({ away: false });
     if (!t) { if (enter && this.state.paste) { this.push([this.L(), this.L(this.S('> ', 'K'), this.S(this.state.paste, 'w'))], 'running'); this.setState({ paste: '' }); } return; }
@@ -459,7 +597,15 @@ class Component extends DCLogic {
     const grid = p.bar === 'grid' && !sheet, direct = grid && ctl && !dis && (s.direct ?? !!p.direct), kb = (kb0 || direct) && !land && !sheet;
     const menuOpen = grid && (s.menu ?? !!p.menu);
     const away = s.away ?? !!p.scrolled, awayN = s.awayN ?? (this.initN - 12);
-    const newN = away ? Math.max(0, lines.length - awayN) : 0;
+    const hl = p.hl ?? 'fixed';
+    this.rawLines = lines; this.nLines = lines.length;
+    const pre = s.sel === undefined, selRaw = pre ? (p.sel && !p.sel.includes('t+') ? this.parseSel(p.sel, lines) : null) : s.sel;
+    const sel = selRaw && !isErr && S0 !== 'opening' && !sheet ? selRaw : null;
+    const dragNow = pre ? (p.drag || null) : s.drag, edgeNow = pre ? (p.edge || null) : s.edge, tbVis = pre ? !p.drag : s.tb;
+    const painted = this.paintSel(lines, sel, hl);
+    const base = away ? awayN : (s.selN ?? (pre && p.newn ? lines.length - p.newn : lines.length));
+    const newN = away || sel ? Math.max(0, lines.length - base) : 0;
+    const jumpShown = !isErr && S0 !== 'opening' && (away || (!!sel && newN > 0));
 
     const W = ['waiting for you', 'sBlock', 'var(--st-block)'];
     const stMap = { asking: W, question: W, multi: W, running: ['running', 'sRun', 'var(--st-text)'], idle: ['idle', 'sIdle', 'var(--st-text)'], suspended: ['suspended', 'sIdle', 'var(--st-mute)'], ended: ['exited', 'sEnd', 'var(--st-mute)'] };
@@ -602,7 +748,45 @@ class Component extends DCLogic {
       { inset: '0', keys: [kbKey('?123', { fn: 1, flex: '1.5' }), kbKey(',', { ch: ',' }), kbKey('', { flex: '5', ch: ' ' }), kbKey('.', { ch: '.' }), kbKey('', { icon: 'ph ph-arrow-elbow-down-left', acc: 1, flex: '1.5', enter: 1 })] }
     ] : [];
 
+    let handles = [], tbar = null, loupe = null, edgeBand = null;
+    if (sel) {
+      const lh = this.lhPx(), cw = this.cwPx(), tip = q => ({ x: q.c * cw, y: (q.l + 1) * lh }), ta = tip(sel.a), tb2 = tip(sel.b);
+      handles = [
+        { x: (ta.x - 33) + 'px', y: (ta.y - 11) + 'px', r: '50% 0 50% 50%', ring: dragNow === 'a' ? '6px' : '0', down: e => this.hDown('a', e) },
+        { x: (tb2.x - 11) + 'px', y: (tb2.y - 11) + 'px', r: '0 50% 50% 50%', ring: dragNow === 'b' ? '6px' : '0', down: e => this.hDown('b', e) }
+      ];
+      const vp = s.vp;
+      if (vp) {
+        const P = (x, y) => ({ x: 6 + x - vp.left, y: 8 + y - vp.top });
+        const A = P(ta.x, sel.a.l * lh), B = P(tb2.x, (sel.b.l + 1) * lh);
+        const topSafe = overlay.length ? 36 : 8, botSafe = jumpShown ? 54 : 8, TW = 204, TH = 44;
+        if (tbVis && !dragNow && B.y > 0 && A.y < vp.h) {
+          const cx = sel.a.l === sel.b.l ? (A.x + B.x) / 2 : vp.w / 2;
+          let y = A.y - 10 - TH;
+          if (y < topSafe) { y = B.y + 22 + 10; if (y + TH > vp.h - botSafe) y = topSafe; }
+          const lines0 = lines;
+          tbar = { x: Math.max(8, Math.min(vp.w - 8 - TW, cx - TW / 2)) + 'px', y: y + 'px',
+            copy: () => { const t = this.selText(lines0, sel), nl = sel.b.l - sel.a.l + 1; try { navigator.clipboard && navigator.clipboard.writeText(t); } catch (x) {} const meta = nl > 1 ? `${nl} lines` : `${t.length} character${t.length === 1 ? '' : 's'}`; this.endSel(); clearTimeout(this.toT); this.setState({ toast: { meta } }); this.toT = setTimeout(() => this.setState({ toast: false }), 2200); },
+            all: () => this.setState({ sel: { a: { l: 0, c: 0 }, b: { l: lines0.length - 1, c: this.txt(lines0[lines0.length - 1]).length } }, tb: true }) };
+        }
+        if (dragNow) {
+          const q = dragNow === 'a' ? sel.a : sel.b, T = P(q.c * cw, (q.l + 1) * lh), LW = 168, LH = 52;
+          let ly = T.y - lh - 12 - LH; if (ly < 4) ly = T.y + 22 + 40;
+          loupe = { x: Math.max(6, Math.min(vp.w - 6 - LW, T.x - LW / 2)) + 'px', y: ly + 'px', lx: (LW / 2 - q.c * 18 * (this.cwR || 0.6)) + 'px',
+            rows: [q.l - 1, q.l, q.l + 1].map((i, j) => ({ op: j === 1 ? '1' : '.45', segs: (painted[i] || { segs: [] }).segs })) };
+        }
+      }
+      if (edgeNow) edgeBand = edgeNow === 'top'
+        ? { top: '0', bottom: 'auto', dir: 'to bottom', ct: '10px', cb: 'auto', icon: 'ph-bold ph-arrow-up', label: 'Scrolling back' }
+        : { top: 'auto', bottom: '0', dir: 'to top', ct: 'auto', cb: jumpShown ? '54px' : '10px', icon: 'ph-bold ph-arrow-down', label: 'Scrolling forward' };
+    }
+    const toastV = s.toast ?? (p.copied ? { meta: p.copied } : null);
+
     return {
+      handles, tbar, loupe, edgeBand, toast: toastV ? { meta: toastV.meta, b: jumpShown ? '54px' : '10px' } : null,
+      contentRef: el => { this.contentEl = el; }, measRef: el => { this.measEl = el; },
+      paneDown: e => this.paneDown(e), paneMove: e => this.paneMove(e), paneUp: () => this.paneUp(), paneClick: e => this.paneClick(e), noMenu: e => e.preventDefault(),
+      hMove: e => this.hMove(e), hUp: () => this.hUp(),
       theme, arc, pulse, framed: !sheet, isSheet: sheet, sheetTitle: `Terminal components · ${theme}`,
       rootW: sheet ? '560px' : land ? '935px' : '432px', rootH: sheet ? 'auto' : land ? '432px' : '935px', rootPad: sheet ? '0' : '10px', rootR: sheet ? '20px' : land ? '48px' : '52px',
       rootBg: sheet ? 'transparent' : 'color-mix(in oklab,var(--color-neutral-900) 55%,#000)', innerH: sheet ? 'auto' : '100%', innerR: sheet ? '20px' : land ? '38px' : '42px',
@@ -610,10 +794,10 @@ class Component extends DCLogic {
       title: p.title ?? 'Fix flaky auth tests', where: `api · feat/auth-retry · ${hub}${S0 === 'nocontrol' ? ' · sandbox' : ''}`, hub, st, conn,
       showTerm: !isErr && S0 !== 'opening', opening: S0 === 'opening', err: isErr ? errs[S0] : null,
       skel: ['62%', '38%', '0', '80%', '30%', '56%', '0', '72%', '44%', '66%', '0', '50%', '84%', '28%'],
-      termRef: el => { this.termEl = el; }, toggleZoom: () => this.setState({ zoom: zoom === 'fit' ? 'read' : 'fit' }),
-      onTermScroll: e => { const el = e.currentTarget; const atB = el.scrollHeight - el.scrollTop - el.clientHeight < 12; const a = this.isAway(); if (!atB && !a) this.setState({ away: true, awayN: lines.length }); else if (atB && a) this.setState({ away: false, awayN: null }); },
-      jump: away && !isErr && S0 !== 'opening' ? { n: newN ? `· ${newN} new` : '', onClick: () => this.setState({ away: false, awayN: null }, () => this.toBottom()) } : null,
-      fs: this.fsPx.toFixed(2) + 'px', lines, termOp: S0 === 'ended' ? '.5' : '1', termFilter: S0 === 'ended' ? 'saturate(.4)' : 'none', overlay,
+      termRef: el => { this.termEl = el; }, toggleZoom: () => { clearTimeout(this.tapT); this.setState({ zoom: zoom === 'fit' ? 'read' : 'fit' }); },
+      onTermScroll: e => { const el = e.currentTarget; this.setVp(el); if (this.selActive) return; const atB = el.scrollHeight - el.scrollTop - el.clientHeight < 12; const a = this.isAway(); if (!atB && !a) this.setState({ away: true, awayN: lines.length }); else if (atB && a) this.setState({ away: false, awayN: null }); },
+      jump: jumpShown ? { n: newN ? `· ${newN} new` : '', onClick: () => { if (this.selActive) this.endSel(); this.setState({ away: false, awayN: null }, () => this.toBottom()); } } : null,
+      fs: this.fsPx.toFixed(2) + 'px', lines: painted, termOp: S0 === 'ended' ? '.5' : '1', termFilter: S0 === 'ended' ? 'saturate(.4)' : 'none', overlay,
       blocks, ctlDir: row ? 'row' : 'column', ctlWrap: row ? 'wrap' : 'nowrap', ctlAlign: row ? 'flex-end' : 'stretch', ctlBg: sheet ? 'transparent' : 'var(--st-surf)', ctlPad: sheet ? '0 28px 32px' : '0', ctlShadow: sheet ? 'none' : '0 -1px 0 var(--st-line)',
       kbOpen: kb, kbRows, kbSugg: direct ? ['Suggestions off · keys go to the terminal'] : ['5s', 'match', 'gateway'],
       moreBtn: grid, onMore: () => this.setState({ menu: !menuOpen }),

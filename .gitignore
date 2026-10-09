@@ -18,3 +18,8 @@ android/.kotlin
 android/build
 android/app/build
 android/local.properties
+
+android/design/**/*.webp
+android/design/**/*.png
+android/design/**/*.jpg
+.thumbnail
