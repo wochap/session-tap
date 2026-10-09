@@ -309,6 +309,65 @@ In portrait the terminal SHALL open at a 9sp font and SHALL pan horizontally to 
 - **WHEN** the keyboard opens and the pane no longer fits the shortened terminal surface
 - **THEN** no pane text draws over the top bar or the input row
 
+### Requirement: Terminal text can be selected and copied
+Long-pressing the terminal pane SHALL enter selection mode, select the word under the finger, and show draggable start and end handles; a word SHALL be a run of letters, digits, and `_ . / ~ : @ + - '`, with a trailing `. : , '` dropped. Long-pressing while selecting SHALL move the selection to the word under the finger. In selection mode the view SHALL be frozen: output that arrives SHALL NOT change the view, and the "Jump to live" pill SHALL count the new lines held back. Dragging a handle SHALL move that end one cell at a time, and the handles SHALL swap roles when they cross. A handle held in the top or bottom 36 dp of the pane SHALL scroll the frozen view, including into scrollback. Drag elsewhere, pinch, and double-tap SHALL behave as outside selection mode and SHALL keep the selection. The selection SHALL have a Line mode (default), which runs from the start cell to the end cell and wraps across rows, and a Block mode, which covers the rectangle between the two handle cells; switching modes SHALL keep both handle cells. Selected cells SHALL be painted with the terminal foreground as background and the terminal background as text, whatever their own colors. A floating toolbar inside the pane SHALL offer Copy, Select all, and the Line/Block toggle, and SHALL NOT cover the top bar. Select all SHALL select the whole buffer, scrollback included, in Line mode. Copy SHALL put plain text on the Android clipboard with trailing blanks trimmed per row, show "Copied · N lines" inside the pane, and end selection mode. In Line mode it SHALL join rows the pane soft-wrapped and keep newlines the agent printed; in Block mode each row SHALL become one line. Tapping outside the selection, pressing Back, tapping Jump to live, or sending any input SHALL end selection mode. Then the held output SHALL be applied and the view SHALL return to live, unless it was scrolled up before selection mode began, in which case it SHALL stay at that position. Selection mode SHALL be available with or without the `control` scope and on ended terminals.
+
+#### Scenario: Long-press selects a path
+- **WHEN** the user long-presses inside `./src/auth/session.rs:` on the pane
+- **THEN** selection mode starts with `./src/auth/session.rs` highlighted and a handle at each end
+
+#### Scenario: Output is held while selecting
+- **WHEN** the user is in selection mode at the live bottom and the agent prints 12 lines
+- **THEN** the view and the selection don't move, and the Jump to live pill shows 12 new lines
+
+#### Scenario: Colored cells look selected
+- **WHEN** the selection covers a green `PASS` badge and a diff line with a 24-bit background
+- **THEN** those cells are painted with the same highlight pair as plain text in the selection
+
+#### Scenario: Copy a multi-line range
+- **WHEN** the user drags the end handle down two rows and taps Copy
+- **THEN** the clipboard holds three lines with trailing blanks trimmed, "Copied · 3 lines" shows inside the pane, and selection mode ends
+
+#### Scenario: Soft-wrapped line is copied as one line
+- **WHEN** in Line mode the selection spans one command that wrapped onto two screen rows
+- **THEN** the copied text is one line with no inserted newline
+
+#### Scenario: Block selection copies a column
+- **WHEN** the user switches to Block mode with handles at column 4 of row 10 and column 12 of row 14, and taps Copy
+- **THEN** the clipboard holds five lines, each the characters from columns 4 to 12 of rows 10 to 14 with trailing blanks trimmed
+
+#### Scenario: Switching mode keeps the handles
+- **WHEN** the user switches from Line to Block and back to Line
+- **THEN** the handles stay on the same cells and the Line selection is the same as before
+
+#### Scenario: Select all
+- **WHEN** the user taps Select all with 300 scrollback rows held
+- **THEN** the selection runs from the first scrollback row to the last screen row in Line mode
+
+#### Scenario: Exit returns to live
+- **WHEN** the user was at the live bottom, entered selection mode, the agent printed output, and the user pressed Back
+- **THEN** selection mode ends, the terminal screen stays open, the held output is shown, and the view is at the live bottom
+
+#### Scenario: Exit while scrolled up
+- **WHEN** the user was scrolled up, entered selection mode, and tapped outside the selection
+- **THEN** selection mode ends and the view stays at the same scrollback position with Jump to live counting the held lines
+
+#### Scenario: Sending input ends selection
+- **WHEN** the user is in selection mode with the `control` scope and taps a key in the key bar
+- **THEN** selection mode ends, the held output is applied, and then the key is sent
+
+#### Scenario: Selecting into scrollback
+- **WHEN** the user holds the start handle in the top 36 dp of the pane
+- **THEN** the frozen view scrolls up into scrollback and the selection extends with it
+
+#### Scenario: Watch-only device copies text
+- **WHEN** a device with the `terminal` scope but not `control` long-presses the pane
+- **THEN** selection mode starts and Copy works
+
+#### Scenario: Ended terminal
+- **WHEN** the terminal has ended and shows its last frame
+- **THEN** the user can long-press to select and copy from it
+
 ### Requirement: Control scope sends input to the agent
 With the `control` scope the terminal screen SHALL show a key bar laid out as rows of keys, a keyboard toggle, and a reply field with a Send button. The default key bar SHALL have two rows of seven keys: Esc, Tab, Shift+Tab, Up, Ctrl+C, Paste, Backspace, then Ctrl, Alt, Left, Down, Right, Space, Enter. Each named key SHALL send that key to the agent as `terminal.input` `keys`, and each character key SHALL send that character. Ctrl and Alt SHALL be modifiers: a tap latches the modifier for the next key only, a long-press locks it until tapped again, and the next key from the key bar or the soft keyboard SHALL be sent with the latched or locked modifiers. Ctrl+C SHALL send nothing on the first tap and SHALL send Ctrl+C only on a second tap within 2.5 seconds. Paste SHALL insert the phone clipboard into the reply field and SHALL NOT send it. Send SHALL send the reply text as a `paste` with `enter` true and clear the field; long-pressing Send SHALL send it with `enter` false. A hub error for a sent input SHALL keep the reply text and show the error. Tapping the reply field SHALL focus it and open the soft keyboard, and the field SHALL keep focus while the controls rearrange around the keyboard. Keys and keystrokes SHALL reach the agent in the order the user pressed them.
 
