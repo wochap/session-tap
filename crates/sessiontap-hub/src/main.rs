@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use sessiontap_core::paths::HubPaths;
 use sessiontap_hub::config::{HubConfig, Subscription};
+use sessiontap_hub::discovery::Discovery;
 use sessiontap_hub::ingest::{self, HubPublication};
 use sessiontap_hub::listen::HubRequest;
 use sessiontap_hub::remote::{self, RemoteGate, RemoteLimits};
@@ -38,7 +39,12 @@ async fn main() -> Result<()> {
         ["listen"] => listen_client().await,
         ["pair", rest @ ..] => {
             let scopes = parse_scopes(rest)?;
-            let socket = HubPaths::discover()?.socket();
+            let paths = HubPaths::discover()?;
+            let socket = paths.socket();
+            let config = HubConfig::load(&paths.config_file()).unwrap_or_default();
+            if let Some(hint) = cli::discovery_hint(config.remote.as_ref()) {
+                println!("{hint}");
+            }
             cli::pair(&socket, scopes, &mut std::io::stdout(), true, |_, _| {
                 cli::prompt_yes_no("Trust this device?")
             })
@@ -125,6 +131,7 @@ async fn run_service() -> Result<()> {
         .with_context(|| format!("bind ingestion address {}", config.listen))?;
     let mut remote_info = None;
     let mut remote_listeners = Vec::new();
+    let discovery = config.remote.as_ref().and_then(Discovery::from_config);
     if let Some(remote) = &config.remote {
         let hub_name = remote.display_name();
         let identity =
@@ -152,6 +159,7 @@ async fn run_service() -> Result<()> {
             Arc::clone(&gate),
             limits.clone(),
             remote::BIND_BACKOFF,
+            discovery.clone(),
         ));
     }
     eprintln!(
@@ -189,6 +197,9 @@ async fn run_service() -> Result<()> {
         }
     }
     unix.abort();
+    if let Some(discovery) = &discovery {
+        discovery.shutdown();
+    }
     let _ = fs::remove_file(&socket);
     drop(lock);
     Ok(())

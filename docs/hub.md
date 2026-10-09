@@ -406,6 +406,53 @@ If Tailscale's "block connections without VPN" (or another always-on VPN
 lockdown) is enabled on the phone, the LAN endpoints are unreachable; the app
 then needs the tailnet address.
 
+### LAN discovery
+
+A paired device keeps its trust when both devices move to another network,
+but it only knows the endpoint hints it stored. With a wildcard bind, set
+`remote.discovery: true` so the app can find the hub on a new shared LAN
+without pairing again:
+
+```yaml
+version: 1
+remote:
+  listen: ["0.0.0.0:8932"]
+  discovery: true
+```
+
+`remote.discovery` defaults to `false`, and the hub then sends and answers no
+mDNS packets. It is valid only when `remote.listen` is a single wildcard
+entry; any other `listen` makes the configuration invalid, with an error
+naming `remote.discovery`.
+
+While the wildcard listener is bound, the hub announces the DNS-SD service
+`_sessiontap._tcp.local` on the wildcard's port. The announced addresses are
+the wildcard endpoint hints described under Pairing, without
+`remote.advertise`: A records only for `0.0.0.0`, A and AAAA for `[::]`,
+never loopback or link-local, and never on `docker`, `veth`, `virbr`, or `br-`
+interfaces. The hub checks its addresses every 10 seconds and re-announces
+when they change. It withdraws the records while the listener is retrying a
+bind and sends goodbye packets on shutdown. If the mDNS socket cannot open,
+the hub logs it once and keeps serving.
+
+Privacy: the instance name and SRV host name are random (`st-<12 hex>`) and
+change at each start, and the TXT record holds only `v=1`. No hub ID, hub
+name, or host name is announced, but anyone on the network can see that a
+SessionTap hub is present. Discovery grants no trust: the app dials each
+discovered address under the pinned hub certificate and drops any mismatch
+before it sends its own certificate.
+
+mDNS needs UDP 5353 on each trusted interface, next to the TCP port:
+
+```nix
+networking.firewall.interfaces."wlan0".allowedTCPPorts = [ 8932 ];
+networking.firewall.interfaces."wlan0".allowedUDPPorts = [ 5353 ];
+```
+
+With a wildcard bind and discovery off, `sessiontap-hub pair` prints a note
+before the QR code: devices will not find the hub on a new network unless
+`remote.discovery` is enabled or a tailnet endpoint is in `remote.advertise`.
+
 ### Pairing
 
 ```sh

@@ -17,8 +17,11 @@ import okhttp3.Request as HttpRequest
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import kotlinx.coroutines.sync.Semaphore
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class RpcException(val code: String, message: String) : Exception("$code: $message")
@@ -96,36 +99,64 @@ data class EndpointFailure(val endpoint: String, val error: Throwable)
 class UnreachableException(val failures: List<EndpointFailure>) :
     Exception("no endpoint answered: " + failures.joinToString { "${it.endpoint} (${it.error.message})" })
 
+/** Most endpoints one race dials at once, below the hub's per-address limit of 4 unauthenticated connections. */
+const val MAX_CONCURRENT_DIALS = 4
+
 /**
  * Opens a WebSocket to every endpoint, the preferred one first, and keeps the
  * first that completes TLS with the pinned key. The rest are cancelled.
+ * [candidates] (from discovery) join the race as they arrive; ones already in
+ * [endpoints] are skipped, and at most [MAX_DISCOVERED] are tried. At most
+ * [maxConcurrent] dials run at once. A candidate with another key fails in
+ * the TLS handshake before the client certificate is sent.
  */
 suspend fun raceEndpoints(
     endpoints: List<String>,
     preferred: String?,
     headStartMs: Long = 300,
+    candidates: ReceiveChannel<String>? = null,
+    maxConcurrent: Int = MAX_CONCURRENT_DIALS,
     clientFor: () -> Pair<OkHttpClient, PinnedTrustManager?>,
 ): Connection = coroutineScope {
-    val ordered = endpoints.sortedBy { if (it == preferred) 0 else 1 }
+    val ordered = endpoints.map { it.trim() }.distinct().sortedBy { if (it == preferred) 0 else 1 }
     val winner = CompletableDeferred<Connection>()
     val decided = AtomicBoolean(false)
     val failures = ConcurrentHashMap<String, Throwable>()
+    val tried = CopyOnWriteArrayList<String>()
     val sockets = ConcurrentHashMap<String, WebSocket>()
-    val jobs = mutableListOf<Job>()
-    fun failed(endpoint: String, error: Throwable) {
-        failures[endpoint] = error
-        if (failures.size == ordered.size && !decided.get()) {
-            winner.completeExceptionally(UnreachableException(ordered.map { EndpointFailure(it, failures[it]!!) }))
+    val jobs = CopyOnWriteArrayList<Job>()
+    val dialing = AtomicInteger(0)
+    val sourceOpen = AtomicBoolean(candidates != null)
+    val permits = Semaphore(maxConcurrent)
+    fun exhausted() {
+        if (dialing.get() == 0 && !sourceOpen.get() && !decided.get()) {
+            winner.completeExceptionally(UnreachableException(tried.map { EndpointFailure(it, failures[it]!!) }))
         }
     }
-    ordered.forEachIndexed { index, endpoint ->
+    fun failed(endpoint: String, error: Throwable) {
+        failures[endpoint] = error
+        dialing.decrementAndGet()
+        exhausted()
+    }
+    fun dial(endpoint: String, waitMs: Long) {
+        tried += endpoint
+        dialing.incrementAndGet()
         jobs += launch {
-            if (index > 0 && ordered[0] == preferred) delay(headStartMs)
-            if (decided.get()) return@launch
+            if (waitMs > 0) delay(waitMs)
+            permits.acquire()
+            val released = AtomicBoolean(false)
+            fun release() {
+                if (released.compareAndSet(false, true)) permits.release()
+            }
+            if (decided.get()) {
+                release()
+                return@launch
+            }
             val (client, trust) = clientFor()
             val conn = Connection(endpoint, trust)
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    release()
                     if (decided.compareAndSet(false, true)) {
                         conn.won = true
                         winner.complete(conn)
@@ -140,6 +171,7 @@ suspend fun raceEndpoints(
                 }
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = conn.onClosed(CloseInfo(code, reason))
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    release()
                     if (conn.won) {
                         conn.onClosed(CloseInfo(1006, t.message ?: "failure", t))
                     } else {
@@ -147,18 +179,40 @@ suspend fun raceEndpoints(
                     }
                 }
             }
-            val url = "wss://${endpoint.trim()}/"
+            val url = "wss://$endpoint/"
             conn.socket = client.newWebSocket(HttpRequest.Builder().url(url).build(), listener)
             sockets[endpoint] = conn.socket
         }
+    }
+    ordered.forEachIndexed { index, endpoint ->
+        dial(endpoint, if (index > 0 && ordered[0] == preferred) headStartMs else 0)
+    }
+    if (candidates != null) {
+        jobs += launch {
+            var taken = 0
+            for (candidate in candidates) {
+                if (decided.get() || taken >= MAX_DISCOVERED) break
+                val endpoint = candidate.trim()
+                if (endpoint in tried) continue
+                taken++
+                dial(endpoint, 0)
+            }
+            sourceOpen.set(false)
+            exhausted()
+        }
+    } else {
+        exhausted()
     }
     try {
         val conn = winner.await()
         sockets.forEach { (endpoint, socket) -> if (endpoint != conn.endpoint) socket.cancel() }
         jobs.forEach { it.cancel() }
+        candidates?.cancel()
         conn
     } catch (e: Throwable) {
         sockets.values.forEach { it.cancel() }
+        jobs.forEach { it.cancel() }
+        candidates?.cancel()
         throw e
     }
 }

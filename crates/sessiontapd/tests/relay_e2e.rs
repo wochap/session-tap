@@ -112,6 +112,7 @@ async fn start_hub() -> (Arc<Hub>, String, std::net::SocketAddr, std::net::Socke
                 listen: vec![remote_addr.to_string()],
                 advertise: Vec::new(),
                 control: true,
+                discovery: false,
             },
             interfaces: Vec::new,
         }),

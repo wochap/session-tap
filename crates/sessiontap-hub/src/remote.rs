@@ -26,6 +26,7 @@ use tokio_tungstenite::tungstenite::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::discovery::Discovery;
 use crate::ingest::HubPublication;
 use crate::listen::{HubStreamEnvelope, StreamSink, stream_merged};
 use crate::relay::{Answer, DeviceOut, Pending, RelayError};
@@ -199,6 +200,7 @@ impl Backoff {
 /// Keeps one remote address served forever. Binding is retried with
 /// `backoff`; a failure streak and a successful bind are each logged once.
 /// When the accept loop fails, the address goes back to the retry loop.
+/// `discovery` is announced only while the listener is bound.
 pub async fn supervise_listener(
     address: SocketAddr,
     acceptor: TlsAcceptor,
@@ -206,6 +208,7 @@ pub async fn supervise_listener(
     gate: Arc<RemoteGate>,
     limits: RemoteLimits,
     backoff: Backoff,
+    discovery: Option<Discovery>,
 ) {
     let mut delay = None;
     loop {
@@ -225,6 +228,9 @@ pub async fn supervise_listener(
         };
         let local = listener.local_addr().unwrap_or(address);
         eprintln!("sessiontap-hub: remote access on {local}");
+        let announcement = discovery
+            .as_ref()
+            .map(|discovery| discovery.announce(local));
         let error = serve_remote(
             listener,
             acceptor.clone(),
@@ -233,6 +239,7 @@ pub async fn supervise_listener(
             limits.clone(),
         )
         .await;
+        drop(announcement);
         eprintln!("sessiontap-hub: remote listener {address} failed: {error}; rebinding");
         // the failure above starts the streak, so its retries stay quiet
         let wait = backoff.next(None);

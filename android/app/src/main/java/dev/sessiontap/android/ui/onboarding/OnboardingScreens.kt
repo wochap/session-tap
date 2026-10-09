@@ -148,7 +148,7 @@ fun PermissionsScreen(onBack: () -> Unit, onContinue: () -> Unit, contentPadding
         }
         Row(Modifier.padding(top = 16.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(PhosphorIcons.Regular.Info, null, tint = c.mute, modifier = Modifier.size(16.dp).padding(top = 1.dp))
-            Text("Hubs outside your home network are reached over Tailscale. Keep it connected on this phone.", fontSize = 12.5.sp, color = c.mute)
+            Text("Hubs on another network are reached over Tailscale. Keep it connected on this phone. On a new shared Wi-Fi network, the app finds a hub only when that hub enables remote.discovery.", fontSize = 12.5.sp, color = c.mute)
         }
         Spacer(Modifier.weight(1f))
         PrimaryButton("Continue", onContinue, Modifier.fillMaxWidth().testTag("continue"))

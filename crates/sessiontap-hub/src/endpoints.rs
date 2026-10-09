@@ -25,10 +25,9 @@ pub struct InterfaceAddr {
 pub fn endpoint_hints(remote: &RemoteConfig, interfaces: &[InterfaceAddr]) -> Vec<String> {
     let addresses: Vec<String> = match remote.listen_mode() {
         ListenMode::Explicit(addresses) => addresses.iter().map(ToString::to_string).collect(),
-        ListenMode::Wildcard(wildcard) => interfaces
-            .iter()
-            .filter(|interface| usable(interface, wildcard.ip()))
-            .map(|interface| SocketAddr::new(interface.ip, wildcard.port()).to_string())
+        ListenMode::Wildcard(wildcard) => wildcard_addresses(wildcard.ip(), interfaces)
+            .into_iter()
+            .map(|ip| SocketAddr::new(ip, wildcard.port()).to_string())
             .collect(),
     };
     let mut hints: Vec<String> = Vec::new();
@@ -43,12 +42,31 @@ pub fn endpoint_hints(remote: &RemoteConfig, interfaces: &[InterfaceAddr]) -> Ve
     hints
 }
 
+/// Interface addresses a wildcard bind on `wildcard` is reachable at, in
+/// system order without duplicates. Both endpoint hints and DNS-SD
+/// announcements come from this list.
+#[must_use]
+pub fn wildcard_addresses(wildcard: IpAddr, interfaces: &[InterfaceAddr]) -> Vec<IpAddr> {
+    let mut addresses: Vec<IpAddr> = Vec::new();
+    for interface in interfaces {
+        if usable(interface, wildcard) && !addresses.contains(&interface.ip) {
+            addresses.push(interface.ip);
+        }
+    }
+    addresses
+}
+
+/// Whether DNS-SD may use `name`: container and VM bridges are never
+/// announced on.
+#[must_use]
+pub fn ignored_interface(name: &str) -> bool {
+    IGNORED_INTERFACE_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
 fn usable(interface: &InterfaceAddr, wildcard: IpAddr) -> bool {
-    if !interface.up
-        || IGNORED_INTERFACE_PREFIXES
-            .iter()
-            .any(|prefix| interface.name.starts_with(prefix))
-    {
+    if !interface.up || ignored_interface(&interface.name) {
         return false;
     }
     match (interface.ip, wildcard) {
@@ -118,6 +136,7 @@ mod tests {
             listen: listen.iter().map(|entry| (*entry).to_owned()).collect(),
             advertise: advertise.iter().map(|entry| (*entry).to_owned()).collect(),
             control: false,
+            discovery: false,
         };
         remote.validate().unwrap();
         remote
@@ -211,6 +230,25 @@ mod tests {
     fn wildcard_without_usable_addresses_is_empty() {
         let remote = remote(&["0.0.0.0:8932"], &[]);
         assert!(endpoint_hints(&remote, &[interface("lo", "127.0.0.1")]).is_empty());
+    }
+
+    #[test]
+    fn announced_addresses_are_wildcard_hints_without_advertise() {
+        for listen in ["0.0.0.0:8932", "[::]:8932"] {
+            let remote = remote(&[listen], &["macbook.tailnet.ts.net:8932", "hub:8932"]);
+            let ListenMode::Wildcard(wildcard) = remote.listen_mode() else {
+                unreachable!()
+            };
+            let announced: Vec<String> = wildcard_addresses(wildcard.ip(), &host())
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, 8932).to_string())
+                .collect();
+            let hints: Vec<String> = endpoint_hints(&remote, &host())
+                .into_iter()
+                .filter(|hint| !remote.advertise.contains(hint))
+                .collect();
+            assert_eq!(announced, hints, "{listen}");
+        }
     }
 
     #[test]

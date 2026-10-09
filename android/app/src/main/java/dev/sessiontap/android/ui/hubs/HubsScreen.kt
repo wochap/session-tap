@@ -98,6 +98,14 @@ fun HubsScreen(
                             Field("Hub key", hubKeyShort(hub.hubId))
                             Field("Last seen", hub.lastSeenAt?.let { relativeAge(Instant.ofEpochMilli(it), now) + " ago" } ?: "never")
                         }
+                        if ((state as? ConnState.Reconnecting)?.discoveryMissed == true) {
+                            Text(
+                                "Not found on this network. Enable remote.discovery on the hub so the app can find it on new networks.",
+                                fontSize = 12.sp,
+                                color = c.mute,
+                                modifier = Modifier.testTag("discovery-hint:${hub.name}"),
+                            )
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Access", fontSize = 12.5.sp, color = c.mute, modifier = Modifier.width(84.dp))
                             if (hub.scopes.isEmpty()) {

@@ -84,6 +84,7 @@ async fn start_hub(options: Options) -> TestHub {
                     listen: vec![remote.to_string()],
                     advertise: Vec::new(),
                     control: options.control,
+                    discovery: false,
                 },
                 interfaces: Vec::new,
             }),

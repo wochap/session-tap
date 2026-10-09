@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.nsd.NsdManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -23,6 +24,7 @@ import dev.sessiontap.android.data.HubOps
 import dev.sessiontap.android.net.ConnState
 import dev.sessiontap.android.net.HubClient
 import dev.sessiontap.android.net.HubClientListener
+import dev.sessiontap.android.net.HubDiscovery
 import dev.sessiontap.android.net.HubEnvelope
 import dev.sessiontap.android.net.HubInfo
 import dev.sessiontap.android.net.HubTls
@@ -47,6 +49,7 @@ class HubService : Service(), HubClientListener, HubOps {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clients = ConcurrentHashMap<String, HubClient>()
     private lateinit var app: SessionTapApp
+    private lateinit var discovery: HubDiscovery
     private val network = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = clients.values.forEach { it.kick() }
         override fun onLost(network: Network) = clients.values.forEach { it.kick() }
@@ -59,7 +62,13 @@ class HubService : Service(), HubClientListener, HubOps {
         app = application as SessionTapApp
         startInForeground(summaryText(0, 0))
         app.repository.ops = this
-        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network)
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        discovery = HubDiscovery(
+            scope = scope,
+            browser = NsdBrowser(getSystemService(NsdManager::class.java), connectivity),
+            eligible = { onLocalNetwork(connectivity) },
+        )
+        connectivity.registerDefaultNetworkCallback(network)
         scope.launch {
             app.repository.hubs.filterNotNull().collectLatest { hubs -> sync(hubs) }
         }
@@ -82,6 +91,7 @@ class HubService : Service(), HubClientListener, HubOps {
         runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
         clients.values.forEach { it.stop() }
         clients.clear()
+        discovery.stop()
         if (app.repository.ops === this) app.repository.ops = null
         scope.cancel()
         super.onDestroy()
@@ -104,6 +114,8 @@ class HubService : Service(), HubClientListener, HubOps {
                 listener = this,
                 scope = scope,
                 clientFor = { HubTls.client(hub.hubId, DeviceKey.keyManager()) },
+                // only reconnecting clients ask, so connected hubs start no browse
+                discover = discovery::request,
             )
             clients[hub.hubId] = client
             scope.launch { client.state.collectLatest { app.repository.setConnState(hub.hubId, it) } }

@@ -13,6 +13,7 @@ use tokio::{
     net::{UnixStream, unix::OwnedReadHalf},
 };
 
+use crate::config::{ListenMode, RemoteConfig};
 use crate::listen::{HubRequest, HubResponse};
 use crate::scope::Scope;
 use crate::store::Device;
@@ -217,6 +218,20 @@ where
     }
 }
 
+/// Printed by `pair` when a wildcard bind cannot be found after a network
+/// move.
+pub const DISCOVERY_HINT: &str = "Note: devices will not find this hub on a new network unless \
+     remote.discovery is enabled or a tailnet endpoint is in remote.advertise.";
+
+/// The `pair` hint for `remote`: shown for a wildcard bind with discovery
+/// off.
+#[must_use]
+pub fn discovery_hint(remote: Option<&RemoteConfig>) -> Option<&'static str> {
+    let remote = remote?;
+    (matches!(remote.listen_mode(), ListenMode::Wildcard(_)) && !remote.discovery)
+        .then_some(DISCOVERY_HINT)
+}
+
 /// Reads a `[y/N]` answer from the terminal.
 #[must_use]
 pub fn prompt_yes_no(question: &str) -> bool {
@@ -232,6 +247,31 @@ pub fn prompt_yes_no(question: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_hint_only_for_wildcard_without_discovery() {
+        let remote = |listen: &str, discovery| RemoteConfig {
+            name: None,
+            listen: vec![listen.into()],
+            advertise: Vec::new(),
+            control: false,
+            discovery,
+        };
+        assert_eq!(
+            discovery_hint(Some(&remote("0.0.0.0:8932", false))),
+            Some(DISCOVERY_HINT)
+        );
+        assert_eq!(
+            discovery_hint(Some(&remote("[::]:8932", false))),
+            Some(DISCOVERY_HINT)
+        );
+        assert_eq!(discovery_hint(Some(&remote("0.0.0.0:8932", true))), None);
+        assert_eq!(
+            discovery_hint(Some(&remote("192.168.1.20:8932", false))),
+            None
+        );
+        assert_eq!(discovery_hint(None), None);
+    }
 
     #[test]
     fn devices_mark_terminal_scopes_disabled_while_control_is_off() {

@@ -782,6 +782,7 @@ mod tests {
                     listen: vec!["127.0.0.1:8932".into()],
                     advertise: vec![],
                     control: false,
+                    discovery: false,
                 },
                 interfaces: Vec::new,
             }),

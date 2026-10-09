@@ -27,7 +27,13 @@ sealed interface ConnState {
     /** Connected, but the hub grants no `read` scope, so there is no session stream. */
     data class NoAccess(val endpoint: String) : ConnState
     /** Waiting until [retryAt] (epoch ms). After a few failures the hub counts as offline. */
-    data class Reconnecting(val retryAt: Long, val failures: Int, val lastError: String?) : ConnState {
+    /** [discoveryMissed]: the last attempt browsed the local network without reaching the hub. */
+    data class Reconnecting(
+        val retryAt: Long,
+        val failures: Int,
+        val lastError: String?,
+        val discoveryMissed: Boolean = false,
+    ) : ConnState {
         val offline: Boolean get() = failures >= OFFLINE_AFTER_FAILURES
     }
     data object Revoked : ConnState
@@ -71,6 +77,8 @@ class HubClient(
     private val now: () -> Long = System::currentTimeMillis,
     private val initialBackoffMs: Long = 1_000,
     private val maxBackoffMs: Long = MAX_BACKOFF_MS,
+    /** Candidates from a local-network browse for this attempt, or null when the app does not browse. */
+    private val discover: () -> ReceiveChannel<String>? = { null },
 ) : TerminalHub {
     private val _state = MutableStateFlow<ConnState>(ConnState.Connecting)
     override val state: StateFlow<ConnState> = _state
@@ -152,8 +160,9 @@ class HubClient(
         while (true) {
             _state.value = ConnState.Connecting
             var error: String? = null
+            val candidates = discover()
             try {
-                val conn = raceEndpoints(endpoints(), lastGood, clientFor = clientFor)
+                val conn = raceEndpoints(endpoints(), lastGood, candidates = candidates, clientFor = clientFor)
                 current = conn
                 try {
                     lastGood = conn.endpoint
@@ -197,7 +206,7 @@ class HubClient(
             }
             failures++
             val wait = backoffMs
-            _state.value = ConnState.Reconnecting(now() + wait, failures, error)
+            _state.value = ConnState.Reconnecting(now() + wait, failures, error, discoveryMissed = candidates != null)
             withTimeoutOrNull(wait) { wake.receive() }
             backoffMs = min(backoffMs * 2, maxBackoffMs)
         }

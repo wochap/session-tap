@@ -76,6 +76,9 @@ pub struct RemoteConfig {
     /// Makes the terminal scopes (`watch`, `control`) grantable and effective.
     #[serde(default)]
     pub control: bool,
+    /// Announces the wildcard listener over DNS-SD on the local network.
+    #[serde(default)]
+    pub discovery: bool,
 }
 
 /// How the remote listener binds, derived from a validated `remote.listen`.
@@ -131,6 +134,13 @@ impl RemoteConfig {
                     "remote.listen wildcard {entry} must be the only remote.listen entry"
                 ));
             }
+        }
+        if self.discovery && !matches!(self.listen_mode(), ListenMode::Wildcard(_)) {
+            return Err(
+                "remote.discovery requires remote.listen to be a single wildcard entry \
+                 (0.0.0.0:<port> or [::]:<port>)"
+                    .into(),
+            );
         }
         if let Some(entry) = self.advertise.iter().find(|entry| entry.trim().is_empty()) {
             return Err(format!("invalid remote.advertise entry: {entry:?}"));
@@ -441,6 +451,27 @@ subscriptions:
         let bad = remote("[\"laptop:8932\"]").validate().unwrap_err();
         assert!(bad.contains("laptop:8932"), "{bad}");
         assert!(HubConfig::parse("version: 1\nremote:\n  name: x\n").is_err());
+    }
+
+    #[test]
+    fn discovery_requires_a_lone_wildcard() {
+        let parse = |listen: &str, extra: &str| {
+            HubConfig::parse(&format!("version: 1\nremote:\n  listen: {listen}\n{extra}")).unwrap()
+        };
+        assert!(!parse("[\"0.0.0.0:8932\"]", "").remote.unwrap().discovery);
+        for listen in ["[\"0.0.0.0:8932\"]", "[\"[::]:8932\"]"] {
+            parse(listen, "  discovery: true\n").validate().unwrap();
+        }
+        for listen in [
+            "[\"192.168.1.20:8932\"]",
+            "[\"100.64.0.7:8932\", \"192.168.1.20:8932\"]",
+        ] {
+            let error = parse(listen, "  discovery: true\n").validate().unwrap_err();
+            assert!(error.contains("remote.discovery"), "{error}");
+        }
+        parse("[\"192.168.1.20:8932\"]", "  discovery: false\n")
+            .validate()
+            .unwrap();
     }
 
     #[test]

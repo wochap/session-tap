@@ -141,6 +141,7 @@ fn remote_config(listen: &[&str], advertise: &[&str]) -> RemoteConfig {
         listen: listen.iter().map(|entry| (*entry).to_owned()).collect(),
         advertise: advertise.iter().map(|entry| (*entry).to_owned()).collect(),
         control: false,
+        discovery: false,
     }
 }
 
@@ -174,6 +175,7 @@ async fn start_supervised_hub(
         RemoteGate::new(&limits),
         limits,
         backoff,
+        None,
     ));
     let socket = temp.path().join("hub.sock");
     let unix = UnixListener::bind(&socket).unwrap();
