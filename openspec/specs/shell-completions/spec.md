@@ -66,15 +66,15 @@ position.
 
 When the argument position accepts a provider name (`setup`, `doctor`,
 `hooks remove`, or the launch position), the completion function SHALL offer
-the built-in providers `claude`, `codex`, and `qwen`, plus the name of every
-adapter declared as an `[adapters.<name>]` section in the SessionTap config
+the built-in providers `claude`, `codex`, `qwen`, `pi`, and `agy`, plus the name of
+every adapter declared as an `[adapters.<name>]` section in the SessionTap config
 file.
 
 #### Scenario: Built-in providers
 
 - **WHEN** zsh completes the provider argument of `sessiontap setup` and no
   config file declares custom adapters
-- **THEN** the candidates are exactly `claude`, `codex`, and `qwen`
+- **THEN** the candidates are `claude`, `codex`, `qwen`, `pi`, and `agy`
 
 #### Scenario: Custom adapters included
 

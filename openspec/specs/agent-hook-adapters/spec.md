@@ -7,7 +7,7 @@ Session-gated Claude Code, Codex, and Qwen event ingestion — mapping provider 
 ## Requirements
 
 ### Requirement: Built-in providers are normalized
-SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, Pi, and Qwen. Each adapter SHALL own its provider's hook or extension configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported root-agent session, prompt, tool, permission, notification, stop, failure-stop, explicit-idle, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
+SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, Pi, Qwen, and Antigravity (`agy`). Each adapter SHALL own its provider's hook or extension configuration, launch preparation, raw payload interpretation, normalized event mapping, metadata extraction, fixtures, and tests. Each adapter SHALL map supported root-agent session, prompt, tool, permission, notification, stop, failure-stop, explicit-idle, and session-end signals into the common internal event model when those signals are available. Adapters SHALL distinguish provider-session lifecycle from supervised process lifecycle and SHALL normalize verified provider turn IDs, model, effort, permission mode, and usage fields into provider-neutral optional metadata.
 
 #### Scenario: Provider behavior changes independently
 - **WHEN** one provider changes its hook names, payload shape, setup requirements, or launch options
@@ -22,7 +22,7 @@ SessionTap SHALL provide separate concrete adapters for Claude Code, Codex, Pi, 
 - **THEN** it emits working activity, identifies the internal event as a new turn, and includes the provider's verified turn identifier when available
 
 #### Scenario: Provider asks a question
-- **WHEN** an adapter can distinguish a root-agent user question or elicitation from a permission approval, including a recognized Claude `AskUserQuestion` permission request
+- **WHEN** an adapter can distinguish a root-agent user question or elicitation from a permission approval, including a recognized Claude `AskUserQuestion` permission request or Antigravity `ask_question` tool invocation
 - **THEN** it emits waiting_input rather than waiting_approval with optional bounded question context
 
 #### Scenario: Provider requests approval
@@ -205,7 +205,7 @@ The Qwen adapter SHALL use hooks as its baseline and MAY add Qwen's dedicated du
 - **THEN** the dual-output probe runs that alias's executable and the launcher tails whatever side channel the adapter returns
 
 ### Requirement: Adapter behavior is versioned and extensible
-The core SHALL depend on the adapter trait rather than provider conditionals. The registry SHALL expose a distinct built-in adapter for each of Claude, Codex, Qwen, and Pi, keyed by a typed provider identity, and SHALL expose the list of built-in identities so callers do not hardcode it. Each built-in adapter MAY be composed from provider-owned hook-dialect and session-collector components through one shared driver, provided every provider still resolves to its own distinct adapter type. Configuration SHALL allow a custom executable name to inherit one built-in adapter's complete behavior and redaction policy, and SHALL reject an `inherits` value that names no built-in adapter at configuration load.
+The core SHALL depend on the adapter trait rather than provider conditionals. The registry SHALL expose a distinct built-in adapter for each of Claude, Codex, Qwen, Pi, and Antigravity (`agy`), keyed by a typed provider identity, and SHALL expose the list of built-in identities so callers do not hardcode it. Each built-in adapter MAY be composed from provider-owned hook-dialect and session-collector components through one shared driver, provided every provider still resolves to its own distinct adapter type. Configuration SHALL allow a custom executable name to inherit one built-in adapter's complete behavior and redaction policy, and SHALL reject an `inherits` value that names no built-in adapter at configuration load.
 
 #### Scenario: Claude-compatible wrapper
 - **WHEN** the user configures `company-claude` to inherit the Claude adapter
@@ -213,7 +213,7 @@ The core SHALL depend on the adapter trait rather than provider conditionals. Th
 
 #### Scenario: Built-in adapter registration
 - **WHEN** the adapter registry is initialized
-- **THEN** each of Claude, Codex, Qwen, and Pi resolves to its own distinct adapter type whose provider-specific behavior lives in that provider's module
+- **THEN** each of Claude, Codex, Qwen, Pi, and Antigravity (`agy`) resolves to its own distinct adapter type whose provider-specific behavior lives in that provider's module
 
 #### Scenario: Alias inherits an unknown adapter
 - **WHEN** configuration declares an alias whose `inherits` value is not a built-in provider identity
@@ -261,7 +261,7 @@ A provider-specific collector that reads agent-owned stores, histories, or trans
 - **THEN** only that concrete provider module and its tests require provider-specific changes
 
 ### Requirement: Common adapter code delegates all provider behavior
-The adapter crate's common library module SHALL contain only provider-neutral contracts, registry selection, normalized shared types, the shared driver, optional provider-neutral file and cursor helper functions, and delegation. It SHALL NOT branch on provider identity or dialect. Claude-, Codex-, Qwen-, and Pi-specific hook names, setup rules, locators, paths, record decoding, JSON fields, cursor semantics, deduplication, metadata extraction, tool-activity mappings, and accounting MUST reside in `claude.rs`, `codex.rs`, `qwen.rs`, and `pi.rs` respectively, expressed through the provider-owned dialect and collector components. Shared helpers MUST NOT own a provider's read loop or decode its records.
+The adapter crate's common library module SHALL contain only provider-neutral contracts, registry selection, normalized shared types, the shared driver, optional provider-neutral file and cursor helper functions, and delegation. It SHALL NOT branch on provider identity or dialect. Claude-, Codex-, Qwen-, Pi-, and Antigravity-specific hook names, setup rules, locators, paths, record decoding, JSON fields, cursor semantics, deduplication, metadata extraction, tool-activity mappings, and accounting MUST reside in `claude.rs`, `codex.rs`, `qwen.rs`, `pi.rs`, and `agy.rs` respectively, expressed through the provider-owned dialect and collector components. Shared helpers MUST NOT own a provider's read loop or decode its records.
 
 #### Scenario: Registry selects a provider
 - **WHEN** common code resolves a configured provider to a concrete adapter
@@ -427,7 +427,7 @@ Normalized adapter output SHALL use typed evidence and tool activity directly wi
 Each built-in adapter SHALL extract an eligible root hook's provider session identity and transcript locator into private authenticated collection context before discarding raw hook input. This collection context SHALL remain separate from `NormalizedEvent`, adapter-selected public metadata, persisted invocation snapshots, and canonical public envelopes. Custom configured providers SHALL inherit the artifact collector and allowed root of their adapter dialect while retaining their configured provider identity.
 
 #### Scenario: Supported root hook has a transcript path
-- **WHEN** a Claude, Codex, or Qwen root hook contains a documented transcript locator and provider session identity
+- **WHEN** a Claude, Codex, Qwen, or Antigravity (`agy`) root hook contains a documented transcript locator and provider session identity
 - **THEN** the adapter supplies them only to the authenticated private usage-collection path
 
 #### Scenario: Child hook has a transcript path
@@ -568,7 +568,7 @@ Every adapter SHALL declare a terminal policy describing provider-specific behav
 - **THEN** the alias's invocations report the Claude terminal policy
 
 ### Requirement: Session model follows provider switches
-The Claude and Pi adapters SHALL keep the session's model current from every model signal their provider exposes. Claude SHALL take the model from `SessionStart` when present, and SHALL subscribe `PostModelSwitch` and map its `to_model` to the session model. Pi SHALL take the selected model from every forwarded event and `model_select`, and the managed extension SHALL forward the provider and model of the assistant message that ended each turn, which then becomes the session model. Every model value SHALL be sanitized and bounded to 160 characters. Every time an adapter reports a model it SHALL also report a `model_label` derived by that adapter's own rule, sanitized and bounded the same way. The Claude rule SHALL drop a leading `claude-`, drop a trailing `-YYYYMMDD` date, and join a trailing `-<major>-<minor>` version with a dot, keeping any bracketed suffix such as `[1m]`. The Pi rule SHALL drop a leading `<provider>/` prefix. When a rule does not change the value, the label SHALL equal the model. Label derivation SHALL live only in the adapter that reports the model. The thinking level `off` SHALL be a valid effort value, so a switch to `off` replaces the previous effort. The last reported model, label, and effort SHALL remain in the snapshot after the session ends.
+The Claude, Pi, and Antigravity (`agy`) adapters SHALL keep the session's model current from every model signal their provider exposes. Claude SHALL take the model from `SessionStart` when present, and SHALL subscribe `PostModelSwitch` and map its `to_model` to the session model. Pi SHALL take the selected model from every forwarded event and `model_select`, and the managed extension SHALL forward the provider and model of the assistant message that ended each turn, which then becomes the session model. Antigravity (`agy`) SHALL take `modelName` from every forwarded hook payload when non-empty. Every model value SHALL be sanitized and bounded to 160 characters. Every time an adapter reports a model it SHALL also report a `model_label` derived by that adapter's own rule, sanitized and bounded the same way. The Claude rule SHALL drop a leading `claude-`, drop a trailing `-YYYYMMDD` date, and join a trailing `-<major>-<minor>` version with a dot, keeping any bracketed suffix such as `[1m]`. The Pi rule SHALL drop a leading `<provider>/` prefix. The Antigravity (`agy`) rule SHALL drop a leading `gemini-` or `claude-` prefix when present and otherwise keep the sanitized model name. When a rule does not change the value, the label SHALL equal the model. Label derivation SHALL live only in the adapter that reports the model. The thinking level `off` SHALL be a valid effort value, so a switch to `off` replaces the previous effort. The last reported model, label, and effort SHALL remain in the snapshot after the session ends.
 
 #### Scenario: Claude model switch
 - **WHEN** a wrapped Claude session runs `/model` and `PostModelSwitch` reports `to_model` `claude-opus-5-5`
@@ -597,3 +597,49 @@ The Claude and Pi adapters SHALL keep the session's model current from every mod
 #### Scenario: Thinking turned off
 - **WHEN** pi reports `thinking_level_select` with level `off` after `high`
 - **THEN** the session's effort becomes `off`
+
+#### Scenario: Antigravity hook reports modelName
+- **WHEN** an `agy` hook reports `modelName` `"gemini-2.5-pro"`
+- **THEN** the session's model becomes `gemini-2.5-pro` and its label becomes `2.5-pro`
+
+### Requirement: Antigravity hooks are installed as a managed global plugin
+Antigravity (`agy`) hook installation SHALL manage a dedicated SessionTap plugin directory inside Antigravity's global configuration root (`$GEMINI_CONFIG_DIR/plugins/sessiontap` when `GEMINI_CONFIG_DIR` is set and non-empty, and `~/.gemini/config/plugins/sessiontap` otherwise) containing `plugin.json` and `hooks.json`. `hooks.json` SHALL register the `"sessiontap"` hook group across `SessionStart`, `PreInvocation`, `PreToolUse` (matcher `"*"`), `PostToolUse` (matcher `"*"`), `PostInvocation`, and `Stop`. Each command handler SHALL invoke the resolved SessionTap executable via `hook emit 'agy' '<Event>'` with stdout and stderr silenced, fail open (`|| true`), and print `{"decision":"allow"}` on stdout for `PreToolUse` and `{}` for all other events. Setup SHALL be idempotent and SHALL refresh the plugin files when their content or executable path drifts. Doctor SHALL verify `plugin.json`, `hooks.json`, the embedded executable path, and that `<config_root>/config.json` does not set `plugins.sessiontap.enabled` to `false`. Removal SHALL delete the managed `plugin.json` and `hooks.json` files (and the `sessiontap` plugin directory if empty) without modifying any other plugin or user configuration file.
+
+#### Scenario: Managed plugin files are installed
+- **WHEN** setup runs for `agy`
+- **THEN** `plugin.json` and `hooks.json` are written under `<config_root>/plugins/sessiontap/` with `PreToolUse` emitting `{"decision":"allow"}` and other events emitting `{}` on stdout
+
+#### Scenario: Doctor detects disabled plugin in config.json
+- **WHEN** `<config_root>/config.json` sets `plugins.sessiontap.enabled` to `false`
+- **THEN** `sessiontap doctor agy` reports degraded observability without modifying `config.json`
+
+#### Scenario: Unwrapped agy launches stay untracked and fail open
+- **WHEN** `agy` runs directly without SessionTap invocation context
+- **THEN** each managed hook command exits with status 0, prints valid JSON (`{"decision":"allow"}` for `PreToolUse`, `{}` otherwise) on stdout, and attributes no event to any invocation
+
+#### Scenario: CLI hook emit injects event name when supplied on command line
+- **WHEN** a managed hook runs `sessiontap hook emit agy PreToolUse` with a JSON object on stdin that lacks `"hook_event_name"`
+- **THEN** SessionTap injects `"hook_event_name": "PreToolUse"` before forwarding the payload to raw hook inspection and adapter normalization
+
+### Requirement: Antigravity lifecycle, approval, input, and stop signals are normalized
+The `agy` adapter SHALL normalize Antigravity hook payloads using exact event and tool mappings: `SessionStart` SHALL map to `ProviderSessionStarted`; `PreInvocation` SHALL map to `NewTurn` with `lastUserInput` selected as bounded prompt context; `PreToolUse` for `ask_question` SHALL map to `WaitingInput` with `toolCall.args.questions[0].question` selected as bounded question context; `PreToolUse` for `run_command` with `toolCall.args.BypassSandbox` set to `true` SHALL map to `WaitingApproval` with `ToolActivityPhase::Attention` and `toolSummary` (or `CommandLine` fallback) selected as bounded approval context; all other `PreToolUse` payloads SHALL map to `Working` with `ToolActivityPhase::Start` correlated by `stepIdx`; `PostToolUse` SHALL map to `Working` with `ToolActivityPhase::Failure` when `error` is a non-empty string and `ToolActivityPhase::Finish` otherwise; `PostInvocation` SHALL map to `Enrichment`; and `Stop` SHALL map `terminationReason` `"USER_CANCELED"` to `Interrupted`, `"ERROR"`, `"MAX_INVOCATIONS"`, `"MAX_FORCED_INVOCATIONS"`, or `"MAX_TOKEN_BUDGET_EXCEEDED"` to `Failed`, and `"NO_TOOL_CALL"` to `Completed`.
+
+#### Scenario: Sandbox bypass command requests approval
+- **WHEN** `agy` emits `PreToolUse` for `run_command` with `toolCall.args.BypassSandbox` equal to `true` and `toolSummary` `"Run integration tests"`
+- **THEN** the adapter emits `waiting_approval` with `ToolActivityPhase::Attention` and bounded approval context `"shell Run integration tests"`
+
+#### Scenario: Sandboxed command starts normally
+- **WHEN** `agy` emits `PreToolUse` for `run_command` with `toolCall.args.BypassSandbox` equal to `false` or absent
+- **THEN** the adapter emits `working` with `ToolActivityPhase::Start` and label `"shell"` without emitting `waiting_approval`
+
+#### Scenario: Ask question tool awaits user input
+- **WHEN** `agy` emits `PreToolUse` for `ask_question` with a non-empty `toolCall.args.questions` array
+- **THEN** the adapter emits `waiting_input` with the first question's sanitized bounded text as status reason
+
+#### Scenario: Stop reports user cancellation
+- **WHEN** `agy` emits `Stop` with `terminationReason` `"USER_CANCELED"`
+- **THEN** the adapter emits `interrupted` rather than `completed`
+
+#### Scenario: Stop reports failure termination reason
+- **WHEN** `agy` emits `Stop` with `terminationReason` `"ERROR"` or `"MAX_INVOCATIONS"`
+- **THEN** the adapter emits `failed` rather than `completed`

@@ -18,11 +18,15 @@ Each built-in provider module SHALL implement the same asynchronous session-coll
 - **THEN** the implementation and fixtures for that concrete provider change without adding provider-specific logic to common adapter orchestration or another provider module
 
 ### Requirement: Each provider owns artifact collection end to end
-The Claude, Codex, and Qwen modules SHALL each own their session locator extraction, allowed-root validation, file access, record decoding, bounded-read policy, cursor representation, deduplication, accounting, metadata extraction, cancellation checkpoints, fixtures, and tests. The system SHALL NOT use a cross-provider JSONL parser or metadata extraction function.
+The Claude, Codex, Qwen, and Antigravity (`agy`) modules SHALL each own their session locator extraction, allowed-root validation, file access, record decoding, bounded-read policy, cursor representation, deduplication, accounting, metadata extraction, cancellation checkpoints, fixtures, and tests. The system SHALL NOT use a cross-provider JSONL parser or metadata extraction function.
 
 #### Scenario: Qwen session data is collected
 - **WHEN** Qwen collection receives a verified Qwen agent-session locator
 - **THEN** only the Qwen module locates, reads, parses, and accounts for that artifact before returning normalized enrichment
+
+#### Scenario: Antigravity session data is collected
+- **WHEN** Antigravity (`agy`) collection receives a verified `transcriptPath` locator beneath the Antigravity brain directory for the authenticated `conversationId`
+- **THEN** only the `agy` module locates, reads, parses, and accounts for that artifact before returning normalized enrichment
 
 #### Scenario: Provider cursor crosses the common boundary
 - **WHEN** a provider returns incremental collection state
@@ -103,7 +107,7 @@ Before applying collected enrichment, SessionTap SHALL revalidate the collection
 - **THEN** SessionTap performs one collection and applies its normalized result only to bindings that still pass revalidation
 
 ### Requirement: Provider accounting remains provider specific and exact
-Each provider module SHALL calculate session totals and current context according to verified semantics for its own records, use checked arithmetic, reject partial totals, and omit unverifiable values. Claude SHALL deduplicate stable response identities and account for verified cache input; Codex SHALL select its latest cumulative snapshot rather than sum snapshots; Qwen SHALL sum valid assistant usage while excluding duplicative telemetry.
+Each provider module SHALL calculate session totals and current context according to verified semantics for its own records, use checked arithmetic, reject partial totals, and omit unverifiable values. Claude SHALL deduplicate stable response identities and account for verified cache input; Codex SHALL select its latest cumulative snapshot rather than sum snapshots; Qwen SHALL sum valid assistant usage while excluding duplicative telemetry; Antigravity (`agy`) SHALL deduplicate `PLANNER_RESPONSE` records by `step_index`, sum `input_tokens + cache_read_tokens` for step input and current context tokens, and sum `output_tokens` across deduplicated planner steps.
 
 #### Scenario: Duplicate Claude response rows exist
 - **WHEN** Claude's session artifact repeats usage for one stable response identity
@@ -116,6 +120,10 @@ Each provider module SHALL calculate session totals and current context accordin
 #### Scenario: Qwen telemetry duplicates assistant usage
 - **WHEN** a Qwen session contains assistant usage and duplicative telemetry
 - **THEN** the Qwen collector calculates totals only from its verified assistant records
+
+#### Scenario: Antigravity transcript contains planner response steps
+- **WHEN** an `agy` `transcript.jsonl` artifact contains `PLANNER_RESPONSE` steps with `step_index`, `input_tokens`, `cache_read_tokens`, and `output_tokens`
+- **THEN** the `agy` collector deduplicates by `step_index`, sets step input to `input_tokens + cache_read_tokens`, accumulates input and output totals across steps, and sets `context_tokens` to the latest step's input total
 
 ### Requirement: Collection failures preserve verified state
 Missing, malformed, oversized, unsupported, cancelled, or temporarily unreadable provider artifacts SHALL NOT fail hooks, lifecycle events, or provider execution. SessionTap SHALL preserve the last verified enrichment, emit no estimated or partial replacement, and expose only bounded local diagnostics. A provider that does not collect artifacts SHALL report an unsupported outcome rather than a failure diagnostic. An artifact whose identity and stable length match the prior cursor SHALL report an unchanged outcome and SHALL NOT re-publish enrichment.
