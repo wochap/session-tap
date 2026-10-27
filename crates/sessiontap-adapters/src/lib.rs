@@ -24,6 +24,7 @@ use std::{
     },
 };
 
+pub mod agy;
 pub mod artifact;
 pub mod claude;
 pub mod codex;
@@ -217,6 +218,7 @@ impl AdapterRegistry {
         adapters.insert(ProviderId::Codex, Box::new(codex::CodexAdapter));
         adapters.insert(ProviderId::Pi, Box::new(pi::PiAdapter));
         adapters.insert(ProviderId::Qwen, Box::new(qwen::QwenAdapter));
+        adapters.insert(ProviderId::Agy, Box::new(agy::AgyAdapter));
         // Aliases naming no built-in are rejected by `Config::validate`; the
         // registry skips them so an unvalidated configuration resolves nothing.
         let aliases = config
@@ -872,12 +874,13 @@ mod tests {
             || production.to_owned(),
             |signature| without_function(production, signature),
         );
-        let literals = ["\"claude\"", "\"codex\"", "\"qwen\"", "\"pi\""];
+        let literals = ["\"claude\"", "\"codex\"", "\"qwen\"", "\"pi\"", "\"agy\""];
         let variants = [
             "ProviderId::Claude",
             "ProviderId::Codex",
             "ProviderId::Qwen",
             "ProviderId::Pi",
+            "ProviderId::Agy",
         ];
         production
             .lines()
@@ -946,6 +949,7 @@ mod tests {
                 "tool_use_id",
                 "tool_call_id",
                 "__sessiontap_invocation_workspace",
+                "PLANNER_RESPONSE",
             ] {
                 assert!(
                     !production.contains(forbidden),
@@ -1022,9 +1026,9 @@ mod tests {
         let registry = AdapterRegistry::new(&config);
         assert_eq!(
             registry.provider_names(),
-            vec!["claude", "codex", "pi", "qwen", "acme", "zeta"]
+            vec!["claude", "codex", "pi", "qwen", "agy", "acme", "zeta"]
         );
-        assert_eq!(AdapterRegistry::builtin_ids().len(), 4);
+        assert_eq!(AdapterRegistry::builtin_ids().len(), 5);
         for id in AdapterRegistry::builtin_ids() {
             assert_eq!(registry.get(*id).provider_id(), *id);
             assert_eq!(registry.resolve(id.as_str()).unwrap().1, id.as_str());

@@ -13,7 +13,7 @@ _sessiontap() {
     'nuke:remove local SessionTap and hub data'
     'completions:print shell completions'
   )
-  providers=(claude codex pi qwen)
+  providers=(claude codex pi qwen agy)
 
   local cfg=${XDG_CONFIG_HOME:-$HOME/.config}/sessiontap/config.toml
   if [[ -r $cfg ]]; then

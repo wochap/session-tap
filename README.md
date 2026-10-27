@@ -61,7 +61,7 @@ launching tracked providers or using `status`/`listen`.
 
 ```sh
 # 1. Install managed hooks (writes into each provider's config file)
-sessiontap setup qwen        # or: setup claude / setup codex / setup pi
+sessiontap setup qwen        # or: setup claude / setup codex / setup pi / setup agy
 
 # 2. Start the broker in a dedicated terminal or service
 sessiontapd

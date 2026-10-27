@@ -14,7 +14,9 @@ sessiontap hooks remove claude   # remove only SessionTap-owned entries
 sessiontapd                      # required for tracking, status, and listen
 sessiontap claude [args...]
 sessiontap codex [args...]
+sessiontap pi [args...]
 sessiontap qwen [args...]
+sessiontap agy [args...]
 sessiontap status                # JSON array
 sessiontap listen                # snapshot then JSONL updates
 sessiontap inspect-hooks         # ephemeral raw managed-hook JSONL
@@ -41,7 +43,7 @@ executable = "company-claude"
 inherits = "claude"
 ```
 
-`inherits` must name a built-in provider (`claude`, `codex`, `pi`, or `qwen`);
+`inherits` must name a built-in provider (`claude`, `codex`, `pi`, `qwen`, or `agy`);
 `sessiontapd` refuses to start with a configuration whose alias names any other
 value, and the launcher reports such an alias as an unknown provider.
 

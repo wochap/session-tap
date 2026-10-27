@@ -11,11 +11,12 @@ pub enum ProviderId {
     Codex,
     Qwen,
     Pi,
+    Agy,
 }
 
 impl ProviderId {
     /// Every built-in identity in the order the CLI documents them.
-    pub const ALL: &'static [Self] = &[Self::Claude, Self::Codex, Self::Pi, Self::Qwen];
+    pub const ALL: &'static [Self] = &[Self::Claude, Self::Codex, Self::Pi, Self::Qwen, Self::Agy];
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -24,6 +25,7 @@ impl ProviderId {
             Self::Codex => "codex",
             Self::Qwen => "qwen",
             Self::Pi => "pi",
+            Self::Agy => "agy",
         }
     }
 
@@ -85,7 +87,7 @@ mod tests {
             assert_eq!(encoded, format!("\"{}\"", id.as_str()));
             assert_eq!(serde_json::from_str::<ProviderId>(&encoded).unwrap(), *id);
         }
-        assert_eq!(ProviderId::ALL.len(), 4);
+        assert_eq!(ProviderId::ALL.len(), 5);
     }
 
     #[test]
@@ -93,7 +95,7 @@ mod tests {
         for name in ["", "Claude", "gemini", "claude "] {
             let error = name.parse::<ProviderId>().unwrap_err();
             assert_eq!(error.0, name);
-            assert!(error.to_string().contains("claude, codex, pi, qwen"));
+            assert!(error.to_string().contains("claude, codex, pi, qwen, agy"));
         }
         assert!(serde_json::from_str::<ProviderId>("\"gemini\"").is_err());
     }

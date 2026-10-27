@@ -51,6 +51,7 @@ enum Cli {
     },
     HookEmit {
         provider: String,
+        event: Option<String>,
     },
     Completions {
         shell: Option<String>,
@@ -93,6 +94,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Cli> {
         }),
         "hook" if args.next().as_deref() == Some("emit") => Ok(Cli::HookEmit {
             provider: args.next().context("missing provider")?,
+            event: args.next(),
         }),
         "completions" => Ok(Cli::Completions { shell: args.next() }),
         "nuke" => parse_nuke(args),
@@ -199,7 +201,7 @@ async fn main() -> Result<()> {
         Cli::Listen => listen(&paths).await,
         Cli::InspectHooks => inspect_hooks(&paths).await,
         Cli::Setup { provider, action } => setup(&paths, provider, action).await,
-        Cli::HookEmit { provider } => hook_emit(&paths, &provider).await,
+        Cli::HookEmit { provider, event } => hook_emit(&paths, &provider, event.as_deref()).await,
         Cli::TerminalWatch { invocation } => terminal_watch(&paths, &invocation).await,
         Cli::TerminalSend { invocation, input } => terminal_send(&paths, &invocation, input).await,
         Cli::Launch { provider, args } => launch(&paths, &provider, args).await,
@@ -839,11 +841,40 @@ async fn wait_with_signal_forwarding(
     }
 }
 
-async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
+fn prepare_hook_payload(
+    mut raw: Vec<u8>,
+    event: Option<&str>,
+) -> (Vec<u8>, Option<serde_json::Value>) {
+    if raw.len() > INSPECTION_MAX_INPUT_BYTES {
+        return (raw, None);
+    }
+    match serde_json::from_slice::<serde_json::Value>(&raw) {
+        Ok(mut value) => {
+            if let Some(event_name) = event {
+                if let Some(map) = value.as_object_mut() {
+                    if !map.contains_key("hook_event_name") {
+                        map.insert(
+                            "hook_event_name".to_string(),
+                            serde_json::Value::String(event_name.to_string()),
+                        );
+                        if let Ok(serialized) = serde_json::to_vec(&value) {
+                            raw = serialized;
+                        }
+                    }
+                }
+            }
+            (raw, Some(value))
+        }
+        Err(_) => (raw, None),
+    }
+}
+
+async fn hook_emit(paths: &AppPaths, provider: &str, event: Option<&str>) -> Result<()> {
     let mut raw = Vec::new();
     std::io::stdin()
         .take((INSPECTION_MAX_INPUT_BYTES + 1) as u64)
         .read_to_end(&mut raw)?;
+    let (raw, value) = prepare_hook_payload(raw, event);
     let Ok(id) = env::var("SESSIONTAP_INVOCATION_ID") else {
         return Ok(());
     };
@@ -862,7 +893,7 @@ async fn hook_emit(paths: &AppPaths, provider: &str) -> Result<()> {
         return Ok(());
     };
     inspect_hook_best_effort(paths, provider, &raw).await;
-    let Ok(value) = serde_json::from_slice(&raw) else {
+    let Some(value) = value else {
         return Ok(());
     };
     let workspace = env::var_os("SESSIONTAP_WORKSPACE").map(PathBuf::from);
@@ -1079,14 +1110,74 @@ mod tests {
         let help = parse(vec!["--help".into()].into_iter()).unwrap_err();
         assert_eq!(
             help.to_string(),
-            "usage: sessiontap <claude|codex|pi|qwen> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | nuke | completions <shell>"
+            "usage: sessiontap <claude|codex|pi|qwen|agy> [provider arguments...] | status | listen | inspect-hooks | setup | doctor | hooks remove | terminal | nuke | completions <shell>"
         );
         let empty = parse(std::iter::empty()).unwrap_err();
         assert!(
             empty
                 .to_string()
-                .starts_with("usage: sessiontap <claude|codex|pi|qwen> [args...] |")
+                .starts_with("usage: sessiontap <claude|codex|pi|qwen|agy> [args...] |")
         );
+    }
+
+    #[test]
+    fn hook_emit_parses_with_and_without_event() {
+        assert_eq!(
+            parse(vec!["hook".into(), "emit".into(), "claude".into()].into_iter()).unwrap(),
+            Cli::HookEmit {
+                provider: "claude".into(),
+                event: None,
+            }
+        );
+        assert_eq!(
+            parse(
+                vec![
+                    "hook".into(),
+                    "emit".into(),
+                    "agy".into(),
+                    "PreToolUse".into()
+                ]
+                .into_iter()
+            )
+            .unwrap(),
+            Cli::HookEmit {
+                provider: "agy".into(),
+                event: Some("PreToolUse".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn prepare_hook_payload_injects_event_name_when_missing() {
+        let raw = br#"{"conversationId":"c1"}"#.to_vec();
+        let (updated, value) = prepare_hook_payload(raw, Some("PreInvocation"));
+        let val = value.unwrap();
+        assert_eq!(val["hook_event_name"], "PreInvocation");
+        assert_eq!(val["conversationId"], "c1");
+        let parsed_raw: serde_json::Value = serde_json::from_slice(&updated).unwrap();
+        assert_eq!(parsed_raw["hook_event_name"], "PreInvocation");
+        assert_eq!(parsed_raw["conversationId"], "c1");
+    }
+
+    #[test]
+    fn prepare_hook_payload_preserves_existing_event_name() {
+        let raw = br#"{"hook_event_name":"SessionStart","conversationId":"c1"}"#.to_vec();
+        let (updated, value) = prepare_hook_payload(raw.clone(), Some("PreInvocation"));
+        assert_eq!(updated, raw);
+        assert_eq!(value.unwrap()["hook_event_name"], "SessionStart");
+    }
+
+    #[test]
+    fn prepare_hook_payload_without_event_or_non_object() {
+        let raw = br#"{"conversationId":"c1"}"#.to_vec();
+        let (updated, value) = prepare_hook_payload(raw.clone(), None);
+        assert_eq!(updated, raw);
+        assert_eq!(value.unwrap()["conversationId"], "c1");
+
+        let array = br#"[1, 2, 3]"#.to_vec();
+        let (updated_arr, value_arr) = prepare_hook_payload(array.clone(), Some("PreToolUse"));
+        assert_eq!(updated_arr, array);
+        assert_eq!(value_arr.unwrap(), serde_json::json!([1, 2, 3]));
     }
 
     #[test]
@@ -1373,7 +1464,9 @@ mod tests {
             "--enter",
             "claude",
             "codex",
+            "pi",
             "qwen",
+            "agy",
         ] {
             assert!(script.contains(token), "missing {token}");
         }
