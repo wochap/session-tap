@@ -245,9 +245,9 @@ fn tool_arg_str(args: Option<&Value>, key: &str) -> Option<String> {
     }
 }
 
-fn is_bypass_sandbox(tool_call: Option<&Value>) -> bool {
+fn run_command_requests_approval(tool_call: Option<&Value>) -> bool {
     let args = tool_call.and_then(|tc| tc.get("args"));
-    tool_arg_bool(args, "BypassSandbox") == Some(true)
+    tool_arg_bool(args, "BypassSandbox") != Some(false)
 }
 
 fn extract_last_assistant_excerpt(transcript_path: &Path) -> Option<String> {
@@ -323,7 +323,8 @@ impl HookDialect for AgyDialect {
                 if tool_name == Some("ask_question") {
                     Some(EventKind::WaitingInput)
                 } else if tool_name == Some("ask_permission")
-                    || (tool_name == Some("run_command") && is_bypass_sandbox(tool_call))
+                    || (tool_name == Some("run_command")
+                        && run_command_requests_approval(tool_call))
                 {
                     Some(EventKind::WaitingApproval)
                 } else {
@@ -510,7 +511,7 @@ impl HookDialect for AgyDialect {
                     return None;
                 }
                 let is_attention = name == "ask_permission"
-                    || (name == "run_command" && is_bypass_sandbox(tool_call));
+                    || (name == "run_command" && run_command_requests_approval(tool_call));
                 let phase = if is_attention {
                     ToolActivityPhase::Attention
                 } else {
@@ -1427,6 +1428,37 @@ mod tests {
         let activity = bypass.event.tool_activity.unwrap();
         assert_eq!(activity.phase, ToolActivityPhase::Attention);
         assert_eq!(activity.detail.as_deref(), Some("Get Lima weather"));
+
+        // run_command with BypassSandbox omitted -> WaitingApproval
+        let no_bypass = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 2,
+                "toolCall": {
+                    "name": "run_command",
+                    "args": {
+                        "CommandLine": "\"curl -s \\\"wttr.in/Lima?format=3\\\"\"",
+                        "WaitMsBeforeAsync": "5000",
+                        "toolSummary": "\"Get Lima weather\""
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(no_bypass.event.kind, EventKind::WaitingApproval);
+        assert_eq!(
+            no_bypass.status_reason.unwrap().summary,
+            "shell Get Lima weather"
+        );
+        assert_eq!(
+            no_bypass.event.tool_activity.unwrap().phase,
+            ToolActivityPhase::Attention
+        );
 
         // ask_permission -> WaitingApproval
         let perm = AgentAdapter::normalize(
