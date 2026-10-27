@@ -223,6 +223,83 @@ pub const AgyAdapter: AgyAdapter = HookAdapter::new(AgyDialect, AgyCollector, ma
 
 pub struct AgyDialect;
 
+fn parse_tool_arg(value: &Value) -> Value {
+    if let Value::String(raw_str) = value {
+        if let Ok(parsed) = serde_json::from_str::<Value>(raw_str) {
+            return parsed;
+        }
+    }
+    value.clone()
+}
+
+fn tool_arg_bool(args: Option<&Value>, key: &str) -> Option<bool> {
+    let val = args?.get(key)?;
+    parse_tool_arg(val).as_bool()
+}
+
+fn tool_arg_str(args: Option<&Value>, key: &str) -> Option<String> {
+    let val = args?.get(key)?;
+    match parse_tool_arg(val) {
+        Value::String(s) => Some(s),
+        _ => None,
+    }
+}
+
+fn is_bypass_sandbox(tool_call: Option<&Value>) -> bool {
+    let args = tool_call.and_then(|tc| tc.get("args"));
+    tool_arg_bool(args, "BypassSandbox") == Some(true)
+}
+
+fn extract_last_assistant_excerpt(transcript_path: &Path) -> Option<String> {
+    if transcript_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        return None;
+    }
+    if !matches!(
+        transcript_path.file_stem().and_then(|s| s.to_str()),
+        Some("transcript" | "transcript_full")
+    ) {
+        return None;
+    }
+    let candidate = if fs::symlink_metadata(transcript_path).is_ok_and(|m| m.file_type().is_file())
+    {
+        transcript_path.to_path_buf()
+    } else if transcript_path.file_name().and_then(|s| s.to_str()) == Some("transcript.jsonl") {
+        let full = transcript_path.with_file_name("transcript_full.jsonl");
+        if fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_file()) {
+            full
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+    let (file, _) = open_bounded_nofollow(&candidate, MAX_SCAN_BYTES).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    let mut last_excerpt = None;
+    loop {
+        line.clear();
+        let count = reader.read_until(b'\n', &mut line).ok()?;
+        if count == 0 || line.len() > MAX_LINE_BYTES || line.last() != Some(&b'\n') {
+            break;
+        }
+        let Ok(record) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        if record.get("type").and_then(Value::as_str) != Some("PLANNER_RESPONSE") {
+            continue;
+        }
+        if let Some(excerpt) = record
+            .get("content")
+            .and_then(Value::as_str)
+            .and_then(status_excerpt)
+        {
+            last_excerpt = Some(excerpt);
+        }
+    }
+    last_excerpt
+}
+
 impl HookDialect for AgyDialect {
     fn id(&self) -> ProviderId {
         ProviderId::Agy
@@ -245,12 +322,8 @@ impl HookDialect for AgyDialect {
                     .and_then(Value::as_str);
                 if tool_name == Some("ask_question") {
                     Some(EventKind::WaitingInput)
-                } else if tool_name == Some("run_command")
-                    && tool_call
-                        .and_then(|t| t.get("args"))
-                        .and_then(|a| a.get("BypassSandbox"))
-                        .and_then(Value::as_bool)
-                        == Some(true)
+                } else if tool_name == Some("ask_permission")
+                    || (tool_name == Some("run_command") && is_bypass_sandbox(tool_call))
                 {
                     Some(EventKind::WaitingApproval)
                 } else {
@@ -334,31 +407,38 @@ impl HookDialect for AgyDialect {
             normalized_tool_label(name)?
         };
         let args = tool_call.get("args");
-        let summary = args
-            .and_then(|a| a.get("toolSummary").or_else(|| a.get("CommandLine")))
-            .and_then(Value::as_str)
-            .and_then(status_excerpt);
+        let tool_summary = tool_arg_str(args, "toolSummary").and_then(|s| status_excerpt(&s));
+        let command_line = tool_arg_str(args, "CommandLine").and_then(|s| status_excerpt(&s));
+        let reason_arg = tool_arg_str(args, "reason")
+            .or_else(|| tool_arg_str(args, "message"))
+            .and_then(|s| status_excerpt(&s));
+        let (summary, source) = if let Some(desc) = tool_summary {
+            (Some(desc), StatusReasonSource::Description)
+        } else if let Some(cmd) = command_line {
+            (Some(cmd), StatusReasonSource::Command)
+        } else if let Some(reason) = reason_arg {
+            (Some(reason), StatusReasonSource::Description)
+        } else {
+            (None, StatusReasonSource::ToolName)
+        };
         let summary_text = match summary {
             Some(desc) => format!("{label} {desc}"),
             None => label,
         };
         Some(StatusReasonContext {
             summary: summary_text,
-            source: if args.and_then(|a| a.get("toolSummary")).is_some() {
-                StatusReasonSource::Description
-            } else if args.and_then(|a| a.get("CommandLine")).is_some() {
-                StatusReasonSource::Command
-            } else {
-                StatusReasonSource::ToolName
-            },
+            source,
         })
     }
 
     fn input_reason(&self, raw: &Value) -> Option<StatusReasonContext> {
-        let question = raw
+        let questions_val = raw
             .get("toolCall")
             .and_then(|tc| tc.get("args"))
             .and_then(|a| a.get("questions"))
+            .map(parse_tool_arg);
+        let question = questions_val
+            .as_ref()
             .and_then(Value::as_array)
             .and_then(|qs| qs.first())
             .and_then(|q| q.get("question"))
@@ -374,14 +454,27 @@ impl HookDialect for AgyDialect {
     }
 
     fn completed_reason(&self, raw: &Value) -> Option<StatusReasonContext> {
-        raw.get("last_assistant_message")
+        if let Some(summary) = raw
+            .get("last_assistant_message")
             .or_else(|| raw.get("excerpt"))
             .and_then(Value::as_str)
             .and_then(status_excerpt)
-            .map(|summary| StatusReasonContext {
+        {
+            return Some(StatusReasonContext {
                 summary,
                 source: StatusReasonSource::AssistantMessage,
-            })
+            });
+        }
+        let transcript_path = raw
+            .get("transcriptPath")
+            .or_else(|| raw.get("transcript_path"))
+            .and_then(Value::as_str)?;
+        extract_last_assistant_excerpt(Path::new(transcript_path)).map(|summary| {
+            StatusReasonContext {
+                summary,
+                source: StatusReasonSource::AssistantMessage,
+            }
+        })
     }
 
     fn failure_reason(&self, raw: &Value) -> Option<StatusReasonContext> {
@@ -416,13 +509,9 @@ impl HookDialect for AgyDialect {
                 if name == "ask_question" {
                     return None;
                 }
-                let is_bypass = name == "run_command"
-                    && tool_call
-                        .and_then(|tc| tc.get("args"))
-                        .and_then(|a| a.get("BypassSandbox"))
-                        .and_then(Value::as_bool)
-                        == Some(true);
-                let phase = if is_bypass {
+                let is_attention = name == "ask_permission"
+                    || (name == "run_command" && is_bypass_sandbox(tool_call));
+                let phase = if is_attention {
                     ToolActivityPhase::Attention
                 } else {
                     ToolActivityPhase::Start
@@ -440,11 +529,10 @@ impl HookDialect for AgyDialect {
                         _ => String::new(),
                     })
                     .filter(|s| !s.is_empty());
-                let detail = tool_call
-                    .and_then(|tc| tc.get("args"))
-                    .and_then(|a| a.get("toolSummary").or_else(|| a.get("CommandLine")))
-                    .and_then(Value::as_str)
-                    .and_then(status_excerpt);
+                let args = tool_call.and_then(|tc| tc.get("args"));
+                let detail = tool_arg_str(args, "toolSummary")
+                    .or_else(|| tool_arg_str(args, "CommandLine"))
+                    .and_then(|s| status_excerpt(&s));
                 Some(ToolActivityUpdate {
                     phase,
                     label,
@@ -528,15 +616,43 @@ pub fn scan_in(
             PathBuf::from,
         )
         .join("brain");
-    let canonical =
-        validate_under_root(&brain_root, &request.locator, Some("transcript"), "jsonl")?;
+    let locator = if !request.locator.exists()
+        && request.locator.file_name().and_then(|s| s.to_str()) == Some("transcript.jsonl")
+    {
+        let full = request.locator.with_file_name("transcript_full.jsonl");
+        if full.exists() {
+            full
+        } else {
+            request.locator.clone()
+        }
+    } else {
+        request.locator.clone()
+    };
+    let canonical = validate_under_root(&brain_root, &locator, None, "jsonl")?;
+    if !matches!(
+        canonical.file_stem().and_then(|s| s.to_str()),
+        Some("transcript" | "transcript_full")
+    ) {
+        bail!("artifact identity mismatch");
+    }
     check_cancelled(request)?;
     let canonical_root = fs::canonicalize(&brain_root)?;
     let expected_session = canonical_root.join(&request.key.provider_session_id);
     if !canonical.starts_with(&expected_session) {
         bail!("transcript does not belong to the authenticated session");
     }
-    let (file, metadata) = open_bounded_nofollow(&canonical, MAX_SCAN_BYTES)?;
+    let target = if canonical.file_name().and_then(|s| s.to_str()) == Some("transcript_full.jsonl")
+    {
+        let compact = canonical.with_file_name("transcript.jsonl");
+        if fs::symlink_metadata(&compact).is_ok_and(|m| m.file_type().is_file()) {
+            compact
+        } else {
+            canonical
+        }
+    } else {
+        canonical
+    };
+    let (file, metadata) = open_bounded_nofollow(&target, MAX_SCAN_BYTES)?;
     let cursor = ArtifactCursor::from(&metadata);
     if cursor_unchanged(request.prior_cursor.as_ref(), &cursor) {
         return Ok(Collected::Unchanged {
@@ -1176,6 +1292,234 @@ mod tests {
             prior_cursor: None,
             cancellation: CollectionCancellation::default(),
         };
+        // outside_req fails
         assert!(scan(&outside_req).is_err());
+
+        // Non-transcript stem under brain root fails with artifact identity mismatch
+        let wrong_stem = home
+            .join(".gemini/antigravity-cli/brain")
+            .join(session_id)
+            .join(".system_generated/logs/other.jsonl");
+        fs::create_dir_all(wrong_stem.parent().unwrap()).unwrap();
+        fs::write(&wrong_stem, "{}\n").unwrap();
+        let wrong_req = CollectSessionDataRequest {
+            home: home.to_path_buf(),
+            key: ProviderSessionKey {
+                configured_provider: "agy".into(),
+                adapter_identity: ProviderId::Agy,
+                provider_session_id: session_id.to_string(),
+            },
+            locator: wrong_stem,
+            prior_cursor: None,
+            cancellation: CollectionCancellation::default(),
+        };
+        let wrong_err = scan(&wrong_req).err().unwrap();
+        assert!(wrong_err.to_string().contains("artifact identity mismatch"));
+    }
+
+    #[test]
+    fn collector_accepts_transcript_full_and_prefers_compact_when_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let session_id = "sess-full-1";
+        let logs_dir = home
+            .join(".gemini/antigravity-cli/brain")
+            .join(session_id)
+            .join(".system_generated/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        let full_transcript = logs_dir.join("transcript_full.jsonl");
+        fs::write(
+            &full_transcript,
+            format!(
+                "{}\n",
+                serde_json::to_string(&json!({
+                    "type": "PLANNER_RESPONSE",
+                    "step_index": 1,
+                    "input_tokens": 300,
+                    "cache_read_tokens": 20,
+                    "output_tokens": 15,
+                    "modelName": "gemini-3.1-pro-high"
+                }))
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        let request = CollectSessionDataRequest {
+            home: home.to_path_buf(),
+            key: ProviderSessionKey {
+                configured_provider: "agy".into(),
+                adapter_identity: ProviderId::Agy,
+                provider_session_id: session_id.to_string(),
+            },
+            locator: full_transcript.clone(),
+            prior_cursor: None,
+            cancellation: CollectionCancellation::default(),
+        };
+        match scan(&request).unwrap() {
+            Collected::Complete { enrichment, .. } => {
+                let usage = enrichment.usage.unwrap();
+                assert_eq!(usage.input_tokens, Some(320));
+                assert_eq!(usage.output_tokens, Some(15));
+                assert_eq!(usage.context_tokens, Some(320));
+                assert_eq!(enrichment.model.as_deref(), Some("gemini-3.1-pro-high"));
+                assert_eq!(enrichment.model_label.as_deref(), Some("3.1-pro-high"));
+            }
+            Collected::Unchanged { .. } => panic!("expected Complete"),
+        }
+
+        // When compact transcript.jsonl is also present, scan prefers it
+        let compact_transcript = logs_dir.join("transcript.jsonl");
+        fs::write(
+            &compact_transcript,
+            format!(
+                "{}\n",
+                serde_json::to_string(&json!({
+                    "type": "PLANNER_RESPONSE",
+                    "step_index": 1,
+                    "input_tokens": 400,
+                    "cache_read_tokens": 50,
+                    "output_tokens": 25
+                }))
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        match scan(&request).unwrap() {
+            Collected::Complete { enrichment, .. } => {
+                let usage = enrichment.usage.unwrap();
+                assert_eq!(usage.input_tokens, Some(450));
+                assert_eq!(usage.output_tokens, Some(25));
+            }
+            Collected::Unchanged { .. } => panic!("expected Complete"),
+        }
+    }
+
+    #[test]
+    fn dialect_handles_protojson_stringified_args_and_ask_permission() {
+        let id = InvocationId::new();
+
+        // Stringified BypassSandbox: "true" and JSON-quoted toolSummary
+        let bypass = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 2,
+                "toolCall": {
+                    "name": "run_command",
+                    "args": {
+                        "BypassSandbox": "true",
+                        "CommandLine": "\"curl -s \\\"wttr.in/Lima?format=3\\\"\"",
+                        "toolSummary": "\"Get Lima weather\""
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(bypass.event.kind, EventKind::WaitingApproval);
+        let reason = bypass.status_reason.unwrap();
+        assert_eq!(reason.summary, "shell Get Lima weather");
+        let activity = bypass.event.tool_activity.unwrap();
+        assert_eq!(activity.phase, ToolActivityPhase::Attention);
+        assert_eq!(activity.detail.as_deref(), Some("Get Lima weather"));
+
+        // ask_permission -> WaitingApproval
+        let perm = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 3,
+                "toolCall": {
+                    "name": "ask_permission",
+                    "args": {
+                        "reason": "\"Allow network access\""
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(perm.event.kind, EventKind::WaitingApproval);
+        assert_eq!(
+            perm.status_reason.unwrap().summary,
+            "ask_permission Allow network access"
+        );
+        assert_eq!(
+            perm.event.tool_activity.unwrap().phase,
+            ToolActivityPhase::Attention
+        );
+
+        // Stringified questions array in ask_question
+        let ask_str = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 4,
+                "toolCall": {
+                    "name": "ask_question",
+                    "args": {
+                        "questions": "[{\"question\":\"Pick an option?\"}]"
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(ask_str.event.kind, EventKind::WaitingInput);
+        assert_eq!(ask_str.status_reason.unwrap().summary, "Pick an option?");
+    }
+
+    #[test]
+    fn stop_extracts_completed_reason_from_transcript_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let transcript = temp.path().join("transcript_full.jsonl");
+        let lines = [
+            json!({
+                "type": "USER_INPUT",
+                "step_index": 0,
+                "content": "What is 2+2?"
+            }),
+            json!({
+                "type": "PLANNER_RESPONSE",
+                "step_index": 1,
+                "content": "2 + 2 equals 4."
+            }),
+        ];
+        let mut body = String::new();
+        for l in lines {
+            body.push_str(&serde_json::to_string(&l).unwrap());
+            body.push('\n');
+        }
+        fs::write(&transcript, body).unwrap();
+
+        let id = InvocationId::new();
+        let stop = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "Stop",
+                "terminationReason": "NO_TOOL_CALL",
+                "transcriptPath": transcript.to_str().unwrap()
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(stop.event.kind, EventKind::Completed);
+        let reason = stop.status_reason.unwrap();
+        assert_eq!(reason.source, StatusReasonSource::AssistantMessage);
+        assert_eq!(reason.summary, "2 + 2 equals 4.");
     }
 }

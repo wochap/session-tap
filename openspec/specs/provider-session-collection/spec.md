@@ -122,7 +122,7 @@ Each provider module SHALL calculate session totals and current context accordin
 - **THEN** the Qwen collector calculates totals only from its verified assistant records
 
 #### Scenario: Antigravity transcript contains planner response steps
-- **WHEN** an `agy` `transcript.jsonl` artifact contains `PLANNER_RESPONSE` steps with `step_index`, `input_tokens`, `cache_read_tokens`, and `output_tokens`
+- **WHEN** an `agy` `transcript.jsonl` or `transcript_full.jsonl` artifact contains `PLANNER_RESPONSE` steps with `step_index`, `input_tokens`, `cache_read_tokens`, and `output_tokens`
 - **THEN** the `agy` collector deduplicates by `step_index`, sets step input to `input_tokens + cache_read_tokens`, accumulates input and output totals across steps, and sets `context_tokens` to the latest step's input total
 
 ### Requirement: Collection failures preserve verified state
