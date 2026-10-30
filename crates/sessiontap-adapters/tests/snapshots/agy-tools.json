@@ -1,0 +1,185 @@
+[
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "agy",
+      "provider_event_id": null,
+      "provider_session_id": "agy-sess-1",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "1",
+        "detail": "/workspace/Cargo.toml",
+        "label": "read_file",
+        "phase": "start"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_approval",
+      "observed_at": "<received_at>",
+      "provider": "agy",
+      "provider_event_id": null,
+      "provider_session_id": "agy-sess-1",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "2",
+        "detail": "/etc/hosts",
+        "label": "read_file",
+        "phase": "attention"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "description",
+      "summary": "read_file /etc/hosts"
+    }
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "agy",
+      "provider_event_id": null,
+      "provider_session_id": "agy-sess-1",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "3",
+        "detail": "/workspace/src/lib.rs",
+        "label": "write_file",
+        "phase": "start"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_approval",
+      "observed_at": "<received_at>",
+      "provider": "agy",
+      "provider_event_id": null,
+      "provider_session_id": "agy-sess-1",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "4",
+        "detail": "Write shadow file",
+        "label": "write_file",
+        "phase": "attention"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "description",
+      "summary": "write_file Write shadow file"
+    }
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "working",
+      "observed_at": "<received_at>",
+      "provider": "agy",
+      "provider_event_id": null,
+      "provider_session_id": "agy-sess-1",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "5",
+        "detail": "src/main.rs",
+        "label": "edit_file",
+        "phase": "start"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": null
+  },
+  {
+    "collection_context": null,
+    "event": {
+      "event_id": "<generated>",
+      "evidence": {
+        "channel": "managed_hook",
+        "collector_revision": 1,
+        "trust": "authenticated_invocation"
+      },
+      "invocation_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "waiting_approval",
+      "observed_at": "<received_at>",
+      "provider": "agy",
+      "provider_event_id": null,
+      "provider_session_id": "agy-sess-1",
+      "received_at": "<now>",
+      "schema_version": 1,
+      "tool_activity": {
+        "correlation_id": "6",
+        "detail": "/var/log/syslog",
+        "label": "edit_file",
+        "phase": "attention"
+      },
+      "turn_id": null,
+      "usage": null
+    },
+    "outcome": "event",
+    "status_reason": {
+      "source": "description",
+      "summary": "edit_file /var/log/syslog"
+    }
+  }
+]

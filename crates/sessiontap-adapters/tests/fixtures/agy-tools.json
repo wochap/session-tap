@@ -1,0 +1,87 @@
+[
+  {
+    "payload": {
+      "hook_event_name": "PreToolUse",
+      "conversationId": "agy-sess-1",
+      "stepIdx": 1,
+      "workspacePaths": ["/workspace"],
+      "toolCall": {
+        "name": "read_file",
+        "args": {
+          "Path": "/workspace/Cargo.toml"
+        }
+      }
+    }
+  },
+  {
+    "payload": {
+      "hook_event_name": "PreToolUse",
+      "conversationId": "agy-sess-1",
+      "stepIdx": 2,
+      "workspacePaths": ["/workspace"],
+      "toolCall": {
+        "name": "read_file",
+        "args": {
+          "Path": "/etc/hosts"
+        }
+      }
+    }
+  },
+  {
+    "payload": {
+      "hook_event_name": "PreToolUse",
+      "conversationId": "agy-sess-1",
+      "stepIdx": 3,
+      "workspacePaths": ["/workspace"],
+      "toolCall": {
+        "name": "write_file",
+        "args": {
+          "Path": "/workspace/src/lib.rs"
+        }
+      }
+    }
+  },
+  {
+    "payload": {
+      "hook_event_name": "PreToolUse",
+      "conversationId": "agy-sess-1",
+      "stepIdx": 4,
+      "workspacePaths": ["/workspace"],
+      "toolCall": {
+        "name": "write_file",
+        "args": {
+          "Path": "/etc/shadow",
+          "toolSummary": "Write shadow file"
+        }
+      }
+    }
+  },
+  {
+    "payload": {
+      "hook_event_name": "PreToolUse",
+      "conversationId": "agy-sess-1",
+      "stepIdx": 5,
+      "workspacePaths": ["/workspace"],
+      "toolCall": {
+        "name": "edit_file",
+        "args": {
+          "Path": "src/main.rs"
+        }
+      }
+    }
+  },
+  {
+    "payload": {
+      "hook_event_name": "PreToolUse",
+      "conversationId": "agy-sess-1",
+      "stepIdx": 6,
+      "workspacePaths": ["/workspace"],
+      "toolCall": {
+        "name": "edit_file",
+        "args": {
+          "Path": "/var/log/syslog"
+        }
+      }
+    }
+  }
+]

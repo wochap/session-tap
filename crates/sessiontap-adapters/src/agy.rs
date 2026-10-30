@@ -233,16 +233,121 @@ fn parse_tool_arg(value: &Value) -> Value {
 }
 
 fn tool_arg_bool(args: Option<&Value>, key: &str) -> Option<bool> {
-    let val = args?.get(key)?;
+    let args = args?;
+    let val = if let Value::String(raw) = args {
+        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+            return tool_arg_bool(Some(&parsed), key);
+        }
+        return None;
+    } else {
+        args.get(key)?
+    };
     parse_tool_arg(val).as_bool()
 }
 
 fn tool_arg_str(args: Option<&Value>, key: &str) -> Option<String> {
-    let val = args?.get(key)?;
+    let args = args?;
+    let val = if let Value::String(raw) = args {
+        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+            return tool_arg_str(Some(&parsed), key);
+        }
+        return None;
+    } else {
+        args.get(key)?
+    };
     match parse_tool_arg(val) {
         Value::String(s) => Some(s),
         _ => None,
     }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() && !path.is_absolute() {
+                    normalized.push(Component::ParentDir);
+                }
+            }
+            c => normalized.push(c),
+        }
+    }
+    normalized
+}
+
+fn is_path_outside_workspaces(target: &Path, workspace_paths: &[PathBuf]) -> bool {
+    if workspace_paths.is_empty() || target.as_os_str().is_empty() {
+        return false;
+    }
+    let normalized_target = normalize_path(target);
+    if normalized_target.is_relative() {
+        if normalized_target
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            let inside_any = workspace_paths.iter().any(|ws| {
+                let ws_norm = normalize_path(ws);
+                let joined = normalize_path(&ws_norm.join(&normalized_target));
+                joined.starts_with(&ws_norm)
+            });
+            return !inside_any;
+        }
+        return false;
+    }
+
+    let inside_any = workspace_paths.iter().any(|ws| {
+        let ws_norm = normalize_path(ws);
+        normalized_target.starts_with(&ws_norm)
+    });
+    !inside_any
+}
+
+fn extract_workspace_paths(raw: &Value, trusted_workspace: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(trusted) = trusted_workspace {
+        paths.push(trusted.to_path_buf());
+    }
+    if let Some(arr) = raw
+        .get("workspacePaths")
+        .or_else(|| raw.get("workspace_paths"))
+        .and_then(Value::as_array)
+    {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                paths.push(PathBuf::from(s));
+            }
+        }
+    }
+    paths
+}
+
+fn extract_target_file_path(tool_call: Option<&Value>, raw: &Value) -> Option<String> {
+    let args = tool_call
+        .and_then(|tc| tc.get("args"))
+        .or_else(|| raw.get("args"))
+        .or_else(|| raw.get("tool_input"));
+    tool_arg_str(args, "Path")
+        .or_else(|| tool_arg_str(args, "path"))
+        .or_else(|| tool_arg_str(args, "file_path"))
+}
+
+fn file_tool_requests_approval(raw: &Value, trusted_workspace: Option<&Path>) -> bool {
+    let tool_call = raw.get("toolCall");
+    let tool_name = tool_call
+        .and_then(|t| t.get("name"))
+        .or_else(|| raw.get("tool_name"))
+        .and_then(Value::as_str);
+    if !matches!(tool_name, Some("read_file" | "write_file" | "edit_file")) {
+        return false;
+    }
+    let Some(target) = extract_target_file_path(tool_call, raw) else {
+        return false;
+    };
+    let workspace_paths = extract_workspace_paths(raw, trusted_workspace);
+    is_path_outside_workspaces(Path::new(&target), &workspace_paths)
 }
 
 fn run_command_requests_approval(tool_call: Option<&Value>) -> bool {
@@ -325,6 +430,7 @@ impl HookDialect for AgyDialect {
                 } else if tool_name == Some("ask_permission")
                     || (tool_name == Some("run_command")
                         && run_command_requests_approval(tool_call))
+                    || file_tool_requests_approval(raw, None)
                 {
                     Some(EventKind::WaitingApproval)
                 } else {
@@ -409,12 +515,19 @@ impl HookDialect for AgyDialect {
         };
         let args = tool_call.get("args");
         let tool_summary = tool_arg_str(args, "toolSummary").and_then(|s| status_excerpt(&s));
+        let file_path = if matches!(name, "read_file" | "write_file" | "edit_file") {
+            extract_target_file_path(Some(tool_call), raw).and_then(|s| status_excerpt(&s))
+        } else {
+            None
+        };
         let command_line = tool_arg_str(args, "CommandLine").and_then(|s| status_excerpt(&s));
         let reason_arg = tool_arg_str(args, "reason")
             .or_else(|| tool_arg_str(args, "message"))
             .and_then(|s| status_excerpt(&s));
         let (summary, source) = if let Some(desc) = tool_summary {
             (Some(desc), StatusReasonSource::Description)
+        } else if let Some(path) = file_path {
+            (Some(path), StatusReasonSource::Description)
         } else if let Some(cmd) = command_line {
             (Some(cmd), StatusReasonSource::Command)
         } else if let Some(reason) = reason_arg {
@@ -493,7 +606,7 @@ impl HookDialect for AgyDialect {
     fn tool_activity(
         &self,
         raw: &Value,
-        _context: &NormalizeContext<'_>,
+        context: &NormalizeContext<'_>,
     ) -> Option<ToolActivityUpdate> {
         let event = raw
             .get("hook_event_name")
@@ -511,7 +624,8 @@ impl HookDialect for AgyDialect {
                     return None;
                 }
                 let is_attention = name == "ask_permission"
-                    || (name == "run_command" && run_command_requests_approval(tool_call));
+                    || (name == "run_command" && run_command_requests_approval(tool_call))
+                    || file_tool_requests_approval(raw, context.workspace);
                 let phase = if is_attention {
                     ToolActivityPhase::Attention
                 } else {
@@ -532,6 +646,13 @@ impl HookDialect for AgyDialect {
                     .filter(|s| !s.is_empty());
                 let args = tool_call.and_then(|tc| tc.get("args"));
                 let detail = tool_arg_str(args, "toolSummary")
+                    .or_else(|| {
+                        if matches!(name, "read_file" | "write_file" | "edit_file") {
+                            extract_target_file_path(tool_call, raw)
+                        } else {
+                            None
+                        }
+                    })
                     .or_else(|| tool_arg_str(args, "CommandLine"))
                     .and_then(|s| status_excerpt(&s));
                 Some(ToolActivityUpdate {
@@ -752,7 +873,7 @@ mod tests {
     use super::*;
     use crate::{AgentAdapter, CollectionCancellation, ProviderSessionKey};
     use serde_json::json;
-    use sessiontap_core::domain::InvocationId;
+    use sessiontap_core::domain::{EventEvidence, InvocationId};
 
     #[test]
     fn model_label_strips_expected_prefixes() {
@@ -1553,5 +1674,344 @@ mod tests {
         let reason = stop.status_reason.unwrap();
         assert_eq!(reason.source, StatusReasonSource::AssistantMessage);
         assert_eq!(reason.summary, "2 + 2 equals 4.");
+    }
+
+    #[test]
+    fn path_outside_workspaces_checks_containment_and_normalization() {
+        let ws = PathBuf::from("/home/user/project");
+        let workspaces = vec![ws];
+
+        // Relative paths within workspace
+        assert!(!is_path_outside_workspaces(
+            Path::new("src/main.rs"),
+            &workspaces
+        ));
+        assert!(!is_path_outside_workspaces(
+            Path::new("./foo/bar.rs"),
+            &workspaces
+        ));
+        assert!(!is_path_outside_workspaces(
+            Path::new("a/b/../c.txt"),
+            &workspaces
+        ));
+
+        // Relative escaping paths
+        assert!(is_path_outside_workspaces(
+            Path::new("../outside.txt"),
+            &workspaces
+        ));
+        assert!(is_path_outside_workspaces(
+            Path::new("src/../../outside.txt"),
+            &workspaces
+        ));
+
+        // Absolute paths within workspace
+        assert!(!is_path_outside_workspaces(
+            Path::new("/home/user/project/src/main.rs"),
+            &workspaces
+        ));
+        assert!(!is_path_outside_workspaces(
+            Path::new("/home/user/project/./src/main.rs"),
+            &workspaces
+        ));
+        assert!(!is_path_outside_workspaces(
+            Path::new("/home/user/project/sub/../src/main.rs"),
+            &workspaces
+        ));
+
+        // Absolute paths outside workspace
+        assert!(is_path_outside_workspaces(
+            Path::new("/etc/hosts"),
+            &workspaces
+        ));
+        assert!(is_path_outside_workspaces(
+            Path::new("/home/user/other/file.txt"),
+            &workspaces
+        ));
+        assert!(is_path_outside_workspaces(
+            Path::new("/home/user/project_sibling/file.txt"),
+            &workspaces
+        ));
+        assert!(is_path_outside_workspaces(
+            Path::new("/home/user/project/../file.txt"),
+            &workspaces
+        ));
+
+        // Multiple workspaces
+        let multi_ws = vec![
+            PathBuf::from("/workspaces/a"),
+            PathBuf::from("/workspaces/b"),
+        ];
+        assert!(!is_path_outside_workspaces(
+            Path::new("/workspaces/a/file.rs"),
+            &multi_ws
+        ));
+        assert!(!is_path_outside_workspaces(
+            Path::new("/workspaces/b/file.rs"),
+            &multi_ws
+        ));
+        assert!(is_path_outside_workspaces(
+            Path::new("/workspaces/c/file.rs"),
+            &multi_ws
+        ));
+
+        // Absent / empty workspaces or empty target default safely to false
+        assert!(!is_path_outside_workspaces(Path::new("/etc/hosts"), &[]));
+        assert!(!is_path_outside_workspaces(Path::new(""), &workspaces));
+    }
+
+    #[test]
+    fn dialect_classifies_file_tools_based_on_workspace_boundary() {
+        let id = InvocationId::new();
+        let ws = "/repo";
+
+        for tool in ["read_file", "write_file", "edit_file"] {
+            // External path -> WaitingApproval
+            let ext = AgentAdapter::normalize(
+                &AgyAdapter,
+                &id,
+                &json!({
+                    "hook_event_name": "PreToolUse",
+                    "stepIdx": 1,
+                    "workspacePaths": [ws],
+                    "toolCall": {
+                        "name": tool,
+                        "args": {
+                            "Path": "/etc/config.toml"
+                        }
+                    }
+                }),
+            )
+            .unwrap()
+            .into_event()
+            .unwrap();
+            assert_eq!(ext.event.kind, EventKind::WaitingApproval);
+
+            // In-workspace path -> Working
+            let in_ws = AgentAdapter::normalize(
+                &AgyAdapter,
+                &id,
+                &json!({
+                    "hook_event_name": "PreToolUse",
+                    "stepIdx": 2,
+                    "workspacePaths": [ws],
+                    "toolCall": {
+                        "name": tool,
+                        "args": {
+                            "Path": "/repo/src/lib.rs"
+                        }
+                    }
+                }),
+            )
+            .unwrap()
+            .into_event()
+            .unwrap();
+            assert_eq!(in_ws.event.kind, EventKind::Working);
+
+            // Relative path -> Working
+            let rel = AgentAdapter::normalize(
+                &AgyAdapter,
+                &id,
+                &json!({
+                    "hook_event_name": "PreToolUse",
+                    "stepIdx": 3,
+                    "workspacePaths": [ws],
+                    "toolCall": {
+                        "name": tool,
+                        "args": {
+                            "Path": "src/lib.rs"
+                        }
+                    }
+                }),
+            )
+            .unwrap()
+            .into_event()
+            .unwrap();
+            assert_eq!(rel.event.kind, EventKind::Working);
+
+            // Missing workspacePaths -> Working (safe backward compatible default)
+            let no_ws = AgentAdapter::normalize(
+                &AgyAdapter,
+                &id,
+                &json!({
+                    "hook_event_name": "PreToolUse",
+                    "stepIdx": 4,
+                    "toolCall": {
+                        "name": tool,
+                        "args": {
+                            "Path": "/etc/config.toml"
+                        }
+                    }
+                }),
+            )
+            .unwrap()
+            .into_event()
+            .unwrap();
+            assert_eq!(no_ws.event.kind, EventKind::Working);
+        }
+
+        // Alternative field keys: path, file_path
+        for key in ["path", "file_path"] {
+            let ext = AgentAdapter::normalize(
+                &AgyAdapter,
+                &id,
+                &json!({
+                    "hook_event_name": "PreToolUse",
+                    "stepIdx": 5,
+                    "workspacePaths": [ws],
+                    "toolCall": {
+                        "name": "read_file",
+                        "args": {
+                            key: "/etc/passwd"
+                        }
+                    }
+                }),
+            )
+            .unwrap()
+            .into_event()
+            .unwrap();
+            assert_eq!(ext.event.kind, EventKind::WaitingApproval);
+        }
+
+        // Protojson stringified args
+        let protojson = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 6,
+                "workspacePaths": [ws],
+                "toolCall": {
+                    "name": "edit_file",
+                    "args": {
+                        "Path": "\"/etc/hosts\""
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+        assert_eq!(protojson.event.kind, EventKind::WaitingApproval);
+    }
+
+    #[test]
+    fn dialect_normalizes_file_approval_reason_and_tool_activity() {
+        let id = InvocationId::new();
+        let ws = "/repo";
+
+        // External read_file -> Attention, reason with target path
+        let read = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 10,
+                "workspacePaths": [ws],
+                "toolCall": {
+                    "name": "read_file",
+                    "args": {
+                        "Path": "/etc/nginx.conf"
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(read.event.kind, EventKind::WaitingApproval);
+        let activity = read.event.tool_activity.unwrap();
+        assert_eq!(activity.phase, ToolActivityPhase::Attention);
+        assert_eq!(activity.label, "read_file");
+        assert_eq!(activity.detail.as_deref(), Some("/etc/nginx.conf"));
+        let reason = read.status_reason.unwrap();
+        assert_eq!(reason.source, StatusReasonSource::Description);
+        assert_eq!(reason.summary, "read_file /etc/nginx.conf");
+
+        // External write_file with toolSummary -> toolSummary takes precedence in reason and detail
+        let write = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 11,
+                "workspacePaths": [ws],
+                "toolCall": {
+                    "name": "write_file",
+                    "args": {
+                        "Path": "/etc/resolv.conf",
+                        "toolSummary": "Overwrite DNS config"
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(write.event.kind, EventKind::WaitingApproval);
+        let activity = write.event.tool_activity.unwrap();
+        assert_eq!(activity.phase, ToolActivityPhase::Attention);
+        assert_eq!(activity.label, "write_file");
+        assert_eq!(activity.detail.as_deref(), Some("Overwrite DNS config"));
+        let reason = write.status_reason.unwrap();
+        assert_eq!(reason.source, StatusReasonSource::Description);
+        assert_eq!(reason.summary, "write_file Overwrite DNS config");
+
+        // In-workspace edit_file -> Start phase, no status_reason
+        let edit = AgentAdapter::normalize(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 12,
+                "workspacePaths": [ws],
+                "toolCall": {
+                    "name": "edit_file",
+                    "args": {
+                        "Path": "/repo/src/main.rs"
+                    }
+                }
+            }),
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+
+        assert_eq!(edit.event.kind, EventKind::Working);
+        assert!(edit.status_reason.is_none());
+        let activity = edit.event.tool_activity.unwrap();
+        assert_eq!(activity.phase, ToolActivityPhase::Start);
+        assert_eq!(activity.label, "edit_file");
+        assert_eq!(activity.detail.as_deref(), Some("/repo/src/main.rs"));
+
+        // Trusted workspace in context prevents Attention
+        let trusted_path = Path::new("/custom/trusted");
+        let context = NormalizeContext {
+            workspace: Some(trusted_path),
+        };
+        let trusted_event = AgentAdapter::normalize_with_evidence(
+            &AgyAdapter,
+            &id,
+            &json!({
+                "hook_event_name": "PreToolUse",
+                "stepIdx": 13,
+                "workspacePaths": [ws],
+                "toolCall": {
+                    "name": "read_file",
+                    "args": {
+                        "Path": "/custom/trusted/secret.key"
+                    }
+                }
+            }),
+            EventEvidence::managed_hook(1),
+            &context,
+        )
+        .unwrap()
+        .into_event()
+        .unwrap();
+        let activity = trusted_event.event.tool_activity.unwrap();
+        assert_eq!(activity.phase, ToolActivityPhase::Start);
     }
 }
